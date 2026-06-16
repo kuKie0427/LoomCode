@@ -1,0 +1,13 @@
+{
+  "project": "loop-test-framework",
+  "features": [
+    {
+      "id": "f-test-framework-p0",
+      "name": "测试基础设施搭建",
+      "description": "安装 pytest、创建目录结构、fixtures、配置",
+      "dependencies": [],
+      "status": "passing",
+      "verification": "pytest --collect-only"
+    }
+  ]
+}
