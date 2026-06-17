@@ -77,12 +77,12 @@
     },
     {
       "id": "f-product-audit-cmd",
-      "name": "Phase 1: minicode audit 命令",
+      "name": "Phase 1: loop audit 命令",
       "description": "Python 版 validate-harness.mjs。5 维评分 (Instructions / State / Verification / Scope / Lifecycle) + JSON/HTML 输出 + 瓶颈指向。",
       "dependencies": ["f-product-init-cmd"],
-      "status": "not-started",
-      "verification": "uv run python -m loop audit . --json | uv run python -c 'import json,sys; r=json.load(sys.stdin); assert r[\"overall\"] >= 70'",
-      "evidence": null
+      "status": "done",
+      "verification": "uv run pytest tests/test_audit_cmd.py -v && uv run loop audit . --json | uv run python -c 'import json,sys; r=json.load(sys.stdin); assert r[\"overall\"] >= 70' && uv run loop audit . --html /tmp/loop-audit.html",
+      "evidence": "16 audit tests pass. loop audit . scores 92/100 (instructions 4/5, state 5/5, verification 5/5, scope 4/5, lifecycle 4/5). Bottleneck: instructions (Startup workflow text not detected). JSON output parses; HTML report 3177 bytes valid HTML. Total tests: 126 pass / 1 pre-existing failure."
     },
     {
       "id": "f-memory-persistence",

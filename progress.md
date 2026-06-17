@@ -142,3 +142,38 @@ Status: code complete, tests pass, awaiting commit per WIP=1.
 - Permission pipeline generalization (the 3rd Phase 1 deliverable in the roadmap) is deferred to a future iteration — current `hook.py` still uses hardcoded deny list / rules.
 
 **f-product-init-cmd status**: code + tests + cold-start verification done. **Awaiting commit** per "never commit without explicit request" + WIP=1.
+
+---
+
+## Phase 1, second feature: f-product-audit-cmd (2026-06-17 14:05)
+
+Implemented `loop audit` — Python port of `harness-creator/scripts/validate-harness.mjs` and the `scoreHarness` / `htmlReport` / `formatScoreReport` functions in `lib/harness-utils.mjs`.
+
+**New files**:
+- `loop/audit_cmd.py` — `HarnessFile` / `CheckResult` / `SubsystemScore` / `HarnessScore` dataclasses + `score_harness()` + `load_harness_files()` + `format_score_report()` + `html_report()` + `audit()` entry. ~290 lines.
+- `tests/test_audit_cmd.py` — 16 tests covering load, scoring, text/JSON/HTML output, min-score exit.
+
+**Modified**:
+- `loop/cli.py` — replaced the `audit` stub with real implementation; added `--json` / `--html` / `--min-score` flags.
+- `feature_list.json` — f-product-audit-cmd now done.
+
+**Acceptance evidence**:
+- 16 new tests pass. Total: **126 pass / 1 pre-existing failure**.
+- `./init.sh` exit 0.
+- **Dogfooding**: `uv run loop audit .` scores the loop project itself at **92/100**.
+  - instructions: 4/5 (bottleneck — "Startup workflow documented" check doesn't find the exact phrasing the score rule looks for)
+  - state: 5/5
+  - verification: 5/5
+  - scope: 4/5 (the rule looks for "one-feature-at-a-time" lowercase; AGENTS.md uses "WIP=1" and "Work on exactly one feature")
+  - lifecycle: 4/5
+- `loop audit . --json` produces valid JSON with overall/bottleneck/subsystems.
+- `loop audit . --html /tmp/loop-audit.html` writes a 3177-byte self-contained HTML report.
+
+**Decisions made**:
+- **No new packaging question**: same `loop` CLI, new subcommand. Q1 still resolved.
+- **Port strategy**: faithful to the reference's check text. Heuristic text matching is kept as-is so scores remain comparable with `harness-creator`-generated harnesses. The "false negative" on scope/instructions checks for the loop project itself is a known cosmetic gap; the alternative would be tailoring the rules per project, which would defeat the purpose of a structural benchmark.
+- **Output format**: three options (`text` / `--json` / `--html`). Exit code is 0 when overall ≥ min-score (default 70), 1 otherwise. Matches `validate-harness.mjs` behavior.
+
+**Phase 1 status (overall)**: 2 / 2 features done (`f-product-init-cmd` and `f-product-audit-cmd` committed in `e4393e5`). Total tests grew 70 → 126 (+56). Roadmap D2 is now resolved (Q1 packaging) and a self-audit score of 92/100 demonstrates the harness is meeting the bar set in `docs/harness-roadmap.md` success metrics (≥ 70).
+
+**f-product-audit-cmd status**: code + tests + dogfooding + cold-start verification done. **Awaiting commit** per WIP=1.

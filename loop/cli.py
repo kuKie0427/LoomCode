@@ -2,7 +2,7 @@
 
 Subcommands:
 - ``init``  — generate a minimum 5-file harness in a target directory
-- ``audit`` — score an existing harness on the 5 subsystems (Phase 1 second feature, stub)
+- ``audit`` — score an existing harness on the 5 subsystems
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import argparse
 from pathlib import Path
 
 from loop import __version__
+from loop.audit_cmd import audit
 from loop.detect import detect_project
 from loop.init_cmd import format_results, init
 
@@ -45,8 +46,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Overwrite existing files. Use with care.",
     )
 
-    audit_p = sub.add_parser("audit", help="Score an existing harness (stub, Phase 1 second feature)")
+    audit_p = sub.add_parser("audit", help="Score an existing harness on the 5 subsystems")
     audit_p.add_argument("target", type=Path, nargs="?", default=Path("."), help="Project directory to audit")
+    audit_p.add_argument("--json", dest="json_output", action="store_true", help="Emit JSON instead of text")
+    audit_p.add_argument("--html", type=Path, default=None, help="Write an HTML report to FILE")
+    audit_p.add_argument("--min-score", type=int, default=70, help="Exit non-zero if overall < N (default 70)")
 
     return parser
 
@@ -71,10 +75,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "audit":
-        print(
-            f"audit: {args.target} — not yet implemented (Phase 1 second feature: f-product-audit-cmd)"
-        )
-        return 1
+        try:
+            audit(
+                args.target,
+                min_score=args.min_score,
+                json_output=args.json_output,
+                html_output=args.html,
+            )
+        except SystemExit as exc:
+            return int(exc.code) if exc.code is not None else 1
+        return 0
 
     parser.print_help()
     return 2
