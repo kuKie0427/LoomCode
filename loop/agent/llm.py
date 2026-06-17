@@ -38,6 +38,7 @@ class LLMClient:
         self.base_url = os.getenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic")
         self.client = self._llm_client(self.api_key, self.base_url)
         self.async_client = self._async_client(self.api_key, self.base_url)
+        self._cancelled = False
 
     def _llm_client(self, api_key: str, base_url: str) -> Anthropic:
         try:
@@ -66,7 +67,11 @@ class LLMClient:
     def change_model(self, new_model: str) -> None:
         self.model = new_model
 
+    def cancel(self) -> None:
+        self._cancelled = True
+
     def stream_iter(self, system, messages, tools, max_tokens=8000) -> Iterator[StreamEvent]:
+        self._cancelled = False
         async def _collect():
             events: list[StreamEvent] = []
             current_block_type: str | None = None
@@ -80,6 +85,8 @@ class LLMClient:
                 max_tokens=max_tokens,
             ) as stream:
                 async for event in stream:
+                    if self._cancelled:
+                        break
                     if event.type == "content_block_start":
                         block = event.content_block
                         current_block_type = block.type

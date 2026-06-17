@@ -192,6 +192,7 @@ class AgentTUIApp(App):
 
     def action_cancel_stream(self) -> None:
         self._cancelled = True
+        self.llm.cancel()
         try:
             for worker in self.workers:
                 if getattr(worker, "group", "") == "agent-turn":
