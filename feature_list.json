@@ -163,6 +163,17 @@
       "status": "done",
       "verification": "test -f .github/workflows/ci.yml && uv run python -m loop.cli eval --fail-under 100 && uv run python -m loop.cli audit . > /tmp/audit.txt",
       "evidence": "./init.sh → 225 pytest passed, 0 ruff, 0 mypy; uv run python -m loop.cli eval → 'Eval results: 37/37 passed' (5 new CI cases); uv run python -m loop.cli audit . → 'Overall: 92/100, Bottleneck: instructions'; .github/workflows/ci.yml: 893 chars, ./init.sh + loop eval --fail-under 100 + loop audit, triggers on push + pull_request to main, uploads audit report as artifact."
+    },
+    {
+      "id": "f-eval-coverage",
+      "name": "Phase 5 §2 closure: permission / compaction / subagent / cross-session eval cases",
+      "description": "Roadmap Phase 5 §2 明列 4 类 case,当前 37 个 case 一个都没覆盖。补齐后 ~45 case。",
+      "dependencies": [
+        "f-ci-integration"
+      ],
+      "status": "done",
+      "verification": "uv run python -m loop.cli eval --fail-under 100",
+      "evidence": "uv run python -m loop.cli eval → 'Eval results: 48/48 passed' (was 37/37, +11 Phase 5 §2 cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Coverage: permission denial (sudo/dd via hook + path escape via safe_path); compaction (microcompact clear + skip-below-KEEP_RECENT + should_compact 85% threshold); subagent (turn cap enforced at 30 + SUB_TOOLS excludes task → recursion prevented at schema); memory (search case-insensitive + summary truncates to max_lines)."
     }
   ]
 }

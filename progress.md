@@ -524,14 +524,58 @@ Overall: 92/100, Bottleneck: instructions
 - **`continue-on-error: true` on the audit step.** Audit scores a project 0-100; sub-70 isn't a build breaker — it should be tracked over time, not block PRs. The artifact upload (`if: always()`) keeps every PR's audit report in GitHub Actions history regardless.
 - **Eval cases for the CI file itself.** The 5 `ci-*` cases are structural guards: if someone deletes `ci.yml`, removes `./init.sh` from it, or drops `--fail-under`, the eval suite goes red. The eval suite is the regression net for product behavior — CI is product behavior.
 
-### Data bug surfaced (not fixed in this commit)
+### Data bug surfaced (not fixed)
 
 - `f-skill-runtime` in `feature_list.json` is marked `not-started`, but commit `a986aee feat: f-skill-runtime — Phase 3 skill index + load_skill tool + ToolRegistry` shipped it; `tests/test_skills.py` + `tests/test_tool_registry.py` = 25 tests pass; files exist (`loop/skills/`, `loop/agent/tool_registry.py`). The status is stale; per AGENTS.md rule 6 ("No self-declared passing"), I'm not unilaterally flipping it. Worth a user-OK'd bookkeeping fix in the next commit.
 
-### Working tree (this commit)
+### Working tree
 
 - `M  feature_list.json` (f-skill-runtime dedup + f-ci-integration lifecycle)
 - `M  progress.md`
-- `M  loop/eval/cases/__init__.py` (register `ci`)
 - `?? .github/workflows/ci.yml`
 - `?? loop/eval/cases/ci.py`
+
+## Session: f-eval-coverage (Phase 5 §2 closure)
+
+**Goal**: cover the 4 case categories Phase 5 §2 explicitly listed but the existing 37-case suite didn't reach: permission denial, compaction triggers, subagent recursion prevention, cross-session memory recovery.
+
+### Done
+
+**11 new eval cases** in `loop/eval/cases/phase5_coverage.py` (37 → 48):
+
+| Category | Cases |
+|---|---|
+| **Permission denial** | `permission-deny-list-blocks-sudo`, `permission-deny-list-blocks-dd`, `permission-write-outside-workspace-rejected` |
+| **Compaction triggers** | `microcompact-clears-old-tool-results`, `microcompact-skips-when-below-keep-recent`, `should-compact-triggers-at-threshold`, `should-compact-skips-below-threshold` |
+| **Subagent recursion** | `subagent-turn-cap-enforced`, `subagent-schema-excludes-task-tool` |
+| **Cross-session memory** | `memory-search-finds-prior-content`, `memory-summary-truncates` |
+
+### Verification
+
+```
+$ uv run python -m loop.cli eval
+Eval results: 48/48 passed
+
+$ ./init.sh
+============================= 225 passed in 1.74s ==============================
+=== Verification Complete (all green) ===
+```
+
+### Decisions / surprises
+
+- **`run_bash` has its OWN short deny-list (`["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]`) that is SEPARATE from `Hooks.DENY_LIST`** (which contains the longer list including `dd if=`, `mkfs`). The `permission-deny-list-blocks-dd` case initially hung because it called `run_bash("dd if=…")` which doesn't match `run_bash`'s hardcoded list and actually executed `dd`. Fix: call `Hooks.check_permission_hook` directly to test the wider `DENY_LIST`. **Surfaces a real design gap** — there are two parallel "is this dangerous?" lists that don't sync. Worth tracking as a future feature (`f-permission-unify` or similar).
+- **`subagent-turn-cap-enforced` initial implementation used `ToolUseBlockParam` (a TypedDict) which broke `block.type == "tool_use"` (attribute access on dict).** Fixed by using `MagicMock(type="tool_use", ...)` matching the pattern in `tests/test_spawn_subagent_structured.py`.
+- **`memory-summary-truncates` initial implementation tried 50 appends; the cap (`MAX_INDEX_LINES = 200`) was hit before the test could run.** Cut to 15 entries + an explicit `shutil.rmtree(wd)` for idempotency across reruns.
+- **`MicrocompactClearsOldToolResults` discovery**: cleared count = 2 (out of 8 rounds). My initial assertion `cleared >= 1` was right but I also checked "tail round NOT cleared" — that works because `_find_rounds` keeps the last `KEEP_RECENT = 6` user-message indices intact.
+
+### Out of scope (potential next features)
+
+- **f-permission-unify**: single source of truth for "is this command dangerous?" — merge `run_bash`'s hardcoded list with `Hooks.DENY_LIST` and `PERMISSION_RULES`. Today: 3 parallel lists that can drift.
+- **f-cross-session-resume-eval**: end-to-end test that kills the agent mid-task, restarts, asserts state recovered. Phase 5 success metric §6 (≥ 90% resume success rate).
+
+### Working tree
+
+- `M  feature_list.json` (f-eval-coverage lifecycle)
+- `M  progress.md`
+- `M  loop/eval/cases/__init__.py` (import phase5_coverage)
+- `M  loop/eval/cases/phase5_coverage.py` (new)

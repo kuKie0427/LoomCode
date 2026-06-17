@@ -5,4 +5,5 @@ from loop.eval.cases import (
     init,  # noqa: F401  — triggers case class definitions
     integration,  # noqa: F401
     memory_skills,  # noqa: F401
+    phase5_coverage,  # noqa: F401
 )
