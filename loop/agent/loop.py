@@ -1,5 +1,6 @@
 import concurrent.futures
 import os
+import subprocess
 import uuid
 from pathlib import Path
 from typing import cast
@@ -226,4 +227,22 @@ def run_repl(resume: bool = False) -> None:
                     print(block.text)
         print()
     hooks.trigger_hooks("SessionEnd", history, 0)
+
+    if _active_config.run_init_sh_on_session_end:
+        init_sh = WORKDIR / "init.sh"
+        if init_sh.is_file():
+            try:
+                proc = subprocess.run(
+                    [str(init_sh)], cwd=WORKDIR, capture_output=True,
+                    text=True, timeout=120,
+                )
+                if proc.returncode != 0:
+                    logger.warning(
+                        "init.sh exited {} on SessionEnd: {}\n{}",
+                        proc.returncode, proc.stdout[:200], proc.stderr[:200],
+                    )
+            except subprocess.TimeoutExpired:
+                logger.warning("init.sh timed out on SessionEnd")
+        else:
+            logger.debug("init.sh not found, skip")
 

@@ -937,3 +937,49 @@ The benchmark detects the regression. It's a real canary, not a synthetic always
 | `loop/eval/cases/user_hooks.py` | New file — 166 lines, 5 EvalCase classes |
 | `loop/eval/cases/__init__.py` | +1 import line |
 | `progress.md` | This section |
+
+---
+
+## Phase A3 — f-session-end-mandatory-init-sh (2026-06-17)
+
+**Session ID:** ses_12aa3ea6cffeOQOgOw1eHD8pJb
+**Base commit:** 77f65fb (f-user-hook-discovery)
+
+### ⚠️ Warn-only design (does NOT affect exit code)
+
+This phase implements Q4's "machine-enforced, not agent-self-reported" mandate for init.sh verification. Key design choice: init.sh failure produces a `logger.warning()` but does NOT affect `loop run` exit code. Rationale: init.sh is a build/verification tool, not a gate. Users debugging their agent shouldn't face spurious failures from init.sh in the middle of development.
+
+### What's Done
+
+- [x] Task 0: feature_list.json — added `f-session-end-mandatory-init-sh` entry (status: in-progress)
+- [x] Task 1: Added `run_init_sh_on_session_end: bool = True` to `HarnessConfig` frozen dataclass in `loop/agent/config.py`
+- [x] Task 2: `apply_config` automatically picks up the new field via `_active_config = config` (no explicit change needed)
+- [x] Task 3: Added SessionEnd init.sh handler in `loop/agent/loop.py::run_repl` — after `hooks.trigger_hooks("SessionEnd", ...)`:
+  - Checks `_active_config.run_init_sh_on_session_end` flag
+  - Skip with `logger.debug("init.sh not found, skip")` if not present
+  - Runs with 120s timeout, `capture_output=True`
+  - On failure: `logger.warning(...)` with first 200 chars of stdout/stderr
+  - On timeout: `logger.warning("init.sh timed out on SessionEnd")`
+  - Never raises, never blocks exit
+- [x] Task 5: Created 4 eval cases in `loop/eval/cases/init_sh_session_end.py`
+  - `session-end-skip-when-no-init-sh` — REPL clean exit without init.sh warnings
+  - `session-end-runs-init-sh-when-exists` — init.sh writes marker on SessionEnd
+  - `session-end-warns-on-init-sh-failure` — init.sh exit 1 → stderr warning, exit code 0
+  - `session-end-skipped-when-opt-out` — `run_init_sh_on_session_end=False` flag honored
+- [x] Task 6: Registered new eval cases in `__init__.py`
+
+### Verification
+
+- `uv run python -m loop.cli eval --fail-under 100` → **84/84 passed** (+4 init_sh_session_end cases)
+- `./init.sh` → **225 passed**, 0 ruff, 0 mypy
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `feature_list.json` | +9 lines — new feature entry |
+| `loop/agent/config.py` | +1 line — `run_init_sh_on_session_end: bool = True` |
+| `loop/agent/loop.py` | +1 import (subprocess), +17 lines init.sh handler in run_repl |
+| `loop/eval/cases/init_sh_session_end.py` | New file — 176 lines, 4 EvalCase classes |
+| `loop/eval/cases/__init__.py` | +1 import line |
+| `progress.md` | This section |

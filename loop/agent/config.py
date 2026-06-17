@@ -65,6 +65,7 @@ class HarnessConfig:
     policy: PermissionPolicy
     checkpoint: CheckpointConfig
     disabled_tools: frozenset[str] = field(default_factory=frozenset)
+    run_init_sh_on_session_end: bool = True
 
     @classmethod
     def from_defaults(cls) -> HarnessConfig:

@@ -247,6 +247,15 @@
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval --fail-under 100 → 80/80 passed (+5 user_hooks cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loop/agent/user_hooks.py (new, 54 lines, discover_user_hooks + make_shell_callback), loop/agent/loop.py (hook registration in run_repl), loop/eval/cases/user_hooks.py (5 new cases), loop/eval/cases/__init__.py (register cases), feature_list.json (new entry)."
+    },
+    {
+      "id": "f-session-end-mandatory-init-sh",
+      "name": "Phase A3: SessionEnd 强制度量 — 跑 init.sh 失败 warn",
+      "description": "loop run 退出时,如果 ./init.sh 存在,自动跑它(非阻塞,失败只 warn 不退出非零)。roadmap §10 Q4 决议的核心:\"machine-enforced, not agent-self-reported\"。不存在的 init.sh 跳过。",
+      "dependencies": ["f-user-hook-discovery"],
+      "status": "done",
+      "verification": "uv run python -m loop.cli eval --fail-under 100",
+      "evidence": "uv run python -m loop.cli eval --fail-under 100 → 84/84 passed (+4 init_sh_session_end cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loop/agent/config.py (run_init_sh_on_session_end bool), loop/agent/loop.py (init.sh handler at SessionEnd, warn-only), loop/eval/cases/init_sh_session_end.py (4 new cases). Design: warn-only, does NOT affect loop run exit code, default True, opt-out via HarnessConfig."
     }
   ]
 }

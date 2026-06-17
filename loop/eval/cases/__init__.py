@@ -6,6 +6,7 @@ from loop.eval.cases import (
     eval_benchmark_cli,  # noqa: F401
     harness_toml,  # noqa: F401
     init,  # noqa: F401  — triggers case class definitions
+    init_sh_session_end,  # noqa: F401
     integration,  # noqa: F401
     memory_skills,  # noqa: F401
     permission_unify,  # noqa: F401
