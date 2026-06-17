@@ -627,3 +627,52 @@ Eval results: 52/52 passed
 - `M  loop/eval/cases/__init__.py` (register permission_unify)
 - `?? loop/agent/permissions.py`
 - `?? loop/eval/cases/permission_unify.py`
+
+## Session: f-cross-session-resume-eval
+
+**Goal**: Phase 5 §6 success metric "Cross-session resume success rate ≥ 90%" had **0 eval cases**. Roadmap promises kill-restart-resume works; nothing was testing it. Now 8 cases.
+
+### Done
+
+**8 new eval cases** in `loop/eval/cases/cross_session_resume.py` (52 → 60):
+
+| Case | What it locks down |
+|---|---|
+| `checkpoint-roundtrip-preserves-tool-use-blocks` | Save + load preserves full tool_use / tool_result blocks (the LLM context that resume needs to continue mid-task) |
+| `checkpoint-load-returns-none-for-corrupt-json` | load() never raises on garbage JSON — corrupt state can't crash restart |
+| `checkpoint-load-returns-none-for-missing-file` | load() returns None on fresh workdir (so resume can branch to "start fresh") |
+| `checkpoint-saved-at-is-iso-timestamp` | saved_at is parseable ISO 8601 (humans can `cat .minicode/checkpoint.json` and read it) |
+| `checkpoint-messages-preserve-order` | Order of 20 messages preserved across roundtrip (LLM context contract) |
+| `checkpoint-maybe-save-fires-at-tool-threshold` | Returns path at exactly N=CHECKPOINT_EVERY_TOOL_CALLS, not before |
+| `checkpoint-maybe-save-fires-at-token-threshold` | Returns path when K=CHECKPOINT_EVERY_TOKENS hit, even at low tool-call count |
+| `checkpoint-resume-cli-restores-history` | End-to-end: plant checkpoint → `loop run --resume` (stdin=exit) → log shows "Resumed from checkpoint (..., 3 messages, 7 tool calls)" |
+
+### Verification
+
+```
+$ uv run python -m loop.cli eval
+Eval results: 60/60 passed   (was 52, +8 new)
+
+$ ./init.sh
+============================= 225 pytest passed, 0 ruff, 0 mypy ==============================
+=== Verification Complete (all green) ===
+```
+
+### Decisions / surprises
+
+- **End-to-end via subprocess (`checkpoint-resume-cli-restores-history`)**, not a mock of `run_repl`. Planted a real checkpoint in a `tempfile.mkdtemp`, invoked `python -m loop.cli run --resume` with `input="exit\n"` (so REPL exits immediately), captured combined stdout+stderr, asserted `"Resumed from checkpoint"` + `"3 messages"` + `"7 tool calls"` all appear in output. ~1.8s — the most expensive case in the suite. Worth it because the resume path runs through `_ask_user` and `input()` mocks that would be brittle.
+- **mypy caught a real bug in my own cases.** I wrote `loaded = load(wd); ts = loaded["saved_at"]` without checking for `None`. mypy flagged it (`dict | None` is not indexable). Fixed by adding `if loaded is None: return FAIL`. This is exactly the kind of issue eval cases should catch before they ship — the fix is one line but the discipline is real.
+- **`saved_at` parsing handles `Z` suffix** via `ts.replace("Z", "+00:00")`. `datetime.fromisoformat` in Python 3.11+ accepts `Z` directly, but the project still supports earlier versions, and the replace is harmless either way.
+- **Cases #2/#3 (None for corrupt/missing) are critical for the resume success metric.** The metric is "≥ 90% resume success rate". If `load()` raised on bad JSON, every corrupted checkpoint would be a 100% failure. Returning None lets the REPL branch to "start fresh" — degrade gracefully, not crash. Now there's a case to prevent the next agent from "fixing" this by adding a raise.
+
+### Out of scope (potential next features)
+
+- **f-harness-toml**: harness.toml per-project checkpoint tuning (Phase 1 §3 promised but never delivered). `PermissionPolicy` injection point already exists from f-permission-unify.
+- **f-resume-success-rate-benchmark**: automated 10× kill-and-restart test (the actual metric target). Today the eval cases verify resume works; the metric itself is still measured manually per §6.
+
+### Working tree (this commit)
+
+- `M  feature_list.json` (f-cross-session-resume-eval lifecycle)
+- `M  progress.md`
+- `M  loop/eval/cases/__init__.py` (register cross_session_resume)
+- `?? loop/eval/cases/cross_session_resume.py`

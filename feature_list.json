@@ -185,6 +185,17 @@
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval → 'Eval results: 52/52 passed' (was 48, +4 permission_unify cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Refactor: 3 parallel deny lists (run_bash hardcoded 5 / Hooks.DENY_LIST 7 / PERMISSION_RULES 2) consolidated into loop/agent/permissions.py::DEFAULT_POLICY (1 tuple deny_patterns + 1 tuple rules). run_bash and Hooks(policy=...) both read from DEFAULT_POLICY. run_bash now blocks dd if=/dev/... (was a real bug — eval case permission-deny-list-blocks-dd surfaced it). tests/test_tools.py::test_run_bash_dangerous_blocked updated to substring match + added dd coverage. Idempotent across reruns."
+    },
+    {
+      "id": "f-cross-session-resume-eval",
+      "name": "Phase 5 success metric: cross-session resume eval cases",
+      "description": "Roadmap §6 'Cross-session resume success rate ≥ 90%' 当前 0 case 覆盖。补 ~8 个 case 锁定 checkpoint 的核心 contract: round-trip 完整性 + 损坏文件容错 + iso timestamp + tool-use blocks 完整保序 + 端到端 `loop run --resume` 子进程恢复 history。",
+      "dependencies": [
+        "f-multi-agent"
+      ],
+      "status": "done",
+      "verification": "uv run python -m loop.cli eval --fail-under 100",
+      "evidence": "uv run python -m loop.cli eval → 'Eval results: 60/60 passed' (was 52, +8 checkpoint cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Coverage: round-trip preserves tool_use/tool_result blocks (the LLM context); load returns None on corrupt JSON; load returns None on missing file (fresh-start contract); saved_at is parseable ISO 8601; messages preserve order across 20 messages; maybe_save fires at tool threshold (N=10) and token threshold (K=5000); end-to-end `loop run --resume` subprocess restores history (3 messages, 7 tool calls logged)."
     }
   ]
 }
