@@ -1,7 +1,11 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "loop"
-version = "0.1.0"
-description = "Minimal Claude-Code-like Python coding agent: agent_loop, tools, hooks, context compression, subagent delegation."
+version = "0.2.0"
+description = "Minimal Claude-Code-like Python coding agent: agent_loop, tools, hooks, context compression, subagent delegation, harness tooling."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
@@ -21,6 +25,12 @@ dev = [
     "ruff>=0.6.0",
     "mypy>=1.10.0",
 ]
+
+[project.scripts]
+loop = "loop.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["loop"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

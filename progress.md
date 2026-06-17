@@ -97,3 +97,48 @@ Working tree inventoried and split into two clean commit candidates:
 **Pre-commit verification**: `./init.sh` exits 0 (smart pass-gate tolerates f-test-framework-p4 blocker).
 
 **Awaiting**: explicit user OK to commit Stage A. No `git commit` performed yet (per "never commit without explicit request" rule).
+
+---
+
+## Phase 1: f-product-init-cmd (2026-06-17 14:00)
+
+Implemented `loop init` — Python port of `harness-creator/scripts/create-harness.mjs`.
+Status: code complete, tests pass, awaiting commit per WIP=1.
+
+**New files (5 in `loop/`, 5 templates, 2 test files, 1 build-system change)**:
+
+- `loop/__init__.py` — package marker, `__version__ = "0.2.0"`
+- `loop/detect.py` — `ProjectInfo` dataclass + `detect_project()` + `detect_package_manager()` + `verification_commands()` + `init_script_content()`. 220 lines.
+- `loop/init_cmd.py` — `init()` function + `FileResult` dataclass + `format_results()`. Generates 6 files (5 static + dynamic `init.sh`).
+- `loop/cli.py` — argparse CLI with `init` + `audit` (stub) subcommands. ~85 lines.
+- `loop/templates/agents.md` — generic 58-line template with `{{AGENT_FILE_NAME}}` / `{{PROJECT_PURPOSE}}` / `{{VERIFICATION_COMMANDS}}` / `{{PRIMARY_VERIFICATION_COMMAND}}` placeholders
+- `loop/templates/feature-list.json` — 5 placeholder features (matches reference)
+- `loop/templates/feature-list.schema.json` — strict schema
+- `loop/templates/progress.md` — static template
+- `loop/templates/session-handoff.md` — static template
+- `tests/test_detect.py` — 16 tests: stack detection (python/go/rust/maven/gradle/dotnet/node/typescript/react), package manager, verification commands
+- `tests/test_init_cmd.py` — 24 tests: happy path, stack-aware, options (--agent-file, --commands, --force), skip-existing, creates-missing
+
+**Modified files**:
+- `pyproject.toml` — added `[build-system] hatchling`, `[project.scripts] loop = "loop.cli:main"`, `[tool.hatch.build.targets.wheel] packages = ["loop"]`, bumped to 0.2.0
+- `feature_list.json` — f-product-init-cmd → done with real evidence
+
+**Acceptance evidence**:
+- 40 new tests pass (16 + 24). Total: 110 pass / 1 pre-existing failure (f-test-framework-p4 still blocked, smart gate tolerates).
+- `./init.sh` exit 0.
+- Cold-start: `uv run loop init /tmp/coldstart --agent-file CLAUDE.md --commands "echo step1,echo step2"` produced 6 files with placeholders replaced, init.sh executable, feature_list.json has 5 not-started placeholders.
+- `uv run loop --help` shows `init` + `audit` subcommands.
+
+**Decisions made**:
+- **Packaging** (resolves Q1 from roadmap): `[project.scripts]` entry point + `python -m loop.cli` fallback. Project is `loop`, package is `loop`, CLI command is `loop`. Single name simplifies discovery.
+- **Stack detection** in `loop/detect.py` mirrors the reference's `detectProject` exactly. Same priority order: package.json → pyproject → go.mod → Cargo.toml → pom.xml → build.gradle → .csproj.
+- **Template strategy**: 5 static files bundled in `loop/templates/`, `init.sh` is generated programmatically by `init_script_content()` (no template needed; commands are stack-specific).
+- **Schema strictness**: 5 placeholder features use the reference schema's loose form (no `evidence`/`blocker` required). The project itself uses a stricter schema with `evidence` for `done` and `blocker` for `blocked`. Both work; the loop project's stricter schema is a superset.
+
+**Known limitations** (deferred to later iterations):
+- `loop audit` is a stub returning 1 (Phase 1 second feature).
+- No HTML report yet (Phase 1 second feature will add it).
+- `loop init` doesn't currently read `harness.toml` for per-project tool overrides (Phase 3 work).
+- Permission pipeline generalization (the 3rd Phase 1 deliverable in the roadmap) is deferred to a future iteration — current `hook.py` still uses hardcoded deny list / rules.
+
+**f-product-init-cmd status**: code + tests + cold-start verification done. **Awaiting commit** per "never commit without explicit request" + WIP=1.

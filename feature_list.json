@@ -68,12 +68,12 @@
     },
     {
       "id": "f-product-init-cmd",
-      "name": "Phase 1: minicode init 命令",
+      "name": "Phase 1: loop init 命令",
       "description": "Python 版 create-harness.mjs。在用户项目里生成 5 件套 + 项目类型自动检测 (Python/Node/Go/Rust/...) + --agent-file / --commands / --force 选项。",
       "dependencies": ["f-harness-scaffold"],
-      "status": "not-started",
-      "verification": "uv run python -m loop init /tmp/test-project && test -f /tmp/test-project/AGENTS.md && test -f /tmp/test-project/init.sh",
-      "evidence": null
+      "status": "done",
+      "verification": "uv run pytest tests/test_detect.py tests/test_init_cmd.py -v && uv run loop init /tmp/coldstart --agent-file CLAUDE.md --commands 'echo step1,echo step2' && test -f /tmp/coldstart/CLAUDE.md && test -x /tmp/coldstart/init.sh",
+      "evidence": "40 tests pass (16 detect + 24 init_cmd). Cold-start: 6 files written, --agent-file CLAUDE.md works, --commands overrides detected commands, feature_list.json has 5 not-started placeholders, init.sh is executable (chmod 0o755)."
     },
     {
       "id": "f-product-audit-cmd",
