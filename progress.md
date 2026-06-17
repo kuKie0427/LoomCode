@@ -828,3 +828,45 @@ The benchmark detects the regression. It's a real canary, not a synthetic always
 - `?? loop/eval/benchmarks/__init__.py`
 - `?? loop/eval/benchmarks/resume.py`
 - `?? loop/eval/cases/resume_benchmark.py`
+
+---
+
+## Phase E2 — f-user-side-resume-benchmark
+
+**Date:** 2026-06-17
+**Session ID:** ses_12ad6fea4ffedq3iCxzarsFud6
+**Feature:** `f-user-side-resume-benchmark`
+
+### What was done
+
+- [x] Added `--benchmark resume` flag to `loop eval` CLI parser (loop/cli.py)
+- [x] Added benchmark dispatch to `run_evals` via `LOOP_BENCHMARK` env var (loop/eval/__init__.py)
+- [x] Created `eval_benchmark_cli.py` eval case to lock CLI existence
+- [x] Registered new case in `loop/eval/cases/__init__.py`
+- [x] Updated AGENTS.md quick start with `--benchmark resume` line
+
+### Validation
+
+- `uv run python -m loop.cli eval --fail-under 100` → **70/70 passed** (was 69, +1)
+- `uv run python -m loop.cli eval --benchmark resume` → **benchmark: resume 10/10 (100%)**, exit code 0
+- `./init.sh` → **Verification Complete (all green)**
+- `uv run ruff check .` → all checks passed
+
+### Files changed
+
+- `M  feature_list.json` (new feature + lifecycle)
+- `M  loop/cli.py` (--benchmark flag + env var set)
+- `M  loop/eval/__init__.py` (benchmark dispatch)
+- `M  loop/eval/cases/eval_benchmark_cli.py` (new eval case)
+- `M  loop/eval/cases/__init__.py` (register case)
+- `M  AGENTS.md` (quick start line)
+
+### Working tree
+
+- `M  feature_list.json`
+- `M  loop/cli.py`
+- `M  loop/eval/__init__.py`
+- `M  loop/eval/cases/__init__.py`
+- `?? loop/eval/cases/eval_benchmark_cli.py`
+- `M  AGENTS.md`
+- `M  progress.md`

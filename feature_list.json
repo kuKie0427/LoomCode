@@ -218,6 +218,17 @@
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval → 'Eval results: 69/69 passed' (was 68, +1 benchmark case); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Benchmark: 10/10 trials, 100% resume success, ~1.2s total. Canary property VERIFIED: injecting `messages.clear()` regression in agent_loop → benchmark flips to 0/10 (FAIL), restoring → 10/10 (PASS). Refactored agent_loop to accept llm_client parameter (backward-compat default to module-level). Caveat (documented in module docstring): synthetic fixture proxy, not production telemetry."
+    },
+    {
+      "id": "f-user-side-resume-benchmark",
+      "name": "User-side: loop eval --benchmark resume",
+      "description": "把现有 f-resume-success-rate-benchmark 包成 loop eval --benchmark resume CLI flag,用户能跑自己项目的 resume canary。0 新 benchmark 代码(只是 CLI 暴露)。",
+      "dependencies": [
+        "f-resume-success-rate-benchmark"
+      ],
+      "status": "done",
+      "verification": "uv run python -m loop.cli eval --benchmark resume --fail-under 100",
+      "evidence": "uv run python -m loop.cli eval --fail-under 100 → 70/70 passed (+1 eval case); uv run python -m loop.cli eval --benchmark resume → 'benchmark: resume 10/10 (100%)', exit 0; ./init.sh 'all green'. Changes: loop/cli.py (--benchmark flag + env var), loop/eval/__init__.py (benchmark dispatch), loop/eval/cases/eval_benchmark_cli.py (CLI eval case), loop/eval/cases/__init__.py (register case), AGENTS.md (quick start line)."
     }
   ]
 }

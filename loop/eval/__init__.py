@@ -24,6 +24,19 @@ from loop.eval.runner import (
 
 def run_evals(workdir=None, html_output=None) -> int:
     """Run all evals; optionally write an HTML report. Returns pass rate 0-100."""
+    import os
+
+    benchmark = os.environ.get("LOOP_BENCHMARK")
+    if benchmark == "resume":
+        from loop.eval.benchmarks.resume import run_resume_benchmark
+
+        report = run_resume_benchmark(trials=10)
+        if report.passed(threshold_pct=90):
+            print(f"benchmark: resume {report.successes}/{report.trials} ({report.rate_pct}%)")
+            return 100
+        print(f"benchmark: resume {report.successes}/{report.trials} ({report.rate_pct}%) < 90% threshold")
+        return 1
+
     passed, results = run_all()
     print(format_report(passed, results))
     if html_output is not None:

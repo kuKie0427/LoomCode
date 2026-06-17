@@ -14,6 +14,7 @@ uv run pytest -v             # Run tests only
 uv run python -m loop.cli run # Start the agent REPL
 uv run python -m loop.cli eval               # Run the eval suite (text)
 uv run python -m loop.cli eval --html r.html # Run eval + write HTML report
+uv run python -m loop.cli eval --benchmark resume # Run resume canary (Phase 5 §6)
 uv run python -m loop.cli trace show         # Show recent trace events
 uv run python -m loop.cli audit              # Audit this project's harness
 uv run python -m loop.cli init .             # Scaffold harness in target dir

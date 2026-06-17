@@ -8,6 +8,7 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from loop import __version__
@@ -68,6 +69,7 @@ def _build_parser() -> argparse.ArgumentParser:
     eval_p.add_argument("--workdir", type=Path, default=Path("."), help="Project workdir")
     eval_p.add_argument("--html", type=Path, default=None, help="Write HTML report to FILE")
     eval_p.add_argument("--fail-under", type=int, default=100, help="Exit non-zero if score < N (default 100)")
+    eval_p.add_argument("--benchmark", choices=["resume"], default=None, help="Run a named benchmark instead of the regular eval suite")
 
     return parser
 
@@ -127,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     if args.command == "eval":
+        if args.benchmark:
+            os.environ["LOOP_BENCHMARK"] = args.benchmark
         from loop.eval import run_evals
         workdir = args.workdir.resolve()
         try:
