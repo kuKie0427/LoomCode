@@ -2,8 +2,9 @@ import concurrent.futures
 import os
 import subprocess
 import uuid
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import dotenv
 from loguru import logger
@@ -13,7 +14,7 @@ import loop.agent.trace as trace_mod
 from loop.agent.config import HarnessConfig, load_config
 from loop.agent.context import Context
 from loop.agent.hooks import Hooks
-from loop.agent.llm import LLMClient
+from loop.agent.llm import LLMClient, StreamEvent
 from loop.agent.prompt import SystemPrompt
 from loop.agent.tools import (
     TOOL_HANDLERS,
@@ -25,6 +26,17 @@ from loop.skills import build_skill_index
 
 dotenv.load_dotenv()
 WORKDIR = Path.cwd()
+
+AgentCallback = Callable[..., None]
+
+DEFAULT_CALLBACKS: dict[str, AgentCallback | None] = {
+    "on_message_start": None,
+    "on_text_delta": None,
+    "on_tool_use": None,
+    "on_tool_result": None,
+    "on_compact": None,
+    "on_message_end": None,
+}
 
 
 def configure_logging() -> None:
@@ -133,12 +145,15 @@ def _run_tool_turn(tool_uses, hooks):
     return results
 
 
-def agent_loop(messages: list, llm_client=None) -> None:
+def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, stream_text: Callable[[str, list, list, int], Iterator[StreamEvent]] | None = None) -> None:
     configure_logging()
+    cb = {**DEFAULT_CALLBACKS, **(callbacks or {})}
     hooks.trigger_hooks("SessionStart")
     if llm_client is None:
         llm_client = globals()["llm_client"]
     hooks.trigger_hooks("AgentStart")
+    if cb["on_message_start"] is not None:
+        cb["on_message_start"]()
     session_id = uuid.uuid4().hex[:12]
     trace_mod.start(WORKDIR, session_id)
     tr = trace_mod.current()
@@ -149,13 +164,54 @@ def agent_loop(messages: list, llm_client=None) -> None:
     while True:
         if context.should_compact(messages, llm_client.get_context_window()):
             hooks.trigger_hooks("PreCompact", messages, context.last_input_tokens)
+            msg_count_before = len(messages)
             context.autocompact(messages, llm_client.client, llm_client.model, llm_client.get_context_window())
+            if cb["on_compact"] is not None:
+                cb["on_compact"](msg_count_before, len(messages))
             if tr is not None:
                 tr.record("autocompact", tool_calls_so_far=tool_call_count)
-        response = llm_client.client.messages.create(
-            model=llm_client.model, system=SYSTEM, messages=messages,
-            tools=cast(list, TOOLS), max_tokens=8000,
-        )
+        if stream_text is not None:
+            # ===== STREAMING PATH =====
+            from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
+            content_blocks: list = []
+            input_tokens = 0
+            output_tokens = 0
+            stop_reason = "end_turn"
+            for ev in stream_text(SYSTEM, messages, cast(list, TOOLS), 8000):
+                if ev.kind == "text":
+                    content_blocks.append(TextBlock(type="text", text=ev.text))
+                    if cb["on_text_delta"] is not None:
+                        cb["on_text_delta"](ev.text)
+                elif ev.kind == "tool_use":
+                    content_blocks.append(ToolUseBlock(
+                        type="tool_use",
+                        id=ev.tool_id,
+                        name=ev.tool_name,
+                        input=ev.tool_input or {},
+                    ))
+                elif ev.kind == "usage":
+                    if ev.input_tokens:
+                        input_tokens = ev.input_tokens
+                    if ev.output_tokens:
+                        output_tokens = ev.output_tokens
+                    if ev.stop_reason:
+                        stop_reason = ev.stop_reason
+            response = Message(
+                id="stream-" + uuid.uuid4().hex[:8],
+                type="message",
+                role="assistant",
+                content=content_blocks,
+                model=llm_client.model,
+                stop_reason=cast(Any, stop_reason),
+                stop_sequence=None,
+                usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens),
+            )
+        else:
+            # ===== SYNC PATH (unchanged) =====
+            response = llm_client.client.messages.create(
+                model=llm_client.model, system=SYSTEM, messages=messages,
+                tools=cast(list, TOOLS), max_tokens=8000,
+            )
         context.update(len(messages), response)
         if tr is not None:
             tr.record("llm_response", stop_reason=response.stop_reason,
@@ -168,13 +224,22 @@ def agent_loop(messages: list, llm_client=None) -> None:
             checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
             if tr is not None:
                 tr.record("session_end", tool_calls=tool_call_count, turns=len(messages))
+            if cb["on_message_end"] is not None:
+                cb["on_message_end"](tool_call_count, len(messages))
             trace_mod.stop()
             return
 
         tool_uses = [b for b in response.content if b.type == "tool_use"]
+        if cb["on_tool_use"] is not None:
+            for block in tool_uses:
+                cb["on_tool_use"](block.name, block.input, block.id)
         if tr is not None and tool_uses:
             tr.record("tool_batch", tools=[b.name for b in tool_uses], size=len(tool_uses))
         results = _run_tool_turn(tool_uses, hooks)
+        if cb["on_tool_result"] is not None:
+            for r in results:
+                if r is not None:
+                    cb["on_tool_result"](r.get("tool_use_id", ""), str(r.get("content", "")), r.get("is_error", False))
         tool_call_count += len(tool_uses)
         messages.append({"role": "user", "content": results})
 

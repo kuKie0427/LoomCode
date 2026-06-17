@@ -1250,3 +1250,218 @@ $ ./init.sh
 - `?? loop/agent/scope.py`
 - `?? loop/eval/cases/scope_wip1.py`
 - `?? .sisyphus/plans/scope-wip1-enforcement.md`
+
+## Session: F 路线规划 (Phase F — TUI / IDE 集成) **(PLANNING, not implementation)**
+
+**Goal**: 规划 Phase F 路线 (TUI 集成)。这是 A+E 路线图完成后的下一段。用户决定:用 Textual v0.85+ 做 Python TUI,参考 Claude Code 本地源码 + opencode + hermes。
+
+### 决策
+
+1. **框架选型: Textual v0.85+**。理由:`MarkdownStream` 专为 LLM 流式设计 (v4.0.0 起)、async-native、Pilot API + snapshot 测试可用。**不**用 Rich + prompt_toolkit (事件循环打架)、不**用 Urwid (2026 维护慢)、不**学 hermes 用 Node.js 子进程 (技术债)、不**学 Claude Code fork Ink (50 文件自定义渲染器,Python 不需要)。
+2. **架构: wrap 不 replace**。`agent_loop` 是核心契约,不能重写。F1 加 `callbacks` 参数 (6 个 hook 点),F2 通过 callbacks 订阅流式事件,F3 接管权限 + 工具调用可视化。同步 `LLMClient` 完整保留,CLI 路径不变。
+3. **范围: 3 phase + 我列的 6 个 P0**。**不**做 vim 模式、插件 Slot 系统、subagent tree 可视化、主题切换、/sessions 等。TUI 是**叠加层**——`loop tui` 新子命令,不动 `loop run`。
+4. **测试: Pilot API + pytest-textual-snapshot**。契约 eval case (F1) + 启动/包结构 case (F2) + 视觉 snapshot (F3,3 个 SVG baseline 提交到 git)。
+
+### 参考借鉴
+
+- **Claude Code** (本地 `/Users/lanf/pra/die/loop/claude-code-src/Claude-Code-main/`, 1,987 个 TS 文件):
+  - 学:`src/state/store.ts` 自研 30 行 Store (无第三方依赖)、`toolUseConfirmQueue` 权限 confirm queue、`Command` type 三分法 (prompt / local / local-jsx)、`renderToolUseMessage` + `renderToolUseProgressMessage` + result component per-tool UI 模块、字符流式 + 行缓冲 (`streamingText.substring(0, lastIndexOf('\n') + 1)`)。
+  - 不学:50 文件自定义 Ink fork、React Compiler 自动 memo、feature() 编译开关、Kairos 持久助手、Buddy 宠物。
+- **opencode** (sst/opencode, OpenTUI + SolidJS):
+  - 学:Inline tool → Block tool 两态、Permission 底部浮层、命令面板 (`/agents` / `/sessions` / `/model`)。
+  - 不学:Zig 依赖、Slot 插件系统、Sidebar 自动收起的 42 字符宽度。
+- **hermes** (NousResearch/hermes-agent, React Ink + JSON-RPC to Python):
+  - 学:`StreamingMd` 稳定前缀流式 (只重渲染 in-flight tail)、ToolTrail 树、Status bar 状态指示。
+  - 不学:Node.js 子进程 + JSON-RPC 双进程架构 (技术债),prompt_toolkit 兼容层 (Phase 3+ 才有,目前不需要)。
+
+### Plan 文件 (新增 4 个)
+
+- `.sisyphus/plans/loop-pf-roadmap.md` (88 lines) — 路线图,导航用
+- `.sisyphus/plans/loop-pf1.md` (198 lines) — F1: `f-async-streaming-llm` 详细 plan
+- `.sisyphus/plans/loop-pf2.md` (371 lines) — F2: `f-tui-textual-app` 详细 plan
+- `.sisyphus/plans/loop-pf3.md` (394 lines) — F3: `f-tui-permission-modal` 详细 plan
+
+### feature_list.json 新增 (3 个 not-started)
+
+- `f-async-streaming-llm` (F1):LLMClient.stream() + agent_loop callbacks,~4h,~5 eval case
+- `f-tui-textual-app` (F2):Textual TUI + 6 斜杠命令,~6h,~5 eval case
+- `f-tui-permission-modal` (F3):PermissionScreen + ToolCallCard + snapshot,~4h,~5 eval case
+
+### 已知偏差
+
+- F2/F3 plan 文件 (371/394 行) 超过 harness-plan-writer 建议的 "~100-150 lines max"。理由:TUI 实现跨 7-8 个文件,每个 widget 都需要独立 task 描述,A+E 路线图那种 1-feature-1-file 的简单 phase 不适用。**接受偏差**。
+- F1 plan (198 行) 略超 150。理由:6 个 callback 的精确触发位置 + 5 个 eval case 详细规格需要更多空间。
+
+### Working tree (this session, NOT committed yet)
+
+- `M  feature_list.json` (3 new F-features)
+- `M  docs/harness-roadmap.md` (§8 status updated, F overview added)
+- `M  .sisyphus/plans/loop-roadmap.md` (F 路线 follow-up pointer)
+- `M  progress.md` (this section)
+- `?? .sisyphus/plans/loop-pf-roadmap.md`
+- `?? .sisyphus/plans/loop-pf1.md`
+- `?? .sisyphus/plans/loop-pf2.md`
+- `?? .sisyphus/plans/loop-pf3.md`
+
+### 后续
+
+新 session 加载 `.sisyphus/plans/loop-pf-roadmap.md` 选 F1/F2/F3 → 读对应 `loop-pf{N}.md` → 按 task 列表实现。本 session 不 commit (用户角色: plan-writer + reviewer, 不 implementer)。
+
+## Session: F 路线 plan 2nd 修正 (Momus re-review + 真实 import 验证) **(PLANNING iteration 2)**
+
+**Goal**: 让 Momus 对修过的 plan 做 re-review,找新引入的问题。我用真实 import 测试逐条验证。
+
+### Momus re-review 找到的 4 个新问题 (全部 verified)
+
+| # | 问题 | 我的真实验证 | 严重度 |
+|---|---|---|---|
+| **B.11** | F3 `from loop.agent import hooks` 拿到 module 不是 instance | `python -c "from loop.agent import hooks; print(type(hooks).__name__)"` → `module` (不是 Hooks 类)。`hooks._asker = ...` 写到模块上,`check_permission_hook` 的 `self._asker` 找不到 → 默认 `input()` 被调,PermissionScreen 永远不出现 | **blocker** |
+| **B.12** | F2 `action_quit` 2 个 broken import (`_active_config` / `WORKDIR` 路径错) | `from loop.agent.config import _active_config` → `ImportError`;`from loop.agent.scope import WORKDIR` → `ImportError`。两个都在 `loop.agent.loop` 才是真的 | **blocker** |
+| **B.7** | F1 streaming 永远 hardcode `stop_reason="end_turn"`,tool_use 永远丢;F2 comments 说"fallback to sync"但代码没实现 | `loop-pf1.md:192` 确认 `stop_reason="end_turn"` 硬编码;F2 `run_agent_turn` 永远传 `stream_text`,没 fallback | **major** |
+| B.4 | `Usage(input_tokens=0, output_tokens=0)` 让 token tracking 降级 | plan 真的这样写。修复 B.7 时一起修 | minor |
+
+### 应用的修复 (用户决定: 真接上 tool_use + 修 import + token)
+
+#### F1: StreamEvent 协议 + 完整 tool_use 流式
+- 新增 `StreamEvent` dataclass (`kind: text | tool_use | usage`)
+- `stream_iter` 解析 3 类 Anthropic events:
+  - `content_block_delta.text_delta` → `StreamEvent(kind="text", text=...)`
+  - `content_block_stop` (after input_json_delta) → `StreamEvent(kind="tool_use", tool_name, tool_input, tool_id)`
+  - `message_start` + `message_delta` → `StreamEvent(kind="usage", input_tokens, output_tokens, stop_reason)`
+- `agent_loop` streaming path 重组 Message (含 `TextBlock + ToolUseBlock` + 真实 token)
+- 旧 plan 说"tool_use 不支持" + "F2 fallback to sync" — **删掉**,F1 现在真支持
+- 7 eval case → 8 eval case(新增: tool_use 流式 + 真实 token usage)
+
+#### F2: 修 5 处 broken imports + 删矛盾 comments
+- L189 (user hook registration) `from loop.agent import hooks` → `from loop.agent.loop import hooks as hooks_instance`
+- L279-281 (action_quit) 3 个 import 全错 → 1 个 `from loop.agent.loop import hooks, _active_config, WORKDIR`
+- `run_agent_turn` 矛盾 comments → 删,改成 "F1 现在真支持 tool_use,不需要 fallback"
+- eval case 4 (action_quit test) `loop.agent.hooks.trigger_hooks` patch → `loop.agent.loop.hooks.trigger_hooks`
+
+#### F3: 修 2 处 broken imports
+- L273 `from loop.agent import hooks` → `from loop.agent.loop import hooks`
+- L417 (eval case 5) `from loop.agent import hooks` → `from loop.agent.loop import hooks`
+
+### 验证
+
+- `python -c "from loop.agent import hooks; print(type(hooks).__name__)"` → 确认拿到 module 而不是 instance
+- `python -c "from loop.agent.config import _active_config"` → `ImportError` (确认 B.12 真实)
+- `python -c "from loop.agent.scope import WORKDIR"` → `ImportError` (确认 B.12 真实)
+- `python -c "from loop.agent.loop import _active_config, WORKDIR"` → 成功
+- `python -c "from loop.agent.loop import hooks; print(type(hooks).__name__)"` → `Hooks` (instance)
+- `./init.sh` → 226 passed, 0 ruff, 0 mypy (仍是绿,只改 plan)
+
+### Working tree (this iteration, NOT committed)
+
+- `M  .sisyphus/plans/loop-pf1.md` (加 StreamEvent + 真 tool_use 流式 + 8 eval case)
+- `M  .sisyphus/plans/loop-pf2.md` (修 5 处 import + 删矛盾 comments)
+- `M  .sisyphus/plans/loop-pf3.md` (修 2 处 import)
+- `M  .sisyphus/plans/loop-pf-roadmap.md` (更新估时 + 实施表)
+- `M  progress.md` (this section)
+
+### 后续
+
+新 session 加载 `.sisyphus/plans/loop-pf-roadmap.md` → 选 F1 → 读 `loop-pf1.md` (436 行,真流式 + tool_use + 真实 token) → 实现 → exit-gate → commit → /handoff。
+
+总 plan 行数: 1554 → 1683 (+129 行,真流式复杂度)。3 plan 总计 ~1590 行 (roadmap 93 + F1 436 + F2 657 + F3 497)。
+
+## Session: F 路线 plan 3rd 修正 (Momus 3rd review + 真源码验证) **(PLANNING iteration 3)**
+
+**Goal**: 启动新一轮 Momus review 找第二轮修复的回归问题。我用 Anthropic 官方 SDK 源码验证关键 claim。
+
+### Momus 3rd review 找到的 6 个 issue (我逐条核查)
+
+| # | Momus 说的 | 严重度 | 我的核查方法 | 真假 |
+|---|---|---|---|---|
+| A.1-4 | 4 个 fix 都生效 | ✓ | grep + Python introspection | **对** |
+| B.1 | TextBlock-per-delta 碎片化 | major | 代码分析 | **对** (semantically messy but functionally OK) |
+| **B.2** | `input_json` `+=` 错,应该是 `=` | **blocker** | **Anthropic 官方 SDK `_messages.py:477` 用 `json_buf += bytes(event.delta.partial_json, "utf-8")` — 跟 plan 一致** | **❌ Momus 错** |
+| B.5 | eval case 覆盖不全 | minor | grep 验证 | **对** (我自己也独立发现) |
+| B.8 | `_main_loop` 没初始化 | minor | 代码 review | **对** (edge case) |
+| Stale note | F1 L434 "F1 流式不支持 tool_use" 矛盾 plan body | major | grep 确认 line 434 真的这样说 | **对** |
+| Not real streaming | `asyncio.run(_collect())` 阻塞到全部 event 收集完 | major | 代码确认 | **对** (设计妥协,不是 blocker) |
+
+### 真实需要修的 2 个 issue
+
+#### Issue 1: 5 个 lost eval case (我独立发现)
+原来 F1 plan 有 5 个 case (1st iter 加到 7, 2nd iter 改成 8 但丢了 5 个):
+- `agent-loop-accepts-callbacks-parameter` (lost)
+- `agent-loop-defaults-callbacks-to-noop` (lost)
+- `agent-loop-fires-on-message-start-and-end` (lost)
+- `agent-loop-fires-on-tool-use-and-result` (lost, partial via case 6)
+- `llm-client-stream-iter-context-manager-protocol` (lost, replaced by case 3)
+
+**修复**: 5 个 case 全部加回 (case 9-13),F1 现在 **13 个 case**。
+
+#### Issue 2: Stale note (F1 L434) (Momus 发现)
+- **原**: `3. F1 的流式不支持 tool_use:这是已知限制,见上文。`
+- **新**: `3. F1 的流式完整支持 tool_use + 真实 token(已通过 StreamEvent 协议实现)。partial_json 累积用 +=(已对照 Anthropic 官方 SDK _messages.py:477 验证)。`
+
+### Momus 错的部分 (我纠正)
+
+- **input_json 累积**: Momus 说 "Anthropic docs 说 partial_json 是 cumulative,所以 += 会产生重复"。**错**。Anthropic 官方 SDK `_messages.py:477` 用 `json_buf += bytes(event.delta.partial_json, "utf-8")` — `partial_json` 是 **incremental** 的 (每 delta 含新字符)。Plan 的 `+=` 是正确的,不需要改。
+
+### Final state
+
+- F1: **13 个 eval case** (8 流式 + 5 sync path callback 契约)
+- F2: 5 个 case (post_message + apply_config + SessionEnd)
+- F3: 5 个 case (PermissionScreen + ToolCallCard + asker bridge)
+- 总预期: `106 + 13 + 5 + 5 = 129/129 passed`
+- Plan 总行数: 1683 → 1693 (+10 行,补 5 个 case 的描述)
+- `./init.sh`: 仍绿 (226 passed, 0 ruff, 0 mypy)
+
+### Working tree (this iteration, NOT committed)
+
+- `M  .sisyphus/plans/loop-pf1.md` (加 5 lost cases + 修 stale note, 8→13 cases)
+- `M  progress.md` (this section)
+
+### 后续
+
+新 session 加载 `.sisyphus/plans/loop-pf-roadmap.md` → 选 F1 → 读 `loop-pf1.md` (446 行, 13 个 eval case) → 实现 → exit-gate → commit → /handoff。
+
+---
+
+## Phase F1: f-async-streaming-llm — DONE
+
+**Date:** 2026-06-18
+**Session:** ses_1295f4da7ffe0rgokJObCexCwo
+
+### What Was Done
+
+Phase F1 implemented async streaming LLM support with callback system:
+
+1. **LLMClient streaming infrastructure** (`loop/agent/llm.py`):
+   - Added `StreamEvent` dataclass with 3 event kinds: text, tool_use, usage
+   - Added `_async_client()` method returning `AsyncAnthropic`
+   - Added `stream_iter()` generator method that wraps `AsyncAnthropic.messages.stream()`
+   - Preserved sync `self.client` unchanged
+
+2. **agent_loop streaming path + callbacks** (`loop/agent/loop.py`):
+   - Added `stream_text` parameter (optional callable returning `Iterator[StreamEvent]`)
+   - Added `callbacks` parameter (dict of 6 callback names → callable)
+   - Implemented streaming path that reassembles `Message` from `StreamEvent` objects
+   - Added 6 callback trigger points: on_message_start, on_text_delta, on_tool_use, on_tool_result, on_compact, on_message_end
+
+3. **13 eval cases** (`loop/eval/cases/async_streaming.py`):
+   - 4 LLMClient cases (async_client, generator, StreamEvent, tool_use)
+   - 4 streaming path cases (callbacks, tool_use, tokens, sync fallback)
+   - 5 sync callback contract cases (accepts, defaults, start/end, tool_use/result, compact)
+
+### Verification
+
+- `uv run python -m loop.cli eval --fail-under 100` → **119/119 passed** (+13)
+- `./init.sh` → 226 pytest passed, 0 ruff, 0 mypy
+- `feature_list.json` → f-async-streaming-llm = `done`
+
+### Files Modified
+
+- `loop/agent/llm.py` (+95 lines: StreamEvent, async_client, stream_iter)
+- `loop/agent/loop.py` (+72 lines: callbacks, streaming path)
+- `loop/eval/cases/async_streaming.py` (+620 lines: 13 eval cases)
+- `loop/eval/cases/__init__.py` (+1 line: register async_streaming)
+- `feature_list.json` (status: done, evidence added)
+
+### 后续
+
+新 session 加载 `.sisyphus/plans/loop-pf2.md` → 选 F2 → 实现 Textual TUI app + 6 slash commands。
+
