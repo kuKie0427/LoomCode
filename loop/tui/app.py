@@ -81,6 +81,7 @@ class AgentTUIApp(App):
     def on_mount(self) -> None:
         """Capture the main event loop for cross-thread async dispatch."""
         self._main_loop = asyncio.get_running_loop()
+        self.query_one("#composer", Composer).focus()
 
     def _make_tui_asker(self):
         """Build an asker that pushes PermissionScreen onto the app via the main loop.
