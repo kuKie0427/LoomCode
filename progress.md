@@ -750,3 +750,81 @@ $ ./init.sh
 - `M  progress.md`
 - `?? loop/agent/config.py`
 - `?? loop/eval/cases/harness_toml.py`
+
+## Session: f-resume-success-rate-benchmark
+
+**Goal**: roadmap §6 promised "Cross-session resume success rate ≥ 90% (10× kill-and-restart)" but nothing actually ran that metric. Ship a synthetic benchmark so we have a canary against regressions in the resume path.
+
+### Done
+
+- **New `loop/eval/benchmarks/__init__.py` + `loop/eval/benchmarks/resume.py`** (~190 LOC):
+  - `BenchmarkReport` / `TrialResult` dataclasses with `passed(threshold_pct=90)` helper
+  - `_make_llm(script)` builds a mock `LLMClient` whose `client.messages.create` replays a list of `(stop_reason, blocks)` tuples
+  - `_make_5_step_script()` — 5 bash tool_use calls then end_turn
+  - `_kill_at_step()` — snapshots messages + writes checkpoint (mirrors auto-checkpoint)
+  - `_verify_resume_preserved_history()` — checks the resumed `agent_loop`'s first LLM call received the pre-kill messages
+  - `run_one_trial(idx, workdir)` — runs first half (5-step script + checkpoint at step 3) then resumed half (script tail from step 5, loaded messages, end_turn)
+  - `run_resume_benchmark(trials=10)` — orchestrator
+- **New `loop/eval/cases/resume_benchmark.py`** — single eval case wrapping the benchmark; reports success rate + per-trial breakdown in `detail`
+- **Modified `loop/agent/loop.py`** — `agent_loop(messages, llm_client=None)` now accepts injected LLM client (default = module-level). Backward-compatible.
+
+### 1 new eval case (68 → 69)
+
+`resume-success-rate-benchmark` — runs 10× kill-restart trials; asserts ≥ 90% succeed.
+
+### Verification
+
+```
+$ uv run python -m loop.cli eval --fail-under 100
+Eval results: 69/69 passed   (was 68, +1)
+# idempotent:
+$ uv run python -m loop.cli eval --fail-under 100
+Eval results: 69/69 passed
+
+$ ./init.sh
+============================= 225 pytest passed, 0 ruff, 0 mypy ==============================
+=== Verification Complete (all green) ===
+```
+
+**Canary property VERIFIED** (most important verification):
+
+```bash
+# Inject regression: agent_loop clears messages after each LLM response
+$ cp loop/agent/loop.py /tmp/loop.py.bak
+$ sed -i 's/messages.append({"role": "assistant", ...})/messages.clear()  # SABOTAGE/' loop/agent/loop.py
+
+$ uv run python -m loop.cli eval --fail-under 100
+Eval results: 68/69 passed
+  [FAIL] resume-success-rate-benchmark (1349ms) — 0/10 (0%) < 90% threshold
+
+# Restore:
+$ cp /tmp/loop.py.bak loop/agent/loop.py
+$ uv run python -m loop.cli eval --fail-under 100
+Eval results: 69/69 passed
+  [PASS] resume-success-rate-benchmark (3163ms) — 10/10 (100%) ≥ 90% threshold
+```
+
+The benchmark detects the regression. It's a real canary, not a synthetic always-green check.
+
+### Decisions / surprises
+
+- **Synthetic fixture, NOT real LLM**: the metric in §6 is about *harness* resume behavior, not LLM determinism. Real LLM would be slow, flaky, expensive. Fixture keeps it 1.2s, deterministic, CI-able. The "synthetic proxy, not production telemetry" caveat is the FIRST thing in the module docstring so future readers don't mistake this for the real success metric.
+- **`agent_loop` refactor was needed**: llm_client was module-level (line 147, 160, 177). To inject fixtures, made it a parameter. Backward compat preserved via `llm_client = globals()["llm_client"]` when None is passed. All 60+ prior eval cases pass without modification.
+- **mypy caught two real bugs**: (a) `_text_block` returns a `TextBlock` but `_build_mock_response` parameter type was inferred as `[MagicMock]`. Added `# type: ignore[list-item]`. (b) `checkpoint.load()` returns `dict | None`; my code did `["messages"]` without checking None first. Added explicit None check returning a TrialResult instead of crashing.
+- **Canary test injection was unplanned** but turned out to be the most valuable verification step. Without it, "10/10 PASS" could just mean the assertions are too loose to ever fail. The sabotage test proves they have teeth.
+- **Module-level `agent_loop` globals() hack**: tried several approaches to inject llm_client without breaking the existing call sites. Cleanest was `llm_client = globals()["llm_client"]` when None is passed — preserves backward compat AND avoids the import cycle (loop.py already has `from loop.agent.llm import LLMClient` as the global).
+
+### Out of scope (potential follow-ups)
+
+- **f-cli-resume-end-to-end**: extend benchmark to spawn `loop run` as actual subprocess with stdin/stdout, kill -9 mid-task. Would test the CLI layer too. Today we test the harness layer (agent_loop + checkpoint). Two different layers; both deserve a canary. Today CLI layer only has `checkpoint-resume-cli-restores-history` (single trial).
+- **Production telemetry hook**: a way for real `--resume` invocations to report success/failure to a sink. Today's §6 metric is unmeasurable in production. Defer until users exist.
+
+### Working tree (this commit)
+
+- `M  loop/agent/loop.py` (llm_client injection parameter)
+- `M  loop/eval/cases/__init__.py` (register resume_benchmark)
+- `M  feature_list.json` (f-resume-success-rate-benchmark lifecycle)
+- `M  progress.md`
+- `?? loop/eval/benchmarks/__init__.py`
+- `?? loop/eval/benchmarks/resume.py`
+- `?? loop/eval/cases/resume_benchmark.py`

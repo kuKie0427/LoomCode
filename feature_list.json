@@ -207,6 +207,17 @@
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval → 'Eval results: 68/68 passed' (was 60, +8 harness-toml cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Closes 3 roadmap promises in one feature: Phase 1 §3 (per-project permission config), Phase 3 §3 ([tools] disable section), Phase 4 §5 / Q4 ([checkpoint] threshold override). Sections: [permissions] deny_patterns (replace) / deny_patterns_add (append) / rules.add (custom); [checkpoint] every_tool_calls / every_tokens; [tools.<name>] enabled = false. harness.toml at workdir root; missing file → HarnessConfig.from_defaults(); malformed TOML → ConfigError. loop init now scaffolds a commented harness.toml skeleton (741 chars). Idempotent across reruns."
+    },
+    {
+      "id": "f-resume-success-rate-benchmark",
+      "name": "Phase 5 §6 metric: 10× kill-and-restart resume benchmark",
+      "description": "Roadmap §6 'Cross-session resume success rate ≥ 90% (10× kill-and-restart)' 一直没有 metric runner。Synthetic fixture-based benchmark: scripted LLM (5 tool_use + 1 end_turn),每个 trial 在 3 个 tool call 后 snapshot + checkpoint.save,新进程加载 + 续跑 2 个 tool call + end_turn。断言:resumed LLM 第一个 call 收到 pre-kill 历史 + 最终 5 个 tool_result 全在。Synthetic proxy(canary),不是 production telemetry,但抓回归够用。",
+      "dependencies": [
+        "f-cross-session-resume-eval"
+      ],
+      "status": "done",
+      "verification": "uv run python -m loop.cli eval --fail-under 100",
+      "evidence": "uv run python -m loop.cli eval → 'Eval results: 69/69 passed' (was 68, +1 benchmark case); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Benchmark: 10/10 trials, 100% resume success, ~1.2s total. Canary property VERIFIED: injecting `messages.clear()` regression in agent_loop → benchmark flips to 0/10 (FAIL), restoring → 10/10 (PASS). Refactored agent_loop to accept llm_client parameter (backward-compat default to module-level). Caveat (documented in module docstring): synthetic fixture proxy, not production telemetry."
     }
   ]
 }

@@ -129,8 +129,10 @@ def _run_tool_turn(tool_uses, hooks):
     return results
 
 
-def agent_loop(messages: list) -> None:
+def agent_loop(messages: list, llm_client=None) -> None:
     configure_logging()
+    if llm_client is None:
+        llm_client = globals()["llm_client"]
     hooks.trigger_hooks("AgentStart")
     session_id = uuid.uuid4().hex[:12]
     trace_mod.start(WORKDIR, session_id)
