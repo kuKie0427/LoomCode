@@ -1,6 +1,5 @@
 """Unit tests for the hook module (Hooks class and HOOKS global)."""
 
-from pathlib import Path
 from unittest.mock import Mock
 
 import pytest

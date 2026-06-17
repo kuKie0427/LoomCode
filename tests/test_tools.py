@@ -1,12 +1,10 @@
 """Integration tests for all tool functions in main.py."""
 
 import subprocess
-from pathlib import Path
 
 import pytest
 
 import main
-
 
 # ── run_bash ──────────────────────────────────────────────────────────────
 

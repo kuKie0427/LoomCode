@@ -13,6 +13,11 @@ wheels/
 
 claude-code-src/
 
+# Harness reference skill (not part of the loop product)
+harness-creator/
+
+# Phase 2 will add: .minicode/
+
 MEMORY.md
 
 test.py
@@ -20,4 +25,9 @@ loop.log
 .pytest_cache/
 
 .env
+
+# Tooling caches
+.ruff_cache/
+.mypy_cache/
+
 

@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Feature List (loop project)",
+  "description": "Track feature implementation state for agent-driven development. Status transitions are restricted; 'done' is reserved for verification-passed features.",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string" },
+    "project": { "type": "string" },
+    "description": { "type": "string" },
+    "state_machine": { "type": "object" },
+    "features": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^f-[a-z0-9-]+$",
+            "description": "Unique feature identifier (e.g. f-test-framework-p0, f-harness-scaffold)"
+          },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "dependencies": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "status": {
+            "type": "string",
+            "enum": ["not-started", "in-progress", "blocked", "done"],
+            "description": "Current state. 'done' is reserved for verification-passed features."
+          },
+          "verification": {
+            "type": "string",
+            "description": "Executable command that proves the feature works. The output (or last line of it) goes in 'evidence' when status is 'done'."
+          },
+          "evidence": {
+            "type": ["string", "null"],
+            "description": "Real command + output snippet proving the feature is 'done'. Null for non-done statuses. Never 'looks correct'."
+          },
+          "blocker": {
+            "type": "string",
+            "description": "Why the feature is blocked. Required when status='blocked'."
+          }
+        },
+        "required": ["id", "name", "description", "status", "verification"],
+        "allOf": [
+          {
+            "if": { "properties": { "status": { "const": "done" } } },
+            "then": {
+              "required": ["evidence"],
+              "properties": { "evidence": { "type": "string", "minLength": 5 } }
+            }
+          },
+          {
+            "if": { "properties": { "status": { "const": "blocked" } } },
+            "then": { "required": ["blocker"] }
+          }
+        ]
+      }
+    }
+  },
+  "required": ["project", "features"]
+}

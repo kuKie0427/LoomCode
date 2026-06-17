@@ -1,7 +1,7 @@
 [project]
 name = "loop"
 version = "0.1.0"
-description = "Add your description here"
+description = "Minimal Claude-Code-like Python coding agent: agent_loop, tools, hooks, context compression, subagent delegation."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
@@ -15,8 +15,49 @@ test = [
     "pytest>=8.0",
     "pytest-mock>=3.12",
 ]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
+    "ruff>=0.6.0",
+    "mypy>=1.10.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-v --tb=short"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = [
+    "harness-creator",
+    ".venv",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "C4", "UP"]
+ignore = [
+    "E501",
+    "B008",
+]
+
+[tool.mypy]
+python_version = "3.13"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+disable_error_code = [
+    "var-annotated",
+    "operator",
+    "return-value",
+    "name-defined",
+    "typeddict-item",
+    "attr-defined",
+]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
