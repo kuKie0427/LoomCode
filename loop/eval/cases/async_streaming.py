@@ -5,7 +5,19 @@ import os
 from unittest.mock import MagicMock, patch
 
 from anthropic import AsyncAnthropic
-from anthropic.types import TextBlock, ToolUseBlock
+from anthropic.types import (
+    InputJSONDelta,
+    RawContentBlockDeltaEvent,
+    RawContentBlockStartEvent,
+    RawContentBlockStopEvent,
+    RawMessageStartEvent,
+    TextBlock,
+    ToolUseBlock,
+    Usage,
+)
+from anthropic.types import (
+    Message as AnthropicMessage,
+)
 
 from loop.agent.llm import LLMClient, StreamEvent
 from loop.eval.runner import EvalCase, EvalResult
@@ -157,6 +169,88 @@ class LLMClientStreamIterHandlesToolUse(EvalCase):
                               detail=f"tool_id: {te.tool_id!r}, expected 'tu_1'")
 
         return EvalResult(name=self.name, passed=True, detail="tool_use assembled correctly")
+
+
+# ── Case 4b: stream_iter tolerates malformed tool_use JSON ─────────────────────
+
+class LLMClientStreamIterHandlesMalformedJson(EvalCase):
+    name = "llm-client-stream-iter-handles-malformed-json"
+    description = "stream_iter falls back to empty input when tool_use JSON is malformed"
+
+    def run(self) -> EvalResult:
+        message_start = RawMessageStartEvent(
+            type="message_start",
+            message=AnthropicMessage(
+                id="msg_1", type="message", role="assistant", model="test-model",
+                content=[], stop_reason=None, stop_sequence=None,
+                usage=Usage(input_tokens=10, output_tokens=0),
+            ),
+        )
+        content_block_start = RawContentBlockStartEvent(
+            type="content_block_start",
+            index=0,
+            content_block=ToolUseBlock(
+                type="tool_use", id="tu_1", name="bash", input={},
+            ),
+        )
+        malformed_delta = RawContentBlockDeltaEvent(
+            type="content_block_delta",
+            index=0,
+            delta=InputJSONDelta(
+                type="input_json_delta",
+                partial_json='{"command": "ls"',
+            ),
+        )
+        content_block_stop = RawContentBlockStopEvent(
+            type="content_block_stop", index=0,
+        )
+
+        class _AsyncIter:
+            def __init__(self, events):
+                self._iter = iter(events)
+            def __aiter__(self):
+                return self
+            async def __anext__(self):
+                try:
+                    return next(self._iter)
+                except StopIteration as err:
+                    raise StopAsyncIteration from err
+
+        class _StreamCM:
+            def __init__(self, events):
+                self._events = events
+            async def __aenter__(self):
+                return _AsyncIter(self._events)
+            async def __aexit__(self, *_args):
+                return False
+
+        def fake_stream(**_kwargs):
+            return _StreamCM([
+                message_start, content_block_start,
+                malformed_delta, content_block_stop,
+            ])
+
+        mock_async = MagicMock()
+        mock_async.messages.stream = fake_stream
+
+        client = LLMClient("test-model")
+        client.async_client = mock_async
+
+        events = list(client.stream_iter("sys", [], []))
+
+        tool_events = [e for e in events if e.kind == "tool_use"]
+        if len(tool_events) != 1:
+            return EvalResult(name=self.name, passed=False,
+                              detail=f"Expected 1 tool_use, got {len(tool_events)}")
+        if tool_events[0].tool_input != {}:
+            return EvalResult(name=self.name, passed=False,
+                              detail=f"Expected empty dict, got {tool_events[0].tool_input!r}")
+        if tool_events[0].tool_id != "tu_1":
+            return EvalResult(name=self.name, passed=False,
+                              detail=f"tool_id lost: {tool_events[0].tool_id!r}")
+
+        return EvalResult(name=self.name, passed=True,
+                          detail="malformed JSON fell back to empty dict without crashing")
 
 
 # ── Case 5: on_text_delta callback fires per chunk ────────────────────────────

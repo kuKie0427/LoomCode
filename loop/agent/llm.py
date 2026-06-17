@@ -97,7 +97,16 @@ class LLMClient:
                             current_tool["input_json"] += delta.partial_json
                     elif event.type == "content_block_stop":
                         if current_block_type == "tool_use":
-                            parsed = json.loads(current_tool["input_json"]) if current_tool["input_json"] else {}
+                            try:
+                                parsed = json.loads(current_tool["input_json"]) if current_tool["input_json"] else {}
+                            except json.JSONDecodeError:
+                                logger.warning(
+                                    "stream_iter: malformed tool_use input JSON, falling back to empty input. "
+                                    "tool_id={} raw_len={}",
+                                    current_tool.get("id", "?"),
+                                    len(current_tool.get("input_json", "")),
+                                )
+                                parsed = {}
                             events.append(
                                 StreamEvent(
                                     kind="tool_use",
