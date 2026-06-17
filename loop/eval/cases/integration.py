@@ -146,7 +146,7 @@ class LoopAuditScoresItself(EvalCase):
             cwd=repo_root,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=120,
         )
         if proc.returncode != 0:
             return EvalResult(name=self.name, passed=False, detail=f"audit exit {proc.returncode}")

@@ -38,6 +38,8 @@ class AgentTUIApp(App):
     #status-bar { height: 1; dock: bottom; background: blue; }
     """
 
+    _main_loop: asyncio.AbstractEventLoop | None
+
     BINDINGS = [
         ("ctrl+c", "cancel_stream", "Cancel"),
         ("ctrl+d", "quit", "Quit"),
@@ -52,6 +54,7 @@ class AgentTUIApp(App):
         self.streaming_text = reactive("")
         self.tool_call_count = reactive(0)
         self._cancelled = False
+        self._main_loop = None
 
         # Wire up harness.toml config (mirrors run_repl L193)
         from loop.agent.config import load_config
@@ -89,6 +92,9 @@ class AgentTUIApp(App):
         def asker(tool_name: str, args: dict, reason: str) -> str:
             from loop.tui.screens import PermissionScreen
 
+            if self._main_loop is None:
+                logger.warning("asker called before on_mount; defaulting to deny")
+                return "deny"
             # Schedule push_screen_wait on the main loop
             future = asyncio.run_coroutine_threadsafe(
                 self.push_screen_wait(PermissionScreen(tool_name, args, reason)),
@@ -258,5 +264,7 @@ class AgentTUIApp(App):
                     logger.warning("init.sh timed out on SessionEnd")
             else:
                 logger.debug("init.sh not found, skip")
+
+        hooks._asker = hooks._default_asker
 
         self.exit()

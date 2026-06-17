@@ -30,13 +30,12 @@ ToolCallCard.tool-error {
 class ToolCallCard(Static):
     DEFAULT_CSS = _DEFAULT_CSS
 
-    state: str = "running"
-
     def __init__(self, tool_name: str, args: dict[str, Any], tool_id: str) -> None:
         super().__init__()
         self.tool_name = tool_name
         self.args = args
         self.tool_id = tool_id
+        self.state = "running"
         self.add_class("tool-running")
 
     def render(self) -> Text:
