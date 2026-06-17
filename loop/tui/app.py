@@ -39,6 +39,8 @@ class AgentTUIApp(App):
     """
 
     _main_loop: asyncio.AbstractEventLoop | None
+    streaming_text: reactive[str] = reactive("")
+    tool_call_count: reactive[int] = reactive(0)
 
     BINDINGS = [
         ("ctrl+c", "cancel_stream", "Cancel"),
@@ -51,8 +53,6 @@ class AgentTUIApp(App):
         self.resume = resume
         self.llm = LLMClient(model=model or os.getenv("MODEL") or "deepseek-v4-flash")
         self.history: list = []
-        self.streaming_text = reactive("")
-        self.tool_call_count = reactive(0)
         self._cancelled = False
         self._main_loop = None
 
@@ -134,7 +134,7 @@ class AgentTUIApp(App):
         )
 
     def on_assistant_turn_end(self, message: AssistantTurnEnd) -> None:
-        self.tool_call_count = self.tool_call_count + message.tool_calls  # type: ignore[assignment]
+        self.tool_call_count = self.tool_call_count + message.tool_calls
 
     async def on_composer_submitted(self, event: Composer.Submitted) -> None:
         user_msg = event.value.strip()
