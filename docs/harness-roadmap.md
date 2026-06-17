@@ -231,9 +231,9 @@ f-test-framework-p0 ─→ p1 ─→ p2 ─→ p3 ─→ p4 (BLOCKED)
 
 | Status | Count | Features |
 |---|---|---|
-| `done` | 5 | `f-test-framework-p0` / `p1` / `p2` / `p3`, `f-harness-scaffold` |
+| `done` | 7 | `f-test-framework-p0` / `p1` / `p2` / `p3`, `f-harness-scaffold`, `f-product-init-cmd`, `f-product-audit-cmd` |
 | `blocked` | 1 | `f-test-framework-p4` (LLM-failure fallback test) |
-| `not-started` | 6 | `f-product-init-cmd` / `f-product-audit-cmd` / `f-memory-persistence` / `f-skill-runtime` / `f-multi-agent` / `f-observability` |
+| `not-started` | 4 | `f-memory-persistence` / `f-skill-runtime` / `f-multi-agent` / `f-observability` |
 
 Current `./init.sh` exit code: **0** (smart pass-gate tolerates the one blocked feature).
 
@@ -248,11 +248,54 @@ Current `./init.sh` exit code: **0** (smart pass-gate tolerates the one blocked 
 - `init.sh` — verification runner.
 - `feature_list.schema.json` — strict schema for `feature_list.json`.
 
-## 10. Open Questions
+## 10. Decisions (resolved)
 
-1. **Phase 1 packaging** — should `loop init` / `loop audit` be a CLI subcommand or a separate PyPI package?
-2. **Skill distribution** — should skills be loaded from `.minicode/skills/` (project-local) or `~/.minicode/skills/` (user-global) or both?
-3. **Memory privacy** — when the agent reads `MEMORY.md`, should it require explicit user consent? (Default: no for own project, yes for foreign projects.)
-4. **Checkpoint granularity** — every N tool calls? Every K tokens? Tunable per project?
+All four open questions are now resolved. They are recorded here so the
+implementing agent of each phase can build to a stable contract instead
+of re-asking.
 
-These are decision points that surface during the relevant phase. They do not block Phase 0.
+### Q1 — Phase 1 packaging: **RESOLVED 2026-06-17** (Phase 1)
+
+**Decision**: `loop init` and `loop audit` are CLI subcommands of the existing `loop` project. Single `[project.scripts]` entry point, single package.
+
+**Rationale**: Discovery is simpler when project name, package name, and CLI name all match. Avoids PyPI packaging complications during a phase that is otherwise pure in-repo work.
+
+**Implementation**: `[project.scripts] loop = "loop.cli:main"` + `[build-system] hatchling` + `[tool.hatch.build.targets.wheel] packages = ["loop"]`. `uv sync` installs the entry point. `python -m loop.cli` works as a fallback.
+
+### Q2 — Skill distribution: **RESOLVED 2026-06-17**
+
+**Decision**: Both project-local `.minicode/skills/<name>/` and user-global `~/.minicode/skills/<name>/` are supported. Project-local takes priority (Python-import style: project overrides user).
+
+**Rationale**: Project-local skills are explicit, version-controlled, and shareable. User-global skills reduce duplication for personal preferences. Project-wins precedence avoids ambiguity. Mirrors how Python imports work.
+
+**Implementation contract (Phase 3)**:
+- Scan order: `.minicode/skills/` (project) → `~/.minicode/skills/` (user)
+- On name collision, project wins; log a debug message that the user-global is shadowed
+- Skill `SKILL.md` frontmatter is the metadata contract (`name` / `description` / `triggers`)
+
+### Q3 — Memory privacy: **RESOLVED 2026-06-17**
+
+**Decision**: Within the user's own project (the project containing the running agent), reading `MEMORY.md` is implicit — no consent prompt. When the agent is asked to read `MEMORY.md` in a foreign project (a project other than its active workdir), explicit user consent is required.
+
+**Rationale**: This is the default behavior humans apply to physical desks. You read your own notes freely; you knock before opening someone else's. The cost of asking once per foreign project is negligible; the cost of leaking preferences is high.
+
+**Implementation contract (Phase 2)**:
+- Detect "own project" by `Path(MEMORY.md).parent.parent` being inside `WORKDIR` (or its `.minicode/` subdirectory)
+- For foreign reads: inject a one-time `PermissionRequest` hook that pauses for explicit y/N
+- For own reads: the existing permission pipeline applies (`read_file` may still be blocked by `PreToolUse` hooks if the user added a custom rule)
+
+### Q4 — Checkpoint granularity: **RESOLVED 2026-06-17**
+
+**Decision**: Hybrid default (whichever fires first: 10 tool calls OR 5k new tokens), tunable per-project via `harness.toml`.
+
+**Rationale**: A pure tool-call count over-checks for long tool outputs and under-checks for compact, fast loops. A pure token count has the awkward property that writing the checkpoint itself consumes tokens that count toward the next checkpoint trigger. A hybrid breaks the recursion and matches the two natural axes (latency vs. context growth). Per-project tuning lets heavy-compute projects use a larger N while chatty projects use a smaller one.
+
+**Implementation contract (Phase 4)**:
+- Default in code: `CHECKPOINT_EVERY_TOOL_CALLS = 10`, `CHECKPOINT_EVERY_TOKENS = 5000`
+- `harness.toml` `[checkpoint]` section overrides: `every_tool_calls = N` and `every_tokens = K`
+- Checkpoint writes `.minicode/checkpoint.json` atomically (write to `.tmp`, rename)
+- `SessionStart` hook reads checkpoint, restores message history and tool-call ledger, then re-validates against the new session's hook set
+
+### What this section used to be
+
+When this section was titled "Open Questions", it listed the four decision points above without resolution. The decision dates, rationale, and implementation contracts now lock in the answers so the agent implementing each phase has a stable contract.

@@ -177,3 +177,20 @@ Implemented `loop audit` — Python port of `harness-creator/scripts/validate-ha
 **Phase 1 status (overall)**: 2 / 2 features done (`f-product-init-cmd` and `f-product-audit-cmd` committed in `e4393e5`). Total tests grew 70 → 126 (+56). Roadmap D2 is now resolved (Q1 packaging) and a self-audit score of 92/100 demonstrates the harness is meeting the bar set in `docs/harness-roadmap.md` success metrics (≥ 70).
 
 **f-product-audit-cmd status**: code + tests + dogfooding + cold-start verification done. **Awaiting commit** per WIP=1.
+
+---
+
+## Open Questions Resolution (2026-06-17 14:10)
+
+The 4 open questions in `docs/harness-roadmap.md::10. Open Questions` are now resolved. Roadmap section 10 is now titled "Decisions (resolved)" with the implementation contract for each.
+
+| Q | Question | Decision |
+|---|---|---|
+| Q1 | Phase 1 packaging | `loop init` / `loop audit` are subcommands of the `loop` project (single name, `[project.scripts]`) — resolved in Phase 1 |
+| Q2 | Skill distribution | Both project-local `.minicode/skills/` and user-global `~/.minicode/skills/`; project wins on conflict (Python-import style) |
+| Q3 | Memory privacy | Implicit in own project, explicit consent for foreign project reads |
+| Q4 | Checkpoint granularity | Hybrid: 10 tool calls OR 5k tokens (whichever first), tunable in `harness.toml` `[checkpoint]` section |
+
+**Status**: 4 / 4 questions resolved. Implementation contracts are in `docs/harness-roadmap.md::10. Decisions (resolved)`. Phase 2 / 3 / 4 implementation now has stable contracts to build against.
+
+**Self-audit after the change**: `uv run loop audit .` still scores 92/100. The instructions / scope false negatives remain cosmetic (the rule phrasing is the reference's; the loop project's AGENTS.md uses WIP=1 synonyms).
