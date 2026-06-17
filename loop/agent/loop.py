@@ -18,6 +18,7 @@ from loop.agent.tools import (
     TOOL_HANDLERS,
     TOOLS,
 )
+from loop.agent.user_hooks import discover_user_hooks, make_shell_callback
 from loop.memory import load_tier1, load_tier2
 from loop.skills import build_skill_index
 
@@ -186,6 +187,20 @@ def agent_loop(messages: list, llm_client=None) -> None:
 
 def run_repl(resume: bool = False) -> None:
     apply_config(load_config(WORKDIR))
+
+    # Discover and register user hook scripts from .minicode/hooks/
+    _EVENT_MAP = {
+        "session_start": "SessionStart",
+        "session_end": "SessionEnd",
+    }
+    for event_name, scripts in discover_user_hooks(WORKDIR).items():
+        hook_event = _EVENT_MAP.get(event_name, event_name)
+        for script in scripts:
+            try:
+                hooks.register_hook(hook_event, make_shell_callback(script))
+            except Exception:
+                logger.warning("Failed to register user hook {} for {}", script, hook_event)
+
     print("输入问题，回车发送。\n")
     history: list = []                                   
     if resume and checkpoint.exists(WORKDIR):

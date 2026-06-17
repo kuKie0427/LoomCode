@@ -238,6 +238,15 @@
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval --fail-under 100 → 75/75 passed (was 70/70, +5 session-hooks cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loop/agent/hooks.py (HOOKS dict +2 keys, log_hook +2 branches), loop/agent/loop.py (SessionStart/End triggers), loop/eval/cases/session_hooks.py (5 new cases), loop/eval/cases/__init__.py (register cases), tests/test_agent_loop.py (reset_hooks fixture updated for new keys)."
+    },
+    {
+      "id": "f-user-hook-discovery",
+      "name": "Phase A4: 用户 hook 脚本自动发现",
+      "description": "loop 启动时扫描 .minicode/hooks/{session_start,session_end,pre_compact,user_prompt_submit}.{sh,py},把找到的脚本作为 callback 注册到 HOOKS。脚本可执行(exit 0 = success),stdout 是空或 JSON。",
+      "dependencies": ["f-session-start-end-hooks"],
+      "status": "done",
+      "verification": "uv run python -m loop.cli eval --fail-under 100",
+      "evidence": "uv run python -m loop.cli eval --fail-under 100 → 80/80 passed (+5 user_hooks cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loop/agent/user_hooks.py (new, 54 lines, discover_user_hooks + make_shell_callback), loop/agent/loop.py (hook registration in run_repl), loop/eval/cases/user_hooks.py (5 new cases), loop/eval/cases/__init__.py (register cases), feature_list.json (new entry)."
     }
   ]
 }

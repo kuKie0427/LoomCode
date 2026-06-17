@@ -905,3 +905,35 @@ The benchmark detects the regression. It's a real canary, not a synthetic always
 | `loop/eval/cases/session_hooks.py` | New file — 5 EvalCase classes |
 | `loop/eval/cases/__init__.py` | +1 import line |
 | `tests/test_agent_loop.py` | reset_hooks fixture updated for new HOOKS keys |
+
+---
+
+## Phase A4 — f-user-hook-discovery (2026-06-17)
+
+**Session ID:** ses_12ab35431ffeAMrv60AJnX1tYw
+**Base commit:** fcb6651 (f-session-start-end-hooks)
+
+### What's Done
+
+- [x] Task 0: feature_list.json — added `f-user-hook-discovery` entry (status: in-progress → done)
+- [x] Task 1: Created `loop/agent/user_hooks.py` with `discover_user_hooks()` and `make_shell_callback()`
+- [x] Task 2: Integrated user hook discovery + registration into `run_repl` in `loop/agent/loop.py` (after `apply_config`)
+- [x] Task 3: Created 5 eval cases in `loop/eval/cases/user_hooks.py` (discovery empty, finds .sh, finds .py, skips non-executable, callback runs script)
+- [x] Task 4: Registered new eval cases in `__init__.py`
+
+### Verification
+
+- `uv run python -m loop.cli eval --fail-under 100` → **80/80 passed** (+5 user_hooks cases)
+- `./init.sh` → **225 passed**, 0 ruff, 0 mypy
+- `feature_list.json` `f-user-hook-discovery` = `done` + evidence
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `feature_list.json` | +9 lines — new feature entry, status→done |
+| `loop/agent/user_hooks.py` | New file — 54 lines, discover_user_hooks + make_shell_callback |
+| `loop/agent/loop.py` | +1 import (user_hooks), +12 lines hook registration in run_repl |
+| `loop/eval/cases/user_hooks.py` | New file — 166 lines, 5 EvalCase classes |
+| `loop/eval/cases/__init__.py` | +1 import line |
+| `progress.md` | This section |
