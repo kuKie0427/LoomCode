@@ -67,6 +67,10 @@ def _build_parser() -> argparse.ArgumentParser:
     run_p = sub.add_parser("run", help="Run the loop coding agent REPL")
     run_p.add_argument("--resume", action="store_true", help="Resume from checkpoint if present")
 
+    tui_p = sub.add_parser("tui", help="Launch the Textual TUI")
+    tui_p.add_argument("--resume", action="store_true", help="Resume from checkpoint")
+    tui_p.add_argument("--model", default=None, help="Override LLM model")
+
     trace_p = sub.add_parser("trace", help="Inspect the structured agent trace (.minicode/trace.jsonl)")
     trace_sub = trace_p.add_subparsers(dest="trace_command", required=True)
     trace_show = trace_sub.add_parser("show", help="Show recent trace events")
@@ -130,6 +134,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "run":
         run_repl(resume=args.resume)
+        return 0
+
+    if args.command == "tui":
+        from loop.tui.app import AgentTUIApp
+        AgentTUIApp(resume=args.resume, model=args.model).run()
         return 0
 
     if args.command == "trace":

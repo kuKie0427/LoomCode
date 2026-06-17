@@ -330,9 +330,9 @@
       "name": "Phase F2: Textual TUI app + 6 斜杠命令",
       "description": "添加 textual>=0.85.0 + pytest-textual-snapshot 依赖;loop/tui/ 新包 (app.py / chat_log.py / composer.py / status_bar.py / commands.py / screens.py / widgets.py);loop tui 子命令;6 斜杠命令 (/help /clear /model /quit /resume /status);AgentTUIApp 通过 F1 callbacks 订阅流式事件;MarkdownStream 真正接流式 token 渲染。",
       "dependencies": ["f-async-streaming-llm"],
-      "status": "not-started",
+      "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
-      "evidence": null
+      "evidence": "uv run python -m loop.cli eval --fail-under 100 → 125/125 passed; ./init.sh → 226 pytest passed, 0 ruff, 0 mypy"
     },
     {
       "id": "f-tui-permission-modal",

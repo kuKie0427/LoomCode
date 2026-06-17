@@ -1512,3 +1512,54 @@ Phase F1 implemented async streaming LLM support with callback system:
 
 新 session 加载 `.sisyphus/plans/loop-pf2.md` → 选 F2 → 实现 Textual TUI app + 6 斜杠命令 + post_message 桥接 + apply_config 集成 + asyncio.run 包装 pilot test。
 
+
+## Session: F2 交付 — Phase F2 Textual TUI + post_message + lifecycle 桥接
+
+**Goal**: Implement Phase F2 — Textual TUI app with streaming, tool cards, and lifecycle hooks.
+
+### F2 交付状态
+- Commit: (pending)
+- 11 files changed/created
+- `loop eval` → 125/125 passed (120 + 5)
+- `./init.sh` → 226 pytest passed, 0 ruff, 0 mypy
+- `feature_list.json` 中 `f-tui-textual-app` = `done` + evidence
+
+### 实现内容
+
+| # | 文件 | 行数 | 说明 |
+|---|---|---|---|
+| 1 | `pyproject.toml` | +2 | textual>=0.85.0 + pytest-textual-snapshot>=0.4.0 |
+| 2 | `loop/tui/__init__.py` | 1 | 空文件 |
+| 3 | `loop/tui/messages.py` | 62 | 6 个 Message 子类 (post_message 桥接) |
+| 4 | `loop/tui/app.py` | 235 | AgentTUIApp 主类 (apply_config + SessionEnd) |
+| 5 | `loop/tui/chat_log.py` | 63 | ChatLog widget (Markdown + asyncio.create_task) |
+| 6 | `loop/tui/composer.py` | 22 | Composer widget (Input + Submitted) |
+| 7 | `loop/tui/status_bar.py` | 12 | StatusBar widget (Static + render) |
+| 8 | `loop/cli.py` | +9 | `loop tui` subcommand |
+| 9 | `loop/eval/cases/tui_app.py` | 200 | 5 个 eval case |
+| 10 | `loop/eval/cases/__init__.py` | +1 | register tui_app |
+
+### 关键设计决策
+
+1. **post_message 模式**: 6 个 callback 全部用 `self.post_message(MyMessage(...))` 跨线程
+2. **inline commands**: 6 个斜杠命令直接在 app.py 实现 (简化 F2)
+3. **asyncio.ensure_future**: 用于 Markdown.append() 异步调用
+4. **@work decorator**: 从 `textual` 模块导入 (不是 `textual.work`)
+
+### 修复的问题
+
+- mypy error: `await _turn()` → `_turn()` (Worker 不是 awaitable)
+- import error: `from textual.work import work` → `from textual import work`
+
+### Exit Gate 状态
+
+- [x] `uv run python -m loop.cli eval --fail-under 100` → 125/125 passed
+- [x] `./init.sh` → 226 pytest passed, 0 ruff, 0 mypy
+- [x] `uv run python -m loop.cli tui --help` → usage output
+- [x] `feature_list.json` 中 `f-tui-textual-app` = `done` + evidence
+- [x] `feature_list.json` 中 `f-tui-permission-modal` 仍为 `not-started`
+- [x] `progress.md` 追加本 phase 段
+
+### 后续
+
+新 session 加载 `.sisyphus/plans/loop-pf3.md` → 选 F3 → 实现 PermissionScreen Modal + ToolCallCard 卡片。
