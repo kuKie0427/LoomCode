@@ -1201,3 +1201,52 @@ E3 review 时:
 - `M  feature_list.json` (f-loop-call-depth-guard)
 - `M  progress.md`
 - `?? loop/eval/cases/loop_call_depth.py`
+
+## Session: f-scope-wip1-enforcement (5/5 harness subsystem complete)
+
+**Goal**: 关闭 5 子系统最后 1/5 — Scope 子系统机器强制 WIP=1(roadmap §3 "WIP=1 + dependency graph + DoD")。warn-only 设计,跟 SessionEnd init.sh 一致。
+
+### Done
+
+- **New `loop/agent/scope.py`** (~30 LOC): `check_wip1(workdir) -> list[str]`。读 `feature_list.json`,数 in-progress,>1 时 `logger.warning` 列出所有 in-progress id。静默处理 missing/malformed file(不崩 CLI)。
+- **`loop/cli.py`**: `main()` 入口在 `LOOP_CALL_DEPTH` guard 之后、`parse_args` 之前,加 `check_wip1(Path.cwd())`。
+- **New `loop/eval/cases/scope_wip1.py`** (5 case):
+  - silent-on-missing-feature-list
+  - silent-on-zero-in-progress
+  - silent-on-one-in-progress
+  - warns-on-multiple-in-progress(loguru StringIO capture,验证 warning 含 f-a + f-b)
+  - cli-invocation-warns(end-to-end subprocess)
+- **`loop/eval/cases/__init__.py`**: 注册 scope_wip1
+
+### Verification
+
+```
+$ uv run python -m loop.cli eval --fail-under 100
+Eval results: 106/106 passed
+# 3 consecutive runs all green
+$ ./init.sh
+============================= 226 pytest passed, 0 ruff, 0 mypy ==============================
+=== Verification Complete (all green) ===
+```
+
+### Decisions
+
+- **warn-only,不 exit**:跟 `f-session-end-mandatory-init-sh` 设计哲学一致。理由:紧急 override 是真实需求(做 f-A,f-B 突然 blocker,要 pause A 切 B)。WIP=1 是指南,机器强制 = 大声警告,不阻塞。
+- **触发点:`main()` 入口一次**:所有 subcommand(init/audit/eval/run/trace)都经过 main → 自然每 CLI 一次。`loop eval` 内部多次 subprocess 也每次触发一次(fire 3 次 OK,cheap)。
+- **读 `Path.cwd()` 不是 `args.target`**:WIP=1 是给"在 loop repo 上做开发的人",不是给"评估别人项目的人"。跑 `loop audit /tmp/xxx` 时 CWD=loop repo,check_wip1 读 loop repo 的 feature_list(我们当前 27 done),不 warn。**这是对的**。
+
+### Debug 中遇到的小坑
+
+- **subprocess cwd 继承**:`loop.cli audit <wd>` 跑出来,子进程 `Path.cwd()` 是 subprocess.run 的 `cwd` 参数(不是 `args.target`)。**case 5 必须传 `cwd=str(wd)`**,否则 check_wip1 读父进程(loop repo)的 feature_list.json,误判不 warn。**这是 case bug 不是产品 bug,但 review 时要分清**。
+- **loguru logger 配置**:loguru 默认 sink 是 stderr,handler id=0。`loop.cli` import 不触发 `logger.remove`(只在 `agent_loop()` 函数体内调),所以默认 sink 仍工作。第一次 fail 误以为 logger 不工作,实际是 subprocess cwd 问题。
+- **stdout 截断误导**:之前 case 失败时我只看了 stdout first 1000,以为没 warning。改看完整 stdout + stderr 后才发现是 cwd 问题,不是 logger 问题。**review 必须看完整输出,不能截断**。
+
+### Working tree (this commit)
+
+- `M  loop/cli.py` (check_wip1 call)
+- `M  loop/eval/cases/__init__.py` (register)
+- `M  feature_list.json` (f-scope-wip1-enforcement done)
+- `M  progress.md`
+- `?? loop/agent/scope.py`
+- `?? loop/eval/cases/scope_wip1.py`
+- `?? .sisyphus/plans/scope-wip1-enforcement.md`

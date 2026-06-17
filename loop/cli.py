@@ -94,6 +94,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     os.environ["LOOP_CALL_DEPTH"] = str(depth + 1)
 
+    from loop.agent.scope import check_wip1
+    check_wip1(Path.cwd())
+
     parser = _build_parser()
     args = parser.parse_args(argv)
 

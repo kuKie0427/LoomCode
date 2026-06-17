@@ -306,6 +306,15 @@
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100 (3 consecutive runs)",
       "evidence": "uv run python -m loop.cli eval → 101/101 passed (3 consecutive runs, no OOM); ./init.sh → 226 pytest passed, 0 ruff, 0 mypy. Fix: 1) loop/eval/cases/audit.py — 4 case 加 --skip-self-test --min-score 0;2) loop/cli.py — _MAX_LOOP_CALL_DEPTH=3,depth guard in main() before parse_args,env var LOOP_CALL_DEPTH auto-increments;3) 3 new eval cases in loop/eval/cases/loop_call_depth.py — depth-enforced-at-max (LOOP_CALL_DEPTH=3 → rc=1), depth-increments-across-calls (parent=1, child=1), depth-allows-normal-call (rc=0)."
+    },
+    {
+      "id": "f-scope-wip1-enforcement",
+      "name": "Scope 子系统: WIP=1 机器强制 (warn-only)",
+      "description": "loop/cli.py 启动时读 feature_list.json,数 in-progress 数量,>1 时 logger.warning 列出所有 in-progress id。warn-only (不 exit),跟 SessionEnd init.sh 设计一致(允许紧急 override)。不读 user harness(只读 project 的 feature_list.json)。关闭 5 子系统最后 1/5。",
+      "dependencies": [],
+      "status": "done",
+      "verification": "uv run python -m loop.cli eval --fail-under 100",
+      "evidence": "uv run python -m loop.cli eval → 'Eval results: 106/106 passed' (3 consecutive runs); ./init.sh → 226 pytest passed, 0 ruff, 0 mypy. loop/agent/scope.py:check_wip1(workdir) returns in-progress ids + warns at >1. loop/cli.py main(): calls check_wip1(Path.cwd()) after depth guard, before parse_args. 5 new eval cases: silent-on-missing, silent-on-zero, silent-on-one, warns-on-multiple (loguru capture), cli-invocation-warns (subprocess end-to-end). Closes 5/5 harness 5-subsystem scope (warn-only design matches SessionEnd init.sh). Edge case caught: case needed subprocess.run(cwd=str(wd)) so Path.cwd() in child process is wd, not the loop repo."
     }
   ]
 }

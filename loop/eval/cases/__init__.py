@@ -15,6 +15,7 @@ from loop.eval.cases import (
     phase5_coverage,  # noqa: F401
     pre_compact_hook,  # noqa: F401
     resume_benchmark,  # noqa: F401
+    scope_wip1,  # noqa: F401
     session_hooks,  # noqa: F401
     telemetry_sink,  # noqa: F401
     user_hooks,  # noqa: F401
