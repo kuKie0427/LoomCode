@@ -11,4 +11,5 @@ from loop.eval.cases import (
     permission_unify,  # noqa: F401
     phase5_coverage,  # noqa: F401
     resume_benchmark,  # noqa: F401
+    session_hooks,  # noqa: F401
 )

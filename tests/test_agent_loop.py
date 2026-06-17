@@ -15,7 +15,7 @@ from loop.agent.hooks import Hooks
 def reset_hooks():
     """Reset HOOKS and main.hooks before each test."""
     hook.HOOKS.clear()
-    for event in ("AgentStart", "PreToolUse", "PostToolUse", "AgentStop"):
+    for event in ("SessionStart", "AgentStart", "PreToolUse", "PostToolUse", "AgentStop", "SessionEnd"):
         hook.HOOKS[event] = []
     main.hooks = Hooks()
     main.hooks.register_hook("PreToolUse", main.hooks.check_permission_hook)
@@ -114,7 +114,7 @@ class TestAgentLoopToolUse:
     def test_agent_loop_tool_use_blocked(self, mocker):
         """PreToolUse blocks tool → tool_result has Permission denied."""
         hook.HOOKS.clear()
-        for event in ("AgentStart", "PreToolUse", "PostToolUse", "AgentStop"):
+        for event in ("SessionStart", "AgentStart", "PreToolUse", "PostToolUse", "AgentStop", "SessionEnd"):
             hook.HOOKS[event] = []
         main.hooks = Hooks()
 

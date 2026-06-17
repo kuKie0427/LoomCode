@@ -16,7 +16,7 @@ def _rule_to_dict(rule) -> dict:
 
 PERMISSION_RULES = [_rule_to_dict(r) for r in DEFAULT_POLICY.rules]
 
-HOOKS = {"AgentStart": [], "PreToolUse": [], "PostToolUse": [], "AgentStop": []}
+HOOKS = {"SessionStart": [], "AgentStart": [], "PreToolUse": [], "PostToolUse": [], "AgentStop": [], "SessionEnd": []}
 HOOKS_LOCK = threading.Lock()
 
 
@@ -70,6 +70,11 @@ class Hooks:
             logger.info("[Agent spawned]")
         elif event == "AgentStop":
             logger.info("[Agent done]")
+        elif event == "SessionStart":
+            logger.info("[Session started]")
+        elif event == "SessionEnd":
+            messages, tool_call_count = args
+            logger.info(f"[Session ended: {tool_call_count} tool calls, {len(messages)} messages]")
         return None
 
     def _check_deny_list(self, command: str) -> str | None:

@@ -870,3 +870,38 @@ The benchmark detects the regression. It's a real canary, not a synthetic always
 - `?? loop/eval/cases/eval_benchmark_cli.py`
 - `M  AGENTS.md`
 - `M  progress.md`
+
+---
+
+## Phase A1 — f-session-start-end-hooks (2026-06-17)
+
+**Session ID:** ses_12aca0fbeffeIeerBw4nFa8NEC
+**Base commit:** d2f6aaa (f-user-side-resume-benchmark)
+
+### What's Done
+
+- [x] Task 0: feature_list.json — added `f-session-start-end-hooks` entry (status: in-progress → done)
+- [x] Task 1: HOOKS dict extended with SessionStart (first) and SessionEnd (last) keys
+- [x] Task 2: log_hook added elif branches for SessionStart (`[Session started]`) and SessionEnd (`[Session ended: N tool calls, M messages]`)
+- [x] Task 3: agent_loop calls `hooks.trigger_hooks("SessionStart")` after configure_logging(), before AgentStart
+- [x] Task 4: run_repl calls `hooks.trigger_hooks("SessionEnd", history, 0)` after while loop exits
+- [x] Task 5: Created 5 eval cases in `loop/eval/cases/session_hooks.py`
+- [x] Task 6: Registered new eval cases in `__init__.py`
+- [x] Fixed: `tests/test_agent_loop.py` reset_hooks fixture to include SessionStart/SessionEnd keys
+
+### Verification
+
+- `uv run python -m loop.cli eval --fail-under 100` → **75/75 passed** (+5 session hooks cases)
+- `./init.sh` → **225 passed**, 0 ruff, 0 mypy
+- `feature_list.json` `f-session-start-end-hooks` = `done` + evidence
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `feature_list.json` | +9 lines — new feature entry, status→done |
+| `loop/agent/hooks.py` | HOOKS dict +2 keys, log_hook +2 branches |
+| `loop/agent/loop.py` | agent_loop +SessionStart, run_repl +SessionEnd |
+| `loop/eval/cases/session_hooks.py` | New file — 5 EvalCase classes |
+| `loop/eval/cases/__init__.py` | +1 import line |
+| `tests/test_agent_loop.py` | reset_hooks fixture updated for new HOOKS keys |

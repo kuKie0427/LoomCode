@@ -229,6 +229,15 @@
       "status": "done",
       "verification": "uv run python -m loop.cli eval --benchmark resume --fail-under 100",
       "evidence": "uv run python -m loop.cli eval --fail-under 100 → 70/70 passed (+1 eval case); uv run python -m loop.cli eval --benchmark resume → 'benchmark: resume 10/10 (100%)', exit 0; ./init.sh 'all green'. Changes: loop/cli.py (--benchmark flag + env var), loop/eval/__init__.py (benchmark dispatch), loop/eval/cases/eval_benchmark_cli.py (CLI eval case), loop/eval/cases/__init__.py (register case), AGENTS.md (quick start line)."
+    },
+    {
+      "id": "f-session-start-end-hooks",
+      "name": "Phase A1: SessionStart / SessionEnd 事件触发点",
+      "description": "在 loop.agent.hooks 加 SessionStart 和 SessionEnd 事件。HOOKS dict 加 2 个 key。agent_loop 启动时 trigger_hooks('SessionStart')。run_repl 退出(exit/EOF/Ctrl-C)时 trigger_hooks('SessionEnd', messages, tool_call_count)。不实现 user hook 脚本发现(那是 A4)。本 phase 只接骨架。",
+      "dependencies": ["f-user-side-resume-benchmark"],
+      "status": "done",
+      "verification": "uv run python -m loop.cli eval --fail-under 100",
+      "evidence": "uv run python -m loop.cli eval --fail-under 100 → 75/75 passed (was 70/70, +5 session-hooks cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loop/agent/hooks.py (HOOKS dict +2 keys, log_hook +2 branches), loop/agent/loop.py (SessionStart/End triggers), loop/eval/cases/session_hooks.py (5 new cases), loop/eval/cases/__init__.py (register cases), tests/test_agent_loop.py (reset_hooks fixture updated for new keys)."
     }
   ]
 }

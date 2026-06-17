@@ -131,6 +131,7 @@ def _run_tool_turn(tool_uses, hooks):
 
 def agent_loop(messages: list, llm_client=None) -> None:
     configure_logging()
+    hooks.trigger_hooks("SessionStart")
     if llm_client is None:
         llm_client = globals()["llm_client"]
     hooks.trigger_hooks("AgentStart")
@@ -209,3 +210,5 @@ def run_repl(resume: bool = False) -> None:
                 if getattr(block, "type", None) == "text":
                     print(block.text)
         print()
+    hooks.trigger_hooks("SessionEnd", history, 0)
+
