@@ -16,7 +16,7 @@ def _rule_to_dict(rule) -> dict:
 
 PERMISSION_RULES = [_rule_to_dict(r) for r in DEFAULT_POLICY.rules]
 
-HOOKS = {"SessionStart": [], "AgentStart": [], "PreToolUse": [], "PostToolUse": [], "AgentStop": [], "SessionEnd": []}
+HOOKS = {"SessionStart": [], "AgentStart": [], "PreToolUse": [], "PostToolUse": [], "PreCompact": [], "AgentStop": [], "SessionEnd": []}
 HOOKS_LOCK = threading.Lock()
 
 
@@ -70,6 +70,9 @@ class Hooks:
             logger.info("[Agent spawned]")
         elif event == "AgentStop":
             logger.info("[Agent done]")
+        elif event == "PreCompact":
+            messages, last_input_tokens = args
+            logger.info(f"[PreCompact: {len(messages)} messages, {last_input_tokens} tokens]")
         elif event == "SessionStart":
             logger.info("[Session started]")
         elif event == "SessionEnd":

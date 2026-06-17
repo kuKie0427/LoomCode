@@ -146,6 +146,7 @@ def agent_loop(messages: list, llm_client=None) -> None:
     tokens_at_last_checkpoint = context.current_tokens(messages)
     while True:
         if context.should_compact(messages, llm_client.get_context_window()):
+            hooks.trigger_hooks("PreCompact", messages, context.last_input_tokens)
             context.autocompact(messages, llm_client.client, llm_client.model, llm_client.get_context_window())
             if tr is not None:
                 tr.record("autocompact", tool_calls_so_far=tool_call_count)

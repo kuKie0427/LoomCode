@@ -256,6 +256,15 @@
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval --fail-under 100 → 84/84 passed (+4 init_sh_session_end cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loop/agent/config.py (run_init_sh_on_session_end bool), loop/agent/loop.py (init.sh handler at SessionEnd, warn-only), loop/eval/cases/init_sh_session_end.py (4 new cases). Design: warn-only, does NOT affect loop run exit code, default True, opt-out via HarnessConfig."
+    },
+    {
+      "id": "f-pre-compact-hook",
+      "name": "Phase A2: PreCompact hook — 压缩前用户能干预",
+      "description": "autocompact 触发前 trigger_hooks('PreCompact', messages, last_input_tokens),让用户能写 .minicode/hooks/pre_compact.sh 在压缩前注入\"这段要保留\"或\"这段删掉\"(通过 stdout JSON)。不在本 phase 实现 stdout 解析(只触发 + 留口子)。",
+      "dependencies": ["f-session-end-mandatory-init-sh"],
+      "status": "done",
+      "verification": "uv run python -m loop.cli eval --fail-under 100",
+      "evidence": "uv run python -m loop.cli eval --fail-under 100 → 88/88 passed (+4 pre_compact_hook cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loop/agent/hooks.py (HOOKS dict +PreCompact key, log_hook +PreCompact branch), loop/agent/loop.py (PreCompact trigger before autocompact), loop/eval/cases/pre_compact_hook.py (4 new cases)."
     }
   ]
 }

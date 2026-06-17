@@ -940,6 +940,42 @@ The benchmark detects the regression. It's a real canary, not a synthetic always
 
 ---
 
+## Phase A2 — f-pre-compact-hook (2026-06-17)
+
+**Base commit:** e1379b5 (f-session-end-mandatory-init-sh)
+
+### What's Done
+
+- [x] Task 0: feature_list.json — added `f-pre-compact-hook` entry (status: in-progress → done)
+- [x] Task 1: HOOKS dict extended with `PreCompact` key (between PostToolUse and AgentStop)
+- [x] Task 2: log_hook added elif branch for PreCompact (`[PreCompact: N messages, M tokens]`)
+- [x] Task 3: agent_loop fires `hooks.trigger_hooks("PreCompact", messages, context.last_input_tokens)` before `context.autocompact(...)`
+- [x] Task 4: Already done — `pre_compact` already in HOOK_EVENTS (from f-user-hook-discovery Phase A4)
+- [x] Task 5: Created 4 eval cases in `loop/eval/cases/pre_compact_hook.py`
+  - `pre-compact-event-key-in-hooks-dict` — HOOKS dict has PreCompact key between PostToolUse and AgentStop
+  - `pre-compact-trigger-runs-callbacks` — registered callback invoked once on trigger
+  - `pre-compact-callback-receives-args` — callback receives messages + last_input_tokens
+  - `pre-compact-fires-before-autocompact` — PreCompact fires before autocompact in call order
+- [x] Task 6: Registered new eval cases in `__init__.py`
+
+### Verification
+
+- `uv run python -m loop.cli eval --fail-under 100` → **88/88 passed** (+4 pre_compact_hook cases, was 84)
+- `./init.sh` → **225 passed**, 0 ruff, 0 mypy
+- `feature_list.json` `f-pre-compact-hook` = `done` + evidence
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `feature_list.json` | +9 lines — new feature entry, status→done |
+| `loop/agent/hooks.py` | HOOKS dict +1 key (`PreCompact`), log_hook +1 branch |
+| `loop/agent/loop.py` | +1 line — PreCompact trigger before autocompact |
+| `loop/eval/cases/pre_compact_hook.py` | New file — 208 lines, 4 EvalCase classes |
+| `loop/eval/cases/__init__.py` | +1 import line |
+
+---
+
 ## Phase A3 — f-session-end-mandatory-init-sh (2026-06-17)
 
 **Session ID:** ses_12aa3ea6cffeOQOgOw1eHD8pJb
