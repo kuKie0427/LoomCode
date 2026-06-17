@@ -143,17 +143,6 @@
       "evidence": "160/0 tests pass. init.sh 'all green'. loop audit 92/100. loop --help shows init/audit/run. Renames tracked by git (R status)."
     },
     {
-      "id": "f-skill-runtime",
-      "name": "Phase 3: Skill Runtime + Tool Registry",
-      "description": ".minicode/skills/<name>/SKILL.md 目录约定 + SKILL.md frontmatter 解析 + load_skill 工具 + ToolRegistry 类 (含 is_read_only / is_concurrent_safe / enable/disable) + Q2 项目覆盖用户全局实现。",
-      "dependencies": [
-        "f-architecture-unify"
-      ],
-      "status": "in-progress",
-      "verification": "uv run pytest tests/test_skills.py tests/test_tool_registry.py -v && echo 'body content' > /tmp/x/.minicode/skills/demo/SKILL.md && uv run loop audit .",
-      "evidence": null
-    },
-    {
       "id": "f-observability",
       "name": "Phase 5: Observability + Eval 套件",
       "description": "结构化 .minicode/trace.jsonl + 30+ eval cases (10 来自 harness-creator 基线 + 20 产品专属) + HTML 报告 + review→rule 闭环 + ablation 实验。",
@@ -163,6 +152,17 @@
       "status": "done",
       "verification": "uv run python -m loop eval --html /tmp/eval.html && test -f /tmp/eval.html",
       "evidence": "uv run python -m loop.cli eval --html /tmp/eval.html → 'Eval results: 32/32 passed', HTML report written (4218 bytes); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy"
+    },
+    {
+      "id": "f-ci-integration",
+      "name": "Phase 5 closure: CI 跑 init.sh + eval + audit",
+      "description": ".github/workflows/ci.yml: push/PR 时跑 ./init.sh + loop eval --fail-under 100 + loop audit .。Phase 5 §4 acceptance 明文要求 'Eval pass rate + 5-dimension score + structural smoke all show up in CI'。",
+      "dependencies": [
+        "f-observability"
+      ],
+      "status": "done",
+      "verification": "test -f .github/workflows/ci.yml && uv run python -m loop.cli eval --fail-under 100 && uv run python -m loop.cli audit . > /tmp/audit.txt",
+      "evidence": "./init.sh → 225 pytest passed, 0 ruff, 0 mypy; uv run python -m loop.cli eval → 'Eval results: 37/37 passed' (5 new CI cases); uv run python -m loop.cli audit . → 'Overall: 92/100, Bottleneck: instructions'; .github/workflows/ci.yml: 893 chars, ./init.sh + loop eval --fail-under 100 + loop audit, triggers on push + pull_request to main, uploads audit report as artifact."
     }
   ]
 }

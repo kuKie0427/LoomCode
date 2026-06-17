@@ -493,3 +493,45 @@ Modified files (not yet committed):
 ### Next
 
 - Awaiting user OK to commit (`feat: f-observability structured trace + eval runner`).
+
+## Session: f-ci-integration (Phase 5 closure)
+
+**Goal**: ship the missing CI gate Phase 5 §4 promised ("Eval pass rate + 5-dimension score + structural smoke all show up in CI").
+
+### Done
+
+- **`.github/workflows/ci.yml`** (893 chars): trigger on push + pull_request to main. Jobs: sync deps → `./init.sh` → `loop eval --fail-under 100` → `loop audit .` → upload audit report as artifact. Uses `astral-sh/setup-uv@v4` for uv cache.
+- **5 new eval cases** in `loop/eval/cases/ci.py` that verify the workflow file exists, wires `./init.sh`, runs eval with `--fail-under`, runs audit, and triggers on push + PR. These are meta-tests — they fail loudly if someone deletes or breaks the CI gate.
+- **Cleanup**: removed duplicate `f-skill-runtime` entry from `feature_list.json`. Down to 13 features.
+
+### Verification
+
+```
+$ ./init.sh
+============================= 225 passed in 0.74s ==============================
+=== Verification Complete (all green) ===
+
+$ uv run python -m loop.cli eval
+Eval results: 37/37 passed
+
+$ uv run python -m loop.cli audit .
+Overall: 92/100, Bottleneck: instructions
+```
+
+### Decisions
+
+- **CI does `./init.sh` first, then `loop eval` separately.** `./init.sh` is the canonical verification per AGENTS.md; `loop eval` is the Phase 5 product regression net. Running both catches both unit and product regressions.
+- **`continue-on-error: true` on the audit step.** Audit scores a project 0-100; sub-70 isn't a build breaker — it should be tracked over time, not block PRs. The artifact upload (`if: always()`) keeps every PR's audit report in GitHub Actions history regardless.
+- **Eval cases for the CI file itself.** The 5 `ci-*` cases are structural guards: if someone deletes `ci.yml`, removes `./init.sh` from it, or drops `--fail-under`, the eval suite goes red. The eval suite is the regression net for product behavior — CI is product behavior.
+
+### Data bug surfaced (not fixed in this commit)
+
+- `f-skill-runtime` in `feature_list.json` is marked `not-started`, but commit `a986aee feat: f-skill-runtime — Phase 3 skill index + load_skill tool + ToolRegistry` shipped it; `tests/test_skills.py` + `tests/test_tool_registry.py` = 25 tests pass; files exist (`loop/skills/`, `loop/agent/tool_registry.py`). The status is stale; per AGENTS.md rule 6 ("No self-declared passing"), I'm not unilaterally flipping it. Worth a user-OK'd bookkeeping fix in the next commit.
+
+### Working tree (this commit)
+
+- `M  feature_list.json` (f-skill-runtime dedup + f-ci-integration lifecycle)
+- `M  progress.md`
+- `M  loop/eval/cases/__init__.py` (register `ci`)
+- `?? .github/workflows/ci.yml`
+- `?? loop/eval/cases/ci.py`

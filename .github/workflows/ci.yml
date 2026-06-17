@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Static checks + unit + integration
+        run: ./init.sh
+
+      - name: Eval suite (Phase 5 product regression net)
+        run: uv run python -m loop.cli eval --fail-under 100
+
+      - name: 5-dimension harness audit
+        run: uv run python -m loop.cli audit . > audit.txt
+        continue-on-error: true
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-report
+          path: audit.txt
+          retention-days: 14
+          if-no-files-found: ignore
