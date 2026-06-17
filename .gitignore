@@ -16,7 +16,8 @@ claude-code-src/
 # Harness reference skill (not part of the loop product)
 harness-creator/
 
-# Phase 2 will add: .minicode/
+# Phase 2: .minicode/ contains runtime data (memory, mailboxes, traces, checkpoints)
+.minicode/
 
 MEMORY.md
 

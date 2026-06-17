@@ -1,15 +1,17 @@
 import os
 import subprocess
-import dotenv
 from pathlib import Path
+
+import dotenv
 from anthropic.types import MessageParam, ToolParam
 from loguru import logger
 
+from context import Context
+from hook import Hooks
+from loop.memory import MemoryStore, load_tier1, load_tier2
 from models import LLMClient
 from prompt import SystemPrompt
-from hook import Hooks
-from context import Context
-    
+
 dotenv.load_dotenv()
 WORKDIR = Path.cwd()
 
@@ -37,6 +39,11 @@ system_prompt.add_static("语言风格：简洁、直接、无废话。")
 
 system_prompt.add_dynamic(f"工作目录: {WORKDIR}")
 system_prompt.add_dynamic(system_prompt.get_git_context(WORKDIR))
+
+memory_tier1 = load_tier1(WORKDIR)
+memory_tier2 = load_tier2(WORKDIR)
+if memory_tier1 or memory_tier2:
+    system_prompt.add_memory(memory_tier1 + ("\n\n" if memory_tier1 and memory_tier2 else "") + memory_tier2)
 
 SYSTEM = system_prompt.build()
 
@@ -145,6 +152,25 @@ def run_todo_write(todos: list) -> str:
 
 
 
+def run_memory_read() -> str:
+    store = MemoryStore(WORKDIR)
+    return store.read()
+
+def run_memory_search(query: str) -> str:
+    store = MemoryStore(WORKDIR)
+    matches = store.search(query)
+    if not matches:
+        return f"(no matches for {query!r})"
+    return "\n".join(matches)
+
+def run_memory_write(entry: str, heading: str | None = None) -> str:
+    store = MemoryStore(WORKDIR)
+    try:
+        store.append(entry, heading=heading)
+    except ValueError as e:
+        return f"Memory cap exceeded: {e}"
+    return f"Appended {len(entry)} chars to MEMORY.md"
+
 TOOLS:list[ToolParam]= [
     {"name": "bash", "description": "Run a shell command.",
      "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
@@ -158,11 +184,18 @@ TOOLS:list[ToolParam]= [
      "input_schema": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}},
     {"name": "todo_write", "description": "Create and manage a task list for your current coding session.",
      "input_schema": {"type": "object", "properties": {"todos": {"type": "array", "items": {"type": "object", "properties": {"content": {"type": "string"}, "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]}}, "required": ["content", "status"]}}}, "required": ["todos"]}},
+    {"name": "memory_read", "description": "Read the project's MEMORY.md (long-term cross-session memory).",
+     "input_schema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "memory_search", "description": "Search MEMORY.md for lines containing the query (case-insensitive).",
+     "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+    {"name": "memory_write", "description": "Append a dated entry to MEMORY.md.",
+     "input_schema": {"type": "object", "properties": {"entry": {"type": "string"}, "heading": {"type": "string"}}, "required": ["entry"]}},
 ]
 
 TOOL_HANDLERS = {
     "bash": run_bash, "read_file": run_read, "write_file": run_write,
     "edit_file": run_edit, "glob": run_glob,
+    "memory_read": run_memory_read, "memory_search": run_memory_search, "memory_write": run_memory_write,
 }
 
 SUB_TOOLS:list[ToolParam] = [
@@ -243,7 +276,7 @@ def agent_loop(messages: list):
 
         is_compact_needed = context.should_compact(messages,llm_client.get_context_window())  # 压缩检查
         if is_compact_needed:
-            pass
+            context.autocompact(messages, llm_client.client, llm_client.model, llm_client.get_context_window())
         response = llm_client.client.messages.create(
             model=llm_client.model, system=SYSTEM, messages=messages,
             tools=TOOLS, max_tokens=8000,
@@ -277,7 +310,7 @@ def agent_loop(messages: list):
 
 
 if __name__ == "__main__":
-    print("输入问题，回车发送。输入 q 退出。\n")
+    print("输入问题，回车发送。\n")
 
     history = []
     while True:
@@ -285,7 +318,7 @@ if __name__ == "__main__":
             query = input("\033[36m >> \033[0m")
         except (EOFError, KeyboardInterrupt):
             break
-        if query.strip().lower() in ("q", "exit", ""):
+        if query.strip().lower() in ("exit", ""):
             break
         history.append({"role": "user", "content": query})
         agent_loop(history)

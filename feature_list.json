@@ -89,9 +89,9 @@
       "name": "Phase 2: 跨会话记忆 + 三层上下文",
       "description": ".minicode/memory/ 目录 + MEMORY.md 长期记忆 + 三段式 SystemPrompt 升级 (静态/会话/记忆) + memory_read/write/search 工具 + 三层上下文加载 (~500 / ~2000 / on-demand)。",
       "dependencies": ["f-harness-scaffold"],
-      "status": "not-started",
+      "status": "done",
       "verification": "uv run pytest tests/test_memory.py -v",
-      "evidence": null
+      "evidence": "29 memory tests pass. Total: 160 pass / 0 fail. Cold-start: MemoryStore().append() then new MemoryStore().read() returns the persisted entries (verified with timestamps and search()). Self-audit: 92/100 (unchanged). Q3 detection implemented: is_own_project() correctly returns True for workdir's own .minicode/, False for sibling projects and orphan paths."
     },
     {
       "id": "f-skill-runtime",
