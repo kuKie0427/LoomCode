@@ -104,12 +104,12 @@
     },
     {
       "id": "f-multi-agent",
-      "name": "Phase 4: Multi-Agent Coordination + Lifecycle",
-      "description": "MessageBus (.minicode/mailboxes/<agent>.jsonl) + Task Board (dependency graph) + Coordinator/Fork/Swarm 模式 + 完整 Lifecycle Hooks (UserPromptSubmit / SessionStart / SessionEnd / PreCompact / Notification) + checkpoint 恢复。",
+      "name": "Phase 4: Multi-Agent via Tool Calling + Checkpoint (Q4)",
+      "description": "Fork 模式并行 subagent（ThreadPoolExecutor）+ SUB_SYSTEM 修复 + 结构化 return (summary + turn count + tool calls) + Checkpoint (Q4 hybrid：10 tool calls OR 5k tokens 写 .minicode/checkpoints/<session>.json, 原子 write)。简化的 Phase 4 —— 不含 MessageBus / Task Board / Swarm / 完整 lifecycle (用户的判断：tool calling + checkpoint 对当前产品足够)。",
       "dependencies": ["f-skill-runtime"],
-      "status": "not-started",
-      "verification": "uv run pytest tests/test_multi_agent.py -v",
-      "evidence": null
+      "status": "done",
+      "verification": "uv run pytest tests/ -v && ./init.sh",
+      "evidence": "206 tests pass / 0 fail (was 185, +21). init.sh 'all green'. Hooks thread-safe (Lock + copy-on-trigger). Fork 模式: 多个 task 工具调用同轮并发执行. SUB_SYSTEM 修复 (之前是空字符串). 结构化 return: [done: N turns, M tool calls]\\n<summary>. Checkpoint: 写到 .minicode/checkpoint.json 原子 write (tmp + rename). loop run --resume 恢复. Cold-start: save/load roundtrip 验证 messages / tool_call_count / model / saved_at 全部保留."
     },
     {
       "id": "f-architecture-unify",

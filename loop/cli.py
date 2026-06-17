@@ -53,7 +53,8 @@ def _build_parser() -> argparse.ArgumentParser:
     audit_p.add_argument("--html", type=Path, default=None, help="Write an HTML report to FILE")
     audit_p.add_argument("--min-score", type=int, default=70, help="Exit non-zero if overall < N (default 70)")
 
-    sub.add_parser("run", help="Run the loop coding agent REPL")
+    run_p = sub.add_parser("run", help="Run the loop coding agent REPL")
+    run_p.add_argument("--resume", action="store_true", help="Resume from checkpoint if present")
 
     return parser
 
@@ -90,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "run":
-        run_repl()
+        run_repl(resume=args.resume)
         return 0
 
     parser.print_help()

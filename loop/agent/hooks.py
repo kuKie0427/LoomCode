@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 from loguru import logger
@@ -16,14 +17,18 @@ PERMISSION_RULES = [
 ]
 
 HOOKS = {"AgentStart": [], "PreToolUse": [], "PostToolUse": [], "AgentStop": []}
+HOOKS_LOCK = threading.Lock()
 
 class Hooks:
 
     def register_hook(self, event: str, callback):
-        HOOKS[event].append(callback)
+        with HOOKS_LOCK:
+            HOOKS[event].append(callback)
 
     def trigger_hooks(self, event: str, *args):
-        for callback in HOOKS[event]:
+        with HOOKS_LOCK:
+            callbacks = list(HOOKS[event])
+        for callback in callbacks:
             result = callback(event, *args)
             if result is not None:
                 return result

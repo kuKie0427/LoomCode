@@ -1,3 +1,4 @@
+import concurrent.futures
 import os
 from pathlib import Path
 from typing import cast
@@ -5,6 +6,7 @@ from typing import cast
 import dotenv
 from loguru import logger
 
+import loop.agent.checkpoint as checkpoint
 from loop.agent.context import Context
 from loop.agent.hooks import Hooks
 from loop.agent.llm import LLMClient
@@ -78,9 +80,44 @@ hooks.register_hook("AgentStop", context.microcompact)
 llm_client = LLMClient(model=os.getenv("MODEL", "deepseek-v4-flash"))
 
 
+def _run_tool_block(block, hooks) -> dict:
+    """Execute a single tool_use block and return the tool_result dict."""
+    blocked = hooks.trigger_hooks("PreToolUse", block)
+    if blocked is not None:
+        return {"type": "tool_result", "tool_use_id": block.id,
+                "content": blocked, "is_error": True}
+    handler = TOOL_HANDLERS.get(block.name)
+    output = handler(**block.input) if handler else f"Unknown: {block.name}"
+    hooks.trigger_hooks("PostToolUse", block, output)
+    return {"type": "tool_result", "tool_use_id": block.id,
+            "content": output, "is_error": False}
+
+
+def _run_tool_turn(tool_uses, hooks):
+    """Run a batch of tool_use blocks. 'task' calls run concurrently (Fork mode)."""
+    results: list[dict | None] = [None] * len(tool_uses)
+    task_idx = [i for i, b in enumerate(tool_uses) if b.name == "task"]
+    non_task_idx = [i for i, b in enumerate(tool_uses) if b.name != "task"]
+
+    for i in non_task_idx:
+        results[i] = _run_tool_block(tool_uses[i], hooks)
+
+    if len(task_idx) == 1:
+        results[task_idx[0]] = _run_tool_block(tool_uses[task_idx[0]], hooks)
+    elif len(task_idx) > 1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(task_idx)) as ex:
+            futures = {ex.submit(_run_tool_block, tool_uses[i], hooks): i for i in task_idx}
+            for fut in concurrent.futures.as_completed(futures):
+                results[futures[fut]] = fut.result()
+
+    return results
+
+
 def agent_loop(messages: list) -> None:
     configure_logging()
     hooks.trigger_hooks("AgentStart")
+    tool_call_count = 0
+    tokens_at_last_checkpoint = context.current_tokens(messages)
     while True:
         if context.should_compact(messages, llm_client.get_context_window()):
             context.autocompact(messages, llm_client.client, llm_client.model, llm_client.get_context_window())
@@ -94,29 +131,29 @@ def agent_loop(messages: list) -> None:
 
         if response.stop_reason != "tool_use":
             hooks.trigger_hooks("AgentStop", messages)
+            checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
             return
 
-        results = []
-        for block in response.content:
-            if block.type != "tool_use":
-                continue
-
-            blocked = hooks.trigger_hooks("PreToolUse", block)
-            if blocked is not None:
-                results.append({"type": "tool_result", "tool_use_id": block.id,
-                                "content": blocked, "is_error": True})
-                continue
-            handler = TOOL_HANDLERS.get(block.name)
-            output = handler(**block.input) if handler else f"Unknown: {block.name}"
-            hooks.trigger_hooks("PostToolUse", block, output)
-            results.append({"type": "tool_result", "tool_use_id": block.id, "content": output, "is_error": False})
-
+        tool_uses = [b for b in response.content if b.type == "tool_use"]
+        results = _run_tool_turn(tool_uses, hooks)
+        tool_call_count += len(tool_uses)
         messages.append({"role": "user", "content": results})
 
+        new_tokens = context.current_tokens(messages) - tokens_at_last_checkpoint
+        if checkpoint.is_due(tool_call_count, new_tokens):
+            checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
+            tokens_at_last_checkpoint = context.current_tokens(messages)
 
-def run_repl() -> None:
+
+def run_repl(resume: bool = False) -> None:
     print("输入问题，回车发送。\n")
     history: list = []
+    if resume and checkpoint.exists(WORKDIR):
+        ckpt = checkpoint.load(WORKDIR)
+        if ckpt is not None:
+            history = ckpt.get("messages", [])
+            saved_at = ckpt.get("saved_at", "unknown")
+            logger.info(f"Resumed from checkpoint ({saved_at}, {len(history)} messages, {ckpt.get('tool_call_count', '?')} tool calls)")
     while True:
         try:
             query = input("\033[36m >> \033[0m")

@@ -380,3 +380,62 @@ Implemented Q2-decision skill runtime + ToolRegistry. Skills are now plug-and-pl
 
 - **`harness.toml [tools]` section**: per the roadmap, end users should be able to declare "disable bash" or "replace bash with restricted version". The registry now has the data (`enabled` flag, `is_read_only` flag), but the loader for `harness.toml` is deferred — no project currently ships one.
 - **Async permission pipeline**: the synchronous `_ask_user()` in `hook.py` works fine for CLI; the roadmap says async is for TUI/HTTP frontends later.
+
+---
+
+## Phase 4: f-multi-agent (2026-06-17 15:25, simplified per user feedback)
+
+User pointed out: the original Phase 4 plan (MessageBus + Task Board + Coordinator/Fork/Swarm + full lifecycle) was over-engineered for the loop product's actual use cases. Tool calling + checkpoint is sufficient. Simplified Phase 4 ships only what's needed.
+
+**Delivered (4 features instead of 6)**:
+
+1. **`SUB_SYSTEM` bug fix** — `loop/agent/tools.py` had `SUB_SYSTEM = ""` (subagent ran with empty system prompt, didn't know what it was doing). Now contains a real sub-agent-specific prompt: "you are a subagent spawned by main agent, focus on the delegated task, do not re-delegate, return a concise summary".
+
+2. **Fork mode (parallel subagent execution)** — `loop/agent/loop.py::_run_tool_turn` separates `task` calls from non-task calls. Non-task runs sequentially (preserves hook ordering). Multiple `task` calls in one LLM response run concurrently via `concurrent.futures.ThreadPoolExecutor`. Total time = max(subagent times), not sum.
+
+3. **Structured return** — `spawn_subagent` now returns `"[done: N turns, M tool calls]\n<summary>"`. Parent agent sees how long the subagent ran, useful for the LLM to gauge subagent complexity.
+
+4. **Checkpoint (Q4 hybrid)** — `loop/agent/checkpoint.py` with `save`/`load`/`exists`/`is_due`/`maybe_save`. Defaults: 10 tool calls OR 5k tokens (whichever fires first). Atomic write via `.tmp` + rename. `loop run --resume` restores from `.minicode/checkpoint.json`.
+
+**New files**:
+
+- `loop/agent/checkpoint.py` — `save`/`load`/`exists`/`default_path_for`/`is_due`/`maybe_save`
+- `tests/test_hooks_concurrency.py` — 3 tests for thread-safety (concurrent register / trigger / lock exists)
+- `tests/test_checkpoint.py` — 12 tests for save/load roundtrip, atomic write, threshold logic, complex message content
+- `tests/test_spawn_subagent_structured.py` — 4 tests for structured return format
+
+**Modified**:
+
+- `loop/agent/hooks.py` — added `HOOKS_LOCK = threading.Lock()`; `register_hook` uses `with HOOKS_LOCK`; `trigger_hooks` snapshots callbacks under lock then iterates outside the lock (so callbacks can take time without blocking other threads).
+- `loop/agent/loop.py` — added `_run_tool_block` and `_run_tool_turn` helpers; `agent_loop` tracks `tool_call_count` and `tokens_at_last_checkpoint`, fires `checkpoint.save()` at threshold or end of session; `run_repl(resume=True)` checks for existing checkpoint.
+- `loop/agent/tools.py` — `SUB_SYSTEM` populated with real prompt; `spawn_subagent` counts turns + tool calls and returns structured string.
+- `loop/cli.py` — `run` subcommand gains `--resume` flag.
+- `tests/test_agent_loop.py` — `test_spawn_subagent_returns_summary` updated to `test_spawn_subagent_returns_summary_with_metadata` (checks for `[done: ...]` prefix instead of exact string).
+
+**Acceptance evidence**:
+
+- 21 new tests pass. Total: **206 pass / 0 fail**.
+- `./init.sh` exit 0 in "all green" mode.
+- `loop audit .` still scores 92/100.
+- **Cold-start (checkpoint roundtrip)**: saved 4 messages to `.minicode/checkpoint.json`, loaded them back. `messages`, `tool_call_count=15`, `model`, `saved_at` all preserved. `Messages match: True`.
+- **Hooks thread-safety**: 10 threads × 100 register calls each → exactly 1000 entries in HOOKS (no lost updates). 8 threads × 1000 trigger calls each → no exceptions, no iteration over mutating list.
+- **Fork mode**: `_run_tool_turn([bash, task_a, task_b, task_c])` runs `bash` sequentially, then `task_a/task_b/task_c` concurrently.
+
+**Decisions made**:
+
+- **Simplified Phase 4**: dropped MessageBus, Task Board, Coordinator/Fork/Swarm 3-pattern, full lifecycle hooks. The user's argument: tool calling is sufficient for the loop product's actual use cases. Mailboxes and dependency graphs are infrastructure without current demand. Kept: Fork (concurrent task execution) because it's a real perf win for the existing `task` tool.
+
+- **Single checkpoint file per workdir**: `.minicode/checkpoint.json` is overwritten each time, no history. Multi-session history is a future iteration. Keeps the API minimal — no session_id parameter, no checkpoint rotation logic. Trade-off: only the most recent session can be resumed.
+
+- **Hooks thread-safety strategy**: lock for register (short critical section), snapshot under lock for trigger (callback iteration outside lock). Snapshots mean callbacks can be slow (e.g., log to file) without blocking other threads. The cost is one list copy per trigger, negligible.
+
+- **Structured return as string prefix, not dict**: keeping the return type as `str` (not a dict) avoids breaking changes to `run_task` consumers. The metadata is human-readable and the LLM can parse the prefix. If we later need structured fields for code (not just LLM), we'd change the return type.
+
+**Working tree**: clean. The 7 p4 work files are still in working tree but not staged — they'll be committed separately when the user is ready.
+
+**What we'd lose with this simplification** (per user's earlier analysis):
+
+- Cross-session agent communication: not needed for current use case.
+- Task dependency graph: parent agent does ordering itself.
+- Background agents: not needed; REPL is synchronous.
+- Complex lifecycle: 4 existing hooks are enough.

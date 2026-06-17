@@ -229,7 +229,16 @@ SUB_HANDLERS = {
     "edit_file": run_edit, "glob": run_glob,
 }
 
-SUB_SYSTEM = ""
+SUB_SYSTEM = (
+    "你是一个编程子智能体（subagent），由主 agent 通过 `task` 工具委派任务。\n"
+    "你的工作目录和主 agent 相同，但上下文独立（不继承主 agent 的对话历史）。\n"
+    "规则：\n"
+    "- 专注完成委派给你的任务，不要做超出范围的工作\n"
+    "- 不要进一步委派（不要调用 task 工具）\n"
+    "- 完成后用简洁的摘要返回结果\n"
+    "- 如果任务需要多步，列出你做了什么、找到/改了什么\n"
+    "- 遇到错误就直接报告，不要重试同一操作超过一次"
+)
 
 
 def extract_text(content) -> str:
@@ -247,7 +256,10 @@ def spawn_subagent(description: str, llm_client=None, hooks=None) -> str:
     hooks.trigger_hooks("AgentStart")
     messages: list[MessageParam] = [{"role": "user", "content": description}]
 
+    turn_count = 0
+    tool_call_count = 0
     for _ in range(30):
+        turn_count += 1
         response = llm_client.client.messages.create(
             model=llm_client.model, system=SUB_SYSTEM,
             messages=messages, tools=SUB_TOOLS, max_tokens=8000,
@@ -258,6 +270,7 @@ def spawn_subagent(description: str, llm_client=None, hooks=None) -> str:
         results = []
         for block in response.content:
             if block.type == "tool_use":
+                tool_call_count += 1
                 blocked = hooks.trigger_hooks("PreToolUse", block)
                 if blocked:
                     results.append({"type": "tool_result", "tool_use_id": block.id,
@@ -280,7 +293,7 @@ def spawn_subagent(description: str, llm_client=None, hooks=None) -> str:
         if not result:
             result = "Subagent stopped after 30 turns without final answer."
     hooks.trigger_hooks("AgentStop", messages)
-    return result
+    return f"[done: {turn_count} turns, {tool_call_count} tool calls]\n{result}"
 
 
 TOOLS.append({

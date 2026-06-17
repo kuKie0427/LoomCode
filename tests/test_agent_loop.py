@@ -193,8 +193,8 @@ class TestAgentLoopToolUse:
 
 
 class TestSpawnSubagent:
-    def test_spawn_subagent_returns_summary(self, mocker):
-        """spawn_subagent returns extracted text as non-empty string."""
+    def test_spawn_subagent_returns_summary_with_metadata(self, mocker):
+        """spawn_subagent returns structured result: '[done: N turns, M tool calls]\\n<summary>'."""
         mock_response = MagicMock()
         mock_response.content = [
             TextBlock(type="text", text="Subagent completed the task successfully.")
@@ -209,5 +209,7 @@ class TestSpawnSubagent:
         result = loop.agent.tools.spawn_subagent("Analyze the codebase")
 
         assert isinstance(result, str)
-        assert len(result) > 0
-        assert result == "Subagent completed the task successfully."
+        assert "Subagent completed the task successfully." in result
+        assert result.startswith("[done: ")
+        assert "turns," in result
+        assert "tool calls]" in result
