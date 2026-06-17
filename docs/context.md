@@ -19,7 +19,7 @@ Two-phase compaction in `context.py::Context`. Designed for the Anthropic SDK wi
   4. Head → summarize via LLM with `COMPACT_PROMPT`
   5. Replace head with a single `system-reminder` user message containing the summary
   6. Inject last-known `todo_write` state if it differs from the tail (`_inject_todo_attachment`)
-- **Failure fallback**: if the summary LLM call fails, `autocompact` truncates: `messages = tail_messages` only.
+- **Failure fallback**: if the summary LLM call fails, `autocompact` skips compaction. The messages list is left untouched. The outer `try/except` in `autocompact` catches any unexpected exception and logs it without modifying messages. This matches `test_autocompact_llm_failure_skips_compaction`.
 
 ## Token Estimation
 

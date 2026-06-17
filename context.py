@@ -94,48 +94,50 @@ class Context:
         自动压缩：总结旧消息，保留最近的消息尾巴。
         调用时机：should_compact() 返回 True 时，在下一轮 API 调用前。
         """
-        # Step 1: 找轮边界
-        rounds = self._find_rounds(messages)
-        if len(rounds) <= 1:
-            return  # 至少 1 轮才压缩
+        try:
+            # Step 1: 找轮边界
+            rounds = self._find_rounds(messages)
+            if len(rounds) <= 1:
+                return  # 至少 1 轮才压缩
 
-        # Step 2: 从尾部向前找尾巴
-        tail_cutoff = self._find_tail_cutoff(messages, int(TAIL_TOKEN_BUDGET_PERCENT * context_window))
+            # Step 2: 从尾部向前找尾巴
+            tail_cutoff = self._find_tail_cutoff(messages, int(TAIL_TOKEN_BUDGET_PERCENT * context_window))
 
-        # Step 3: 尾巴里不能截断轮——找到尾巴起始位置所属的轮的起点
-        tail_start = self._align_to_round_start(rounds, tail_cutoff)
+            # Step 3: 尾巴里不能截断轮——找到尾巴起始位置所属的轮的起点
+            tail_start = self._align_to_round_start(rounds, tail_cutoff)
 
-        # Step 4: 提取要压缩的头部消息 + 尾巴消息
-        head_messages = messages[:tail_start]
-        tail_messages = messages[tail_start:]
+            # Step 4: 提取要压缩的头部消息 + 尾巴消息
+            head_messages = messages[:tail_start]
+            tail_messages = messages[tail_start:]
 
-        # Step 5: 提取最后一次 todo 状态（从头部中找）
-        last_todo = self._extract_last_todo(head_messages)
+            # Step 5: 提取最后一次 todo 状态（从头部中找）
+            last_todo = self._extract_last_todo(head_messages)
 
-        # Step 6: 调用 LLM 生成摘要
-        summary = self._generate_summary(head_messages, client, model)
-        if not summary:
-            logger.warning("压缩摘要生成失败，跳过压缩")
-            return
+            # Step 6: 调用 LLM 生成摘要
+            summary = self._generate_summary(head_messages, client, model)
+            if not summary:
+                logger.warning("压缩摘要生成失败，跳过压缩（caller 应处理 context overflow）")
+                return
 
-        # Step 7: 重建 messages 列表
-        messages.clear()
-        messages.append({
-            "role": "user",
-            "content": f"<system-reminder>\n对话历史已被压缩。以下是摘要：\n\n{summary}\n</system-reminder>"
-        })
-        messages.extend(tail_messages)
+            # Step 7: 重建 messages 列表
+            messages.clear()
+            messages.append({
+                "role": "user",
+                "content": f"<system-reminder>\n对话历史已被压缩。以下是摘要：\n\n{summary}\n</system-reminder>"
+            })
+            messages.extend(tail_messages)
 
-        # Step 8: 注入 todo 附件（如果头部的 todo 和尾巴里的不一致）
-        if last_todo:
-            self._inject_todo_attachment(messages, last_todo)
+            # Step 8: 注入 todo 附件（如果头部的 todo 和尾巴里的不一致）
+            if last_todo:
+                self._inject_todo_attachment(messages, last_todo)
 
-        # Step 9: 重置 token 追踪状态
-        self.last_input_tokens = 0
-        self.checked_at_index = 0
+            # Step 9: 重置 token 追踪状态
+            self.last_input_tokens = 0
+            self.checked_at_index = 0
 
-        logger.success(f"压缩完成：{len(head_messages)} 条消息 → 1 条摘要，保留 {len(tail_messages)} 条尾巴")
-
+            logger.success(f"压缩完成：{len(head_messages)} 条消息 → 1 条摘要，保留 {len(tail_messages)} 条尾巴")
+        except Exception as e:
+            logger.error(f"压缩失败：{e}")
 
     # ─── 4. 辅助方法 ───
 

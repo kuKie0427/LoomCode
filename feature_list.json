@@ -53,9 +53,9 @@
       "name": "Context 压缩流程测试",
       "description": "update / current_tokens / _find_tail_cutoff / _generate_summary / _inject_todo_attachment / autocompact — includes LLM-failure fallback path",
       "dependencies": ["f-test-framework-p3"],
-      "status": "blocked",
+      "status": "done",
       "verification": "uv run pytest tests/test_context.py",
-      "blocker": "test_autocompact_llm_failure_skips_compaction failing: assert 12 == 20. Expected: 20 messages preserved on LLM-failure (truncate-to-tail fallback). Actual: 12 messages. Likely regression from recent context.py changes (uncommitted in working tree). Diagnosis: when _generate_summary returns None, autocompact falls into the truncate branch (messages.clear(); messages.extend(tail_messages)) — need to verify the tail size for the test fixture matches the expected 20."
+      "evidence": "26/26 context tests pass (was 25/26 with test_autocompact_llm_failure_skips_compaction failing). Full suite: 127 passed / 0 failed — init.sh exits 0 in 'all green' mode (no blocked-feature notice). Fix: when _generate_summary returns None, autocompact now skips compaction (leaves messages unchanged) instead of truncating to tail. Aligns with the test name 'skips_compaction' and the test assertion that messages[0]['content'] == 'Round 1' stays intact."
     },
     {
       "id": "f-harness-scaffold",

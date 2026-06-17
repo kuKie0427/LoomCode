@@ -194,3 +194,52 @@ The 4 open questions in `docs/harness-roadmap.md::10. Open Questions` are now re
 **Status**: 4 / 4 questions resolved. Implementation contracts are in `docs/harness-roadmap.md::10. Decisions (resolved)`. Phase 2 / 3 / 4 implementation now has stable contracts to build against.
 
 **Self-audit after the change**: `uv run loop audit .` still scores 92/100. The instructions / scope false negatives remain cosmetic (the rule phrasing is the reference's; the loop project's AGENTS.md uses WIP=1 synonyms).
+
+---
+
+## f-test-framework-p4 fixed (2026-06-17 14:30)
+
+Closed the last pre-existing blocker. f-test-framework-p4 is now `done`.
+
+**Root cause** (regression introduced in working tree):
+
+The committed code (`fdc5a49`) had:
+```python
+if not summary:
+    logger.warning("压缩摘要生成失败，跳过压缩")
+    return
+```
+
+The working-tree version wrapped the whole `autocompact` body in an outer `try/except Exception` (good defensive add) BUT in the same edit changed the `if not summary` branch from "skip" to "truncate":
+```python
+if not summary:
+    logger.warning("压缩摘要生成失败，改为截断")
+    messages.clear()
+    messages.extend(tail_messages)
+    return
+```
+
+The test `test_autocompact_llm_failure_skips_compaction` (5 rounds × 4 msg = 20 messages) asserts `len(messages) == 20` and `messages[0]["content"] == "Round 1"` after autocompact with LLM-side-effect exception. The truncate branch produces `messages[8:]` = 12 messages (rounds 3, 4, 5 kept). 12 ≠ 20 → assertion fails.
+
+**Fix** (minimal, 2 lines changed in `context.py`):
+```python
+if not summary:
+    logger.warning("压缩摘要生成失败，跳过压缩（caller 应处理 context overflow）")
+    return
+```
+
+Keep the outer try/except (sensible defensive add), revert the LLM-failure branch to skip behavior (the test name and assertions both say "skip"). Truncation was over-aggressive: the agent loses round 1 and 2 silently when the LLM is briefly unavailable.
+
+**Doc correction** (`docs/context.md`): the "Failure fallback" bullet was describing the buggy truncate behavior. Updated to describe the new skip behavior + reference the test that locks it in.
+
+**Verification**:
+- `uv run pytest tests/test_context.py` → 26 / 26 pass
+- `./init.sh` → exit 0 in **"all green" mode** (no blocked-feature notice). This is the first time the smart pass-gate's tolerated path is not exercised.
+- Total tests: **127 pass / 0 failed** (was 126 / 1).
+
+**Status snapshot**:
+- `done`: 8 (was 7: added p4)
+- `blocked`: 0 (was 1)
+- `not-started`: 4 (unchanged: f-memory-persistence / f-skill-runtime / f-multi-agent / f-observability)
+
+**Working tree after fix**: 5 of 7 p4 files left untouched (user's other p4 work — `hook.py` / `main.py` / `models.py` / `prompt.py` / `tests/test_agent_loop.py`). These are the agent-loop integration pieces; they interact with the new context.py but are not strictly required for the p4 test to pass. They can be committed separately when the user is ready.
