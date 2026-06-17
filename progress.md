@@ -1605,3 +1605,43 @@ Phase F1 implemented async streaming LLM support with callback system:
 ### 后续
 
 新 session 加载 `.sisyphus/plans/loop-pf3.md` → 选 F3 → 实现 PermissionScreen Modal + ToolCallCard 卡片 + `asyncio.run_coroutine_threadsafe` 桥接 asker。
+
+---
+
+## Phase F3: f-tui-permission-modal (2026-06-17)
+
+### Summary
+Phase F3 完成 PermissionScreen Modal + ToolCallCard 卡片 + hooks._asker 可注入 + TUI asker 桥接。
+
+### What was done
+- [x] Task 0: `hooks._asker` 变可注入 — `Hooks(asker=...)` 构造参数, `_default_asker` fallback
+- [x] Task 1: `PermissionScreen` Modal — `ModalScreen[str]`, 3 按钮 + 3 键盘快捷键
+- [x] Task 2: `ToolCallCard` widget — 3 态 (running/completed/error), `rich.text.Text` 渲染
+- [x] Task 3: `ChatLog` 用 `ToolCallCard` 替代 markdown 占位
+- [x] Task 4: TUI 启动时注入 asker — `asyncio.run_coroutine_threadsafe` 桥接 worker thread → main loop
+- [x] Task 5: 3 个 snapshot 测试 — `snap_compare` + `run_before`
+- [x] Task 6: 5 个 eval case — PermissionScreen/ToolCallCard/hooks asker/TUI asker 注入
+- [x] Task 7: 注册新 case 到 `__init__.py`
+
+### Files changed
+- `loop/agent/hooks.py`: `asker` 参数 + `_default_asker` + `_ask_user` 委托
+- `loop/tui/screens.py`: 新文件, `PermissionScreen(ModalScreen[str])`
+- `loop/tui/widgets.py`: 新文件, `ToolCallCard(Static)` 3 态
+- `loop/tui/chat_log.py`: `ToolCallCard` 集成
+- `loop/tui/app.py`: `_make_tui_asker()` + `on_mount()` 捕获 `_main_loop`
+- `tests/test_tui_snapshot.py`: 新文件, 3 个 snapshot 测试
+- `tests/__snapshots__/test_tui_snapshot/`: 3 个 SVG baseline
+- `loop/eval/cases/tui_permission.py`: 新文件, 5 个 eval case
+- `loop/eval/cases/__init__.py`: 注册 `tui_permission`
+
+### Verification
+- 130/130 eval cases pass (+5 tui_permission)
+- 229 pytest + 0 ruff + 0 mypy
+- 3 snapshot baselines generated
+
+### Plan deviation
+- Task 5 subagent 发现并修复 `ToolCallCard.set_class()` bug (4 处)
+- Task 6 subagent 自动注册了 case 到 `__init__.py` (Task 7 合并)
+
+### Next
+F 路线全部完成。后续 roadmap (G/H/...) 由用户决定。

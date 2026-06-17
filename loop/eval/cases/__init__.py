@@ -20,5 +20,6 @@ from loop.eval.cases import (
     session_hooks,  # noqa: F401
     telemetry_sink,  # noqa: F401
     tui_app,  # noqa: F401
+    tui_permission,  # noqa: F401
     user_hooks,  # noqa: F401
 )

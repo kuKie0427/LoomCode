@@ -339,9 +339,9 @@
       "name": "Phase F3: PermissionScreen Modal + ToolCallCard 卡片",
       "description": "loop/tui/screens.py::PermissionScreen (Textual ModalScreen, Allow once / Allow always / Deny 三按钮 + 键盘快捷键);loop/tui/widgets.py::ToolCallCard (Static + Rich Text 渲染, 3 态: running spinner / completed 绿框 / error 红框);hooks._asker 变可注入 (Hooks(asker=...) 构造参数),TUI 启动时注入 call_from_thread wrapper;3 个 snapshot 测试 (空 layout / 权限 modal / 工具卡片);5 个 eval case 锁契约。",
       "dependencies": ["f-tui-textual-app"],
-      "status": "not-started",
+      "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
-      "evidence": null
+      "evidence": "uv run python -m loop.cli eval --fail-under 100 → 130/130 passed (+5 tui_permission cases); ./init.sh → 229 pytest passed, 0 ruff, 0 mypy. Changes: loop/agent/hooks.py (asker injectable), loop/tui/screens.py (PermissionScreen ModalScreen), loop/tui/widgets.py (ToolCallCard 3-state), loop/tui/chat_log.py (ToolCallCard integration), loop/tui/app.py (TUI asker injection via asyncio.run_coroutine_threadsafe), tests/test_tui_snapshot.py (3 snapshot tests), loop/eval/cases/tui_permission.py (5 eval cases), loop/eval/cases/__init__.py (register cases)."
     }
   ]
 }

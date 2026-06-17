@@ -1,4 +1,5 @@
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
@@ -26,9 +27,11 @@ class Hooks:
         self,
         policy: PermissionPolicy | None = None,
         disabled_tools: frozenset[str] | None = None,
+        asker: Callable[[str, dict, str], str] | None = None,
     ) -> None:
         self.policy = policy if policy is not None else DEFAULT_POLICY
         self.disabled_tools = disabled_tools if disabled_tools is not None else frozenset()
+        self._asker = asker if asker is not None else self._default_asker
 
     def register_hook(self, event: str, callback):
         with HOOKS_LOCK:
@@ -90,11 +93,14 @@ class Hooks:
         rule = self.policy.find_rule(tool_name, args)
         return rule.message if rule is not None else None
 
-    def _ask_user(self, tool_name: str, args: dict, reason: str) -> str:
+    def _default_asker(self, tool_name: str, args: dict, reason: str) -> str:
         logger.warning("⚠  {}", reason)
         logger.info("   Tool: {} ({})", tool_name, args)
         choice = input("   Allow? [y/N] ").strip().lower()
         return "allow" if choice in ("y", "yes") else "deny"
+
+    def _ask_user(self, tool_name: str, args: dict, reason: str) -> str:
+        return self._asker(tool_name, args, reason)
 
 
 if __name__ == "__main__":

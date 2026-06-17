@@ -60,7 +60,7 @@ class AgentTUIApp(App):
         apply_config(load_config(WORKDIR))
 
         # Register user hook scripts (mirrors run_repl L196-206)
-        from loop.agent.loop import hooks as hooks_instance
+        from loop.agent.loop import hooks
         from loop.agent.user_hooks import discover_user_hooks, make_shell_callback
 
         _EVENT_MAP = {"session_start": "SessionStart", "session_end": "SessionEnd"}
@@ -68,9 +68,35 @@ class AgentTUIApp(App):
             hook_event = _EVENT_MAP.get(event_name, event_name)
             for script in scripts:
                 try:
-                    hooks_instance.register_hook(hook_event, make_shell_callback(script))
+                    hooks.register_hook(hook_event, make_shell_callback(script))
                 except Exception:
                     logger.warning("Failed to register user hook {} for {}", script, hook_event)
+
+        # Inject TUI asker (after apply_config so hooks instance is finalized)
+        hooks._asker = self._make_tui_asker()
+
+    def on_mount(self) -> None:
+        """Capture the main event loop for cross-thread async dispatch."""
+        self._main_loop = asyncio.get_running_loop()
+
+    def _make_tui_asker(self):
+        """Build an asker that pushes PermissionScreen onto the app via the main loop.
+
+        Called from worker thread (agent_loop running via asyncio.to_thread).
+        Uses asyncio.run_coroutine_threadsafe to schedule the async push on the main
+        event loop, then blocks the worker thread on the Future result.
+        """
+        def asker(tool_name: str, args: dict, reason: str) -> str:
+            from loop.tui.screens import PermissionScreen
+
+            # Schedule push_screen_wait on the main loop
+            future = asyncio.run_coroutine_threadsafe(
+                self.push_screen_wait(PermissionScreen(tool_name, args, reason)),
+                self._main_loop,
+            )
+            # Block the worker thread until user responds
+            return future.result()
+        return asker
 
     def compose(self) -> ComposeResult:
         yield Header()

@@ -6,20 +6,24 @@ async operations are safe to schedule via ``asyncio.ensure_future``.
 """
 
 import asyncio
-import json
 from typing import Any
 
 from textual.containers import VerticalScroll
 from textual.widgets import Markdown
 
+from loop.tui.widgets import ToolCallCard
+
 
 class ChatLog(VerticalScroll):
     """Scrollable Markdown chat display."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._tool_cards: dict[str, ToolCallCard] = {}
+
     def compose(self) -> Any:
         yield Markdown(id="md")
         self._stream: Any = None
-        self._tool_cards: dict[str, str] = {}
 
     async def append_user_message(self, text: str) -> None:
         md = self.query_one("#md", Markdown)
@@ -38,18 +42,16 @@ class ChatLog(VerticalScroll):
         self.scroll_end()
 
     def add_tool_card(self, name: str, inp: dict, tool_id: str) -> None:
-        md = self.query_one("#md", Markdown)
-        self._tool_cards[tool_id] = f"▶ {name}"
-        snippet = json.dumps(inp)[:100]
-        asyncio.ensure_future(md.append(f"▶ **{name}** `{snippet}`\n"))
+        card = ToolCallCard(name, inp, tool_id)
+        self._tool_cards[tool_id] = card
+        asyncio.ensure_future(self.mount(card))
         self.scroll_end()
 
     def complete_tool_card(self, tool_id: str, output: str, is_error: bool) -> None:
-        md = self.query_one("#md", Markdown)
-        marker = "✗" if is_error else "✓"
-        preview = output[:200].replace("\n", "↩ ")
-        asyncio.ensure_future(md.append(f"  {marker} {preview}\n"))
-        self.scroll_end()
+        card = self._tool_cards.get(tool_id)
+        if card is not None:
+            card.complete(output, is_error)
+            self.scroll_end()
 
     def append_system_note(self, text: str) -> None:
         md = self.query_one("#md", Markdown)
