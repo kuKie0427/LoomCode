@@ -3,23 +3,27 @@ from pathlib import Path
 
 from loguru import logger
 
+from loop.agent.permissions import DEFAULT_POLICY, PermissionPolicy
+
 WORKDIR = Path.cwd()
 
-DENY_LIST = ["rm -rf /", "sudo", "shutdown", "reboot", "mkfs", "dd if=", "> /dev/sda"]
+DENY_LIST = list(DEFAULT_POLICY.deny_patterns)
 
-PERMISSION_RULES = [
-    {"tools": ["write_file", "edit_file"],
-     "check": lambda args: not (WORKDIR / args.get("path", "")).resolve().is_relative_to(WORKDIR),
-     "message": "Writing outside workspace"},
-    {"tools": ["bash"],
-     "check": lambda args: any(kw in args.get("command", "") for kw in ["rm ", "> /etc/", "chmod 777"]),
-     "message": "Potentially destructive command"},
-]
+
+def _rule_to_dict(rule) -> dict:
+    return {"tools": list(rule.tools), "check": rule.check, "message": rule.message}
+
+
+PERMISSION_RULES = [_rule_to_dict(r) for r in DEFAULT_POLICY.rules]
 
 HOOKS = {"AgentStart": [], "PreToolUse": [], "PostToolUse": [], "AgentStop": []}
 HOOKS_LOCK = threading.Lock()
 
+
 class Hooks:
+
+    def __init__(self, policy: PermissionPolicy | None = None) -> None:
+        self.policy = policy if policy is not None else DEFAULT_POLICY
 
     def register_hook(self, event: str, callback):
         with HOOKS_LOCK:
@@ -61,16 +65,14 @@ class Hooks:
         return None
 
     def _check_deny_list(self, command: str) -> str | None:
-        for pattern in DENY_LIST:
-            if pattern in command:
-                return f"Blocked: '{pattern}' is on the deny list"
+        pattern = self.policy.matches_deny(command)
+        if pattern is not None:
+            return f"Blocked: '{pattern}' is on the deny list"
         return None
 
     def _check_rules(self, tool_name: str, args: dict) -> str | None:
-        for rule in PERMISSION_RULES:
-            if tool_name in rule["tools"] and rule["check"](args):
-                return rule["message"]
-        return None
+        rule = self.policy.find_rule(tool_name, args)
+        return rule.message if rule is not None else None
 
     def _ask_user(self, tool_name: str, args: dict, reason: str) -> str:
         logger.warning("⚠  {}", reason)

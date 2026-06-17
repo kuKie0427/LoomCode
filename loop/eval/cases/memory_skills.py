@@ -6,9 +6,13 @@ class MemoryStoreRoundtrip(EvalCase):
     description = "MemoryStore append + read returns the same content"
 
     def run(self) -> EvalResult:
+        import shutil
+
         from loop.eval._util import make_empty_workdir
         from loop.memory import MemoryStore
         wd = make_empty_workdir("memory-roundtrip")
+        shutil.rmtree(wd, ignore_errors=True)
+        wd.mkdir(parents=True, exist_ok=True)
         store = MemoryStore(wd)
         store.append("User prefers tabs over spaces.")
         store.append("Project: loop test consumer.")

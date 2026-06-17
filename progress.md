@@ -579,3 +579,51 @@ $ ./init.sh
 - `M  progress.md`
 - `M  loop/eval/cases/__init__.py` (import phase5_coverage)
 - `M  loop/eval/cases/phase5_coverage.py` (new)
+
+## Session: f-permission-unify
+
+**Goal**: merge 3 parallel deny-lists into one `PermissionPolicy` dataclass so a dangerous pattern either blocks everywhere or nowhere.
+
+### Done
+
+- **New `loop/agent/permissions.py`** (80 LOC): `PermissionPolicy` + `PermissionRule` dataclasses, `DEFAULT_POLICY` instance. Methods: `matches_deny(command) -> pattern | None`, `find_rule(tool, args) -> rule | None`.
+- **`loop/agent/hooks.py`**: `Hooks(policy=None)` constructor accepts a custom policy (default `DEFAULT_POLICY`). `_check_deny_list` and `_check_rules` now consult `self.policy`. `DENY_LIST` + `PERMISSION_RULES` re-exported for backward compat.
+- **`loop/agent/tools.py::run_bash`**: removed the 5-item hardcoded `dangerous` list; reads `DEFAULT_POLICY.deny_patterns`. Error message now identifies which pattern matched: `"Error: Dangerous command blocked (matched: <pattern>)"`.
+- **`tests/test_tools.py::test_run_bash_dangerous_blocked`**: substring match (was exact match — too brittle). Added `dd if=/dev/zero` to the test corpus.
+- **`loop/eval/cases/permission_unify.py`**: 4 new cases — `permission-single-source-of-truth` (AST scans `loop/` for list/tuple literals containing `"rm -rf /"` outside `permissions.py`), `permission-bash-and-hook-agree-on-dd`, `permission-bash-and-hook-agree-on-sudo`, `permission-policy-is-data-driven` (constructs a custom `PermissionPolicy`, verifies it's isolated to that `Hooks` instance).
+- **`loop/eval/cases/memory_skills.py::MemoryStoreRoundtrip`**: pre-existing sandbox-state flake — added `shutil.rmtree(wd)` for idempotency (same fix as `memory-summary-truncates` from prior session).
+
+### Verification
+
+```
+$ uv run python -m loop.cli eval --fail-under 100
+Eval results: 52/52 passed   (was 48, +4 new permission_unify cases)
+
+$ ./init.sh
+============================= 225 pytest passed, 0 ruff, 0 mypy ==============================
+=== Verification Complete (all green) ===
+
+# idempotent:
+$ uv run python -m loop.cli eval --fail-under 100
+Eval results: 52/52 passed
+```
+
+### Decisions / surprises
+
+- **AST scan vs grep for `single-source-of-truth`.** First attempt: grep for `"rm -rf /"` literal. False positives: `hooks.py`'s `__main__` demo Block, `permission_unify.py`'s own error messages. Fixed by parsing each `loop/**/*.py` with `ast.parse` and walking for `ast.List`/`ast.Tuple` nodes containing an `ast.Constant(value="rm -rf /")`. Only literal list/tuple definitions count — test inputs (string args to subprocess etc.) don't.
+- **`run_bash` error message format change** (added `(matched: X)` suffix). `tests/test_tools.py` had an exact-string assertion that broke. Updated to substring match. The new message is more informative for users and aligns with the eval case `bash-deny-list-blocks-rm-rf` which already used `not in`.
+- **`Hooks(policy=...)` injection point** was the natural place for per-project overrides — Phase 1 §3 promised `harness.toml` permission config; this commit doesn't deliver that but the API is now ready.
+- **`PermissionRule.check` is a `Callable[[dict], bool]`, not a lambda in a dict literal.** Dataclass + lambda field works with `Callable` from `typing`; freezing is fine because callables are hashable by identity.
+- **Discovered a real bug fixable for free**: `run_bash("dd if=/dev/zero ...")` used to actually run `dd` (the hardcoded `dangerous` list didn't include `dd if=`). Now blocks because `dd if=` is in `DEFAULT_POLICY.deny_patterns`. The eval case `permission-deny-list-blocks-dd` (which uses `Hooks.check_permission_hook`) was masking this bug.
+
+### Working tree (this commit)
+
+- `M  loop/agent/hooks.py` (constructor + reads from policy)
+- `M  loop/agent/tools.py` (run_bash uses DEFAULT_POLICY)
+- `M  tests/test_tools.py` (substring match + dd corpus)
+- `M  loop/eval/cases/memory_skills.py` (idempotent rmtree)
+- `M  feature_list.json` (f-permission-unify lifecycle)
+- `M  progress.md` (this section)
+- `M  loop/eval/cases/__init__.py` (register permission_unify)
+- `?? loop/agent/permissions.py`
+- `?? loop/eval/cases/permission_unify.py`

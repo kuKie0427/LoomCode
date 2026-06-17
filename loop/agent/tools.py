@@ -6,6 +6,7 @@ from anthropic.types import MessageParam, ToolParam
 from loguru import logger
 
 import loop.agent.trace as trace_mod
+from loop.agent.permissions import DEFAULT_POLICY
 from loop.agent.tool_registry import Tool, ToolRegistry
 from loop.memory import MemoryStore
 from loop.skills import build_skill_index
@@ -15,9 +16,9 @@ WORKDIR = Path.cwd()
 CURRENT_TODOS: list = []
 
 def run_bash(command: str) -> str:
-    dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
-    if any(d in command for d in dangerous):
-        return "Error: Dangerous command blocked"
+    matched = DEFAULT_POLICY.matches_deny(command)
+    if matched is not None:
+        return f"Error: Dangerous command blocked (matched: {matched})"
     try:
         r = subprocess.run(
             command, shell=True, cwd=WORKDIR,

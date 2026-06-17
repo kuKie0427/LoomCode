@@ -116,9 +116,9 @@
       "dependencies": [
         "f-memory-persistence"
       ],
-      "status": "not-started",
-      "verification": "uv run pytest tests/test_skill.py -v",
-      "evidence": null
+      "status": "done",
+      "verification": "uv run pytest tests/test_skills.py tests/test_tool_registry.py",
+      "evidence": "uv run pytest tests/test_skills.py tests/test_tool_registry.py → 25/25 passed; skill files exist at loop/skills/{discovery,registry}.py + loop/agent/tool_registry.py; commit a986aee feat: f-skill-runtime — Phase 3 skill index + load_skill tool + ToolRegistry. Status flip authorized by user (resolves pre-existing data bug surfaced during f-eval-coverage)."
     },
     {
       "id": "f-multi-agent",
@@ -174,6 +174,17 @@
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval → 'Eval results: 48/48 passed' (was 37/37, +11 Phase 5 §2 cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Coverage: permission denial (sudo/dd via hook + path escape via safe_path); compaction (microcompact clear + skip-below-KEEP_RECENT + should_compact 85% threshold); subagent (turn cap enforced at 30 + SUB_TOOLS excludes task → recursion prevented at schema); memory (search case-insensitive + summary truncates to max_lines)."
+    },
+    {
+      "id": "f-permission-unify",
+      "name": "Permission 子系统: 3 套并行 deny-list 合并为单一来源 PermissionPolicy",
+      "description": "合并 run_bash 硬编码 dangerous / Hooks.DENY_LIST / PERMISSION_RULES 到 loop/agent/permissions.py 的单一 PermissionPolicy dataclass。run_bash 和 Hooks.check_permission_hook 都从 DEFAULT_POLICY 读。保留 DENY_LIST + PERMISSION_RULES 旧名字 re-export 以兼容。新增 4 个 eval case 锁定 single-source-of-truth + run_bash/hook 一致性 + policy 是数据驱动。",
+      "dependencies": [
+        "f-eval-coverage"
+      ],
+      "status": "done",
+      "verification": "uv run python -m loop.cli eval --fail-under 100",
+      "evidence": "uv run python -m loop.cli eval → 'Eval results: 52/52 passed' (was 48, +4 permission_unify cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Refactor: 3 parallel deny lists (run_bash hardcoded 5 / Hooks.DENY_LIST 7 / PERMISSION_RULES 2) consolidated into loop/agent/permissions.py::DEFAULT_POLICY (1 tuple deny_patterns + 1 tuple rules). run_bash and Hooks(policy=...) both read from DEFAULT_POLICY. run_bash now blocks dd if=/dev/... (was a real bug — eval case permission-deny-list-blocks-dd surfaced it). tests/test_tools.py::test_run_bash_dangerous_blocked updated to substring match + added dd coverage. Idempotent across reruns."
     }
   ]
 }

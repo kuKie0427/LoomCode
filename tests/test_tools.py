@@ -16,12 +16,12 @@ def test_run_bash_safe_command(monkeypatch, temp_workdir):
 
 
 def test_run_bash_dangerous_blocked(monkeypatch, temp_workdir):
-    """run_bash blocks commands matching the dangerous list and returns an error."""
+    """run_bash blocks commands matching the policy deny_patterns and returns an error."""
     monkeypatch.setattr(main, "WORKDIR", temp_workdir)
 
-    for cmd in ("rm -rf /", "sudo rm file", "shutdown now", "reboot"):
+    for cmd in ("rm -rf /", "sudo rm file", "shutdown now", "reboot", "dd if=/dev/zero of=/tmp/x"):
         result = main.run_bash(cmd)
-        assert result == "Error: Dangerous command blocked"
+        assert "Dangerous command blocked" in result, f"expected block for {cmd!r}, got {result!r}"
 
 
 def test_run_bash_timeout(monkeypatch):
