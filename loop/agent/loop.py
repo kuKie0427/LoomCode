@@ -1,5 +1,6 @@
 import concurrent.futures
 import os
+import uuid
 from pathlib import Path
 from typing import cast
 
@@ -7,6 +8,7 @@ import dotenv
 from loguru import logger
 
 import loop.agent.checkpoint as checkpoint
+import loop.agent.trace as trace_mod
 from loop.agent.context import Context
 from loop.agent.hooks import Hooks
 from loop.agent.llm import LLMClient
@@ -84,6 +86,9 @@ def _run_tool_block(block, hooks) -> dict:
     """Execute a single tool_use block and return the tool_result dict."""
     blocked = hooks.trigger_hooks("PreToolUse", block)
     if blocked is not None:
+        tr = trace_mod.current()
+        if tr is not None:
+            tr.record("tool_denied", tool=block.name, reason=str(blocked)[:200])
         return {"type": "tool_result", "tool_use_id": block.id,
                 "content": blocked, "is_error": True}
     handler = TOOL_HANDLERS.get(block.name)
@@ -116,32 +121,50 @@ def _run_tool_turn(tool_uses, hooks):
 def agent_loop(messages: list) -> None:
     configure_logging()
     hooks.trigger_hooks("AgentStart")
+    session_id = uuid.uuid4().hex[:12]
+    trace_mod.start(WORKDIR, session_id)
+    tr = trace_mod.current()
+    if tr is not None:
+        tr.record("session_start", workdir=str(WORKDIR), initial_messages=len(messages))
     tool_call_count = 0
     tokens_at_last_checkpoint = context.current_tokens(messages)
     while True:
         if context.should_compact(messages, llm_client.get_context_window()):
             context.autocompact(messages, llm_client.client, llm_client.model, llm_client.get_context_window())
+            if tr is not None:
+                tr.record("autocompact", tool_calls_so_far=tool_call_count)
         response = llm_client.client.messages.create(
             model=llm_client.model, system=SYSTEM, messages=messages,
             tools=cast(list, TOOLS), max_tokens=8000,
         )
         context.update(len(messages), response)
-
+        if tr is not None:
+            tr.record("llm_response", stop_reason=response.stop_reason,
+                      tokens_in=getattr(response.usage, "input_tokens", 0),
+                      tokens_out=getattr(response.usage, "output_tokens", 0))
         messages.append({"role": "assistant", "content": response.content})
 
         if response.stop_reason != "tool_use":
             hooks.trigger_hooks("AgentStop", messages)
             checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
+            if tr is not None:
+                tr.record("session_end", tool_calls=tool_call_count, turns=len(messages))
+            trace_mod.stop()
             return
 
         tool_uses = [b for b in response.content if b.type == "tool_use"]
+        if tr is not None and tool_uses:
+            tr.record("tool_batch", tools=[b.name for b in tool_uses], size=len(tool_uses))
         results = _run_tool_turn(tool_uses, hooks)
         tool_call_count += len(tool_uses)
         messages.append({"role": "user", "content": results})
 
         new_tokens = context.current_tokens(messages) - tokens_at_last_checkpoint
         if checkpoint.is_due(tool_call_count, new_tokens):
-            checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
+            saved_path = checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
+            if tr is not None:
+                tr.record("checkpoint_save", path=str(saved_path),
+                          tool_calls=tool_call_count, new_tokens=new_tokens)
             tokens_at_last_checkpoint = context.current_tokens(messages)
 
 

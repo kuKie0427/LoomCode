@@ -9,22 +9,32 @@
 ## Quick Start
 
 ```bash
-./init.sh                    # Install deps + run full verification (pytest + ruff + mypy)
+./init.sh                    # Install deps + run full verification (ruff + mypy + pytest)
 uv run pytest -v             # Run tests only
-uv run python main.py        # Start the agent REPL
+uv run python -m loop.cli run # Start the agent REPL
+uv run python -m loop.cli eval               # Run the eval suite (text)
+uv run python -m loop.cli eval --html r.html # Run eval + write HTML report
+uv run python -m loop.cli trace show         # Show recent trace events
+uv run python -m loop.cli audit              # Audit this project's harness
+uv run python -m loop.cli init .             # Scaffold harness in target dir
 ```
 
 ## Layout
 
-| File | Purpose |
+| Path | Purpose |
 |---|---|
-| `main.py` | `agent_loop()`, tool definitions, REPL entry point |
-| `context.py` | Token estimation, `microcompact`, `autocompact` |
-| `hook.py` | `Hooks` registry, deny list, permission rules, user approval |
-| `models.py` | `LLMClient` (Anthropic SDK wrapper) |
-| `prompt.py` | `SystemPrompt` (static + dynamic with cache boundary) |
-| `tests/` | pytest suite (71 tests across 6 files) |
-| `harness-creator/` | Reference skill (do NOT commit; gitignored) |
+| `loop/agent/loop.py` | `agent_loop()`, message flow, checkpoint, trace |
+| `loop/agent/context.py` | Token estimation, `microcompact`, `autocompact` |
+| `loop/agent/hooks.py` | `Hooks` registry, deny list, permission rules |
+| `loop/agent/llm.py` | `LLMClient` (Anthropic SDK wrapper) |
+| `loop/agent/prompt.py` | `SystemPrompt` (static + dynamic, cache boundary) |
+| `loop/agent/tools.py` | `run_*` tool handlers, `spawn_subagent` |
+| `loop/agent/trace.py` | Append-only JSONL trace (`.minicode/trace.jsonl`) |
+| `loop/agent/checkpoint.py` | Atomic save of conversation state |
+| `loop/eval/` | EvalCase framework + 32 cases (init/audit/detect/memory/skills/integration) |
+| `loop/cli.py` | Argparse + subcommand routing |
+| `tests/` | pytest suite (225 tests) |
+| `harness-creator/` | Reference skill (gitignored, do NOT commit) |
 
 Topic docs (load **on demand**, never pre-load):
 
@@ -43,6 +53,8 @@ Topic docs (load **on demand**, never pre-load):
 4. **Update artifacts**: After every change, update `feature_list.json`. Append a section to `progress.md` at end of session.
 5. **Stay in scope**: Don't modify files unrelated to the active feature.
 6. **No self-declared passing**: Agents may mark `not-started → in-progress → blocked`. Only `./init.sh` (or its sub-commands) marks `done`.
+7. **Review→Rule**: When a review or post-mortem surfaces a recurring failure pattern, promote it to a numbered Working Rule here AND, when cheap, encode it as an eval case under `loop/eval/cases/`. One-off fixes don't compound; rules do.
+8. **Eval cases are first-class tests**: New features that change observable behavior should ship with at least one eval case in `loop/eval/cases/`. The eval runner is the regression net for product behavior; pytest is for unit correctness.
 
 ## Definition of Done
 
@@ -57,10 +69,11 @@ A feature is done ONLY when ALL of the following hold:
 ## End-of-Session Checklist
 
 1. Run `./init.sh` — must exit 0
-2. Update `feature_list.json` for the active feature (status, evidence, blocker)
-3. Append a section to `progress.md` (what was done, blockers, next step)
-4. If multi-session: write `session-handoff.md`
-5. Commit with a message naming the feature (e.g. `feat: f-test-framework-p4 compress failure path`)
+2. Run `loop eval` if any eval case was touched — must be 32/32 (or more)
+3. Update `feature_list.json` for the active feature (status, evidence, blocker)
+4. Append a section to `progress.md` (what was done, blockers, next step)
+5. If multi-session: write `session-handoff.md`
+6. Commit with a message naming the feature (e.g. `feat: f-observability structured trace + eval runner`)
 
 ## Verification Commands
 
@@ -70,20 +83,25 @@ A feature is done ONLY when ALL of the following hold:
 
 # Layer 1 — static
 uv run ruff check .
-uv run mypy main.py context.py hook.py models.py prompt.py
+uv run mypy loop/
 
 # Layer 2 — unit + integration tests
 uv run pytest -v
 
-# Layer 3 — smoke (manual)
-uv run python main.py    # type a question, expect streamed response
+# Layer 3 — eval suite (product behavior)
+uv run python -m loop.cli eval --fail-under 100
+
+# Layer 4 — smoke (manual)
+uv run python -m loop.cli run    # type a question, expect streamed response
 ```
 
 ## Escalation
 
 - **Architecture decision**: Read `docs/architecture.md` first. If still unclear, ask user.
-- **Tool behavior unclear**: Read `docs/tools.md` + the `run_*` functions in `main.py`.
-- **Hook ordering / events**: Read `docs/hooks.md` and `hook.py`.
-- **Compression heuristics**: Read `docs/context.md` and the constants in `context.py` (`KEEP_RECENT`, `THRESHOLD`, etc.).
+- **Tool behavior unclear**: Read `docs/tools.md` + the `run_*` functions in `loop/agent/tools.py`.
+- **Hook ordering / events**: Read `docs/hooks.md` and `loop/agent/hooks.py`.
+- **Compression heuristics**: Read `docs/context.md` and the constants in `loop/agent/context.py`.
+- **Trace schema or eval case design**: Read `loop/agent/trace.py` and `loop/eval/runner.py` before adding cases.
 - **Test failure repeats 3+ times**: Update `progress.md` with diagnosis, mark feature `blocked`, ask user.
 - **New verification command needed**: Choose from existing patterns in `feature_list.json` first; only add a new command if none fit.
+- **Recurring reviewer finding**: Promote to a Working Rule here AND/OR add an eval case — don't just patch and move on.

@@ -25,7 +25,9 @@
       "id": "f-test-framework-p1",
       "name": "核心单元测试: Prompt & Models",
       "description": "SystemPrompt 全部方法 + LLMClient 初始化和配置",
-      "dependencies": ["f-test-framework-p0"],
+      "dependencies": [
+        "f-test-framework-p0"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_prompt.py tests/test_models.py",
       "evidence": "12 passed in 0.17s"
@@ -34,7 +36,9 @@
       "id": "f-test-framework-p2",
       "name": "核心单元测试: Hooks",
       "description": "Hooks 事件系统 (context 压缩测试见 f-test-framework-p4)",
-      "dependencies": ["f-test-framework-p1"],
+      "dependencies": [
+        "f-test-framework-p1"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_hook.py",
       "evidence": "8 passed in 0.02s"
@@ -43,7 +47,9 @@
       "id": "f-test-framework-p3",
       "name": "集成测试: 工具函数 & Agent Loop",
       "description": "bash/read/write/edit/glob/todo 工具 + agent_loop 端到端 + spawn_subagent",
-      "dependencies": ["f-test-framework-p2"],
+      "dependencies": [
+        "f-test-framework-p2"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_tools.py tests/test_agent_loop.py",
       "evidence": "25 passed in 0.11s"
@@ -52,7 +58,9 @@
       "id": "f-test-framework-p4",
       "name": "Context 压缩流程测试",
       "description": "update / current_tokens / _find_tail_cutoff / _generate_summary / _inject_todo_attachment / autocompact — includes LLM-failure fallback path",
-      "dependencies": ["f-test-framework-p3"],
+      "dependencies": [
+        "f-test-framework-p3"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_context.py",
       "evidence": "26/26 context tests pass (was 25/26 with test_autocompact_llm_failure_skips_compaction failing). Full suite: 127 passed / 0 failed — init.sh exits 0 in 'all green' mode (no blocked-feature notice). Fix: when _generate_summary returns None, autocompact now skips compaction (leaves messages unchanged) instead of truncating to tail. Aligns with the test name 'skips_compaction' and the test assertion that messages[0]['content'] == 'Round 1' stays intact."
@@ -61,7 +69,9 @@
       "id": "f-harness-scaffold",
       "name": "Phase 0: Harness 自洽 (Dogfooding)",
       "description": "添加 AGENTS.md / init.sh / progress.md / session-handoff.md / docs/ / ruff / mypy / feature_list.json schema 迁移 + Phase 1-5 roadmap features。让本项目本身符合 harness-creator 最小五件套。",
-      "dependencies": ["f-test-framework-p2"],
+      "dependencies": [
+        "f-test-framework-p2"
+      ],
       "status": "done",
       "verification": "test -f AGENTS.md && test -f init.sh && test -f progress.md && test -f session-handoff.md && ls docs/architecture.md docs/tools.md docs/hooks.md docs/context.md docs/testing.md && uv run python -c 'import json; json.load(open(\"feature_list.json\"))'",
       "evidence": "12 features in feature_list.json, schema ref: ./feature_list.schema.json. ./init.sh exits 0 (smart pass-gate tolerates f-test-framework-p4 blocked). All 5 docs present."
@@ -70,7 +80,9 @@
       "id": "f-product-init-cmd",
       "name": "Phase 1: loop init 命令",
       "description": "Python 版 create-harness.mjs。在用户项目里生成 5 件套 + 项目类型自动检测 (Python/Node/Go/Rust/...) + --agent-file / --commands / --force 选项。",
-      "dependencies": ["f-harness-scaffold"],
+      "dependencies": [
+        "f-harness-scaffold"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_detect.py tests/test_init_cmd.py -v && uv run loop init /tmp/coldstart --agent-file CLAUDE.md --commands 'echo step1,echo step2' && test -f /tmp/coldstart/CLAUDE.md && test -x /tmp/coldstart/init.sh",
       "evidence": "40 tests pass (16 detect + 24 init_cmd). Cold-start: 6 files written, --agent-file CLAUDE.md works, --commands overrides detected commands, feature_list.json has 5 not-started placeholders, init.sh is executable (chmod 0o755)."
@@ -79,7 +91,9 @@
       "id": "f-product-audit-cmd",
       "name": "Phase 1: loop audit 命令",
       "description": "Python 版 validate-harness.mjs。5 维评分 (Instructions / State / Verification / Scope / Lifecycle) + JSON/HTML 输出 + 瓶颈指向。",
-      "dependencies": ["f-product-init-cmd"],
+      "dependencies": [
+        "f-product-init-cmd"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_audit_cmd.py -v && uv run loop audit . --json | uv run python -c 'import json,sys; r=json.load(sys.stdin); assert r[\"overall\"] >= 70' && uv run loop audit . --html /tmp/loop-audit.html",
       "evidence": "16 audit tests pass. loop audit . scores 92/100 (instructions 4/5, state 5/5, verification 5/5, scope 4/5, lifecycle 4/5). Bottleneck: instructions (Startup workflow text not detected). JSON output parses; HTML report 3177 bytes valid HTML. Total tests: 126 pass / 1 pre-existing failure."
@@ -88,7 +102,9 @@
       "id": "f-memory-persistence",
       "name": "Phase 2: 跨会话记忆 + 三层上下文",
       "description": ".minicode/memory/ 目录 + MEMORY.md 长期记忆 + 三段式 SystemPrompt 升级 (静态/会话/记忆) + memory_read/write/search 工具 + 三层上下文加载 (~500 / ~2000 / on-demand)。",
-      "dependencies": ["f-harness-scaffold"],
+      "dependencies": [
+        "f-harness-scaffold"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_memory.py -v",
       "evidence": "29 memory tests pass. Total: 160 pass / 0 fail. Cold-start: MemoryStore().append() then new MemoryStore().read() returns the persisted entries (verified with timestamps and search()). Self-audit: 92/100 (unchanged). Q3 detection implemented: is_own_project() correctly returns True for workdir's own .minicode/, False for sibling projects and orphan paths."
@@ -97,7 +113,9 @@
       "id": "f-skill-runtime",
       "name": "Phase 3: Skill Runtime + Tool Registry",
       "description": ".minicode/skills/ 目录约定 + SKILL.md frontmatter + load_skill 工具 + ToolRegistry 类 (name/schema/handler/permission_profile) + 权限管线 async 化。",
-      "dependencies": ["f-memory-persistence"],
+      "dependencies": [
+        "f-memory-persistence"
+      ],
       "status": "not-started",
       "verification": "uv run pytest tests/test_skill.py -v",
       "evidence": null
@@ -106,7 +124,9 @@
       "id": "f-multi-agent",
       "name": "Phase 4: Multi-Agent via Tool Calling + Checkpoint (Q4)",
       "description": "Fork 模式并行 subagent（ThreadPoolExecutor）+ SUB_SYSTEM 修复 + 结构化 return (summary + turn count + tool calls) + Checkpoint (Q4 hybrid：10 tool calls OR 5k tokens 写 .minicode/checkpoints/<session>.json, 原子 write)。简化的 Phase 4 —— 不含 MessageBus / Task Board / Swarm / 完整 lifecycle (用户的判断：tool calling + checkpoint 对当前产品足够)。",
-      "dependencies": ["f-skill-runtime"],
+      "dependencies": [
+        "f-skill-runtime"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/ -v && ./init.sh",
       "evidence": "206 tests pass / 0 fail (was 185, +21). init.sh 'all green'. Hooks thread-safe (Lock + copy-on-trigger). Fork 模式: 多个 task 工具调用同轮并发执行. SUB_SYSTEM 修复 (之前是空字符串). 结构化 return: [done: N turns, M tool calls]\\n<summary>. Checkpoint: 写到 .minicode/checkpoint.json 原子 write (tmp + rename). loop run --resume 恢复. Cold-start: save/load roundtrip 验证 messages / tool_call_count / model / saved_at 全部保留."
@@ -115,7 +135,9 @@
       "id": "f-architecture-unify",
       "name": "架构统一：产品全部内迁 loop/agent/",
       "description": "原根目录的 main.py / context.py / hook.py / models.py / prompt.py 全部内迁到 loop/agent/。三层加载从 loop/memory/context.py 并入 loop/agent/prompt.py（消除概念分裂）。loop CLI 加 run subcommand 替代 python main.py。",
-      "dependencies": ["f-memory-persistence"],
+      "dependencies": [
+        "f-memory-persistence"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/ -v && uv run loop audit . | grep 'Overall'",
       "evidence": "160/0 tests pass. init.sh 'all green'. loop audit 92/100. loop --help shows init/audit/run. Renames tracked by git (R status)."
@@ -124,7 +146,9 @@
       "id": "f-skill-runtime",
       "name": "Phase 3: Skill Runtime + Tool Registry",
       "description": ".minicode/skills/<name>/SKILL.md 目录约定 + SKILL.md frontmatter 解析 + load_skill 工具 + ToolRegistry 类 (含 is_read_only / is_concurrent_safe / enable/disable) + Q2 项目覆盖用户全局实现。",
-      "dependencies": ["f-architecture-unify"],
+      "dependencies": [
+        "f-architecture-unify"
+      ],
       "status": "in-progress",
       "verification": "uv run pytest tests/test_skills.py tests/test_tool_registry.py -v && echo 'body content' > /tmp/x/.minicode/skills/demo/SKILL.md && uv run loop audit .",
       "evidence": null
@@ -133,10 +157,12 @@
       "id": "f-observability",
       "name": "Phase 5: Observability + Eval 套件",
       "description": "结构化 .minicode/trace.jsonl + 30+ eval cases (10 来自 harness-creator 基线 + 20 产品专属) + HTML 报告 + review→rule 闭环 + ablation 实验。",
-      "dependencies": ["f-multi-agent"],
-      "status": "not-started",
+      "dependencies": [
+        "f-multi-agent"
+      ],
+      "status": "done",
       "verification": "uv run python -m loop eval --html /tmp/eval.html && test -f /tmp/eval.html",
-      "evidence": null
+      "evidence": "uv run python -m loop.cli eval --html /tmp/eval.html → 'Eval results: 32/32 passed', HTML report written (4218 bytes); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy"
     }
   ]
 }

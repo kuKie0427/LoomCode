@@ -1,9 +1,11 @@
 import subprocess
+import time
 from pathlib import Path
 
 from anthropic.types import MessageParam, ToolParam
 from loguru import logger
 
+import loop.agent.trace as trace_mod
 from loop.agent.tool_registry import Tool, ToolRegistry
 from loop.memory import MemoryStore
 from loop.skills import build_skill_index
@@ -253,6 +255,10 @@ def spawn_subagent(description: str, llm_client=None, hooks=None) -> str:
         from loop.agent.loop import llm_client as _llm_client
         llm_client = llm_client or _llm_client
         hooks = hooks or _hooks
+    tr = trace_mod.current()
+    if tr is not None:
+        tr.record("subagent_start", description_len=len(description))
+    t0 = time.monotonic()
     hooks.trigger_hooks("AgentStart")
     messages: list[MessageParam] = [{"role": "user", "content": description}]
 
@@ -293,6 +299,10 @@ def spawn_subagent(description: str, llm_client=None, hooks=None) -> str:
         if not result:
             result = "Subagent stopped after 30 turns without final answer."
     hooks.trigger_hooks("AgentStop", messages)
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    if tr is not None:
+        tr.record("subagent_end", turns=turn_count, tool_calls=tool_call_count,
+                  duration_ms=elapsed_ms)
     return f"[done: {turn_count} turns, {tool_call_count} tool calls]\n{result}"
 
 

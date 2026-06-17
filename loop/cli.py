@@ -12,6 +12,7 @@ from pathlib import Path
 
 from loop import __version__
 from loop.agent import run_repl
+from loop.agent.trace import Trace, default_path_for
 from loop.audit_cmd import audit
 from loop.detect import detect_project
 from loop.init_cmd import format_results, init
@@ -56,6 +57,18 @@ def _build_parser() -> argparse.ArgumentParser:
     run_p = sub.add_parser("run", help="Run the loop coding agent REPL")
     run_p.add_argument("--resume", action="store_true", help="Resume from checkpoint if present")
 
+    trace_p = sub.add_parser("trace", help="Inspect the structured agent trace (.minicode/trace.jsonl)")
+    trace_sub = trace_p.add_subparsers(dest="trace_command", required=True)
+    trace_show = trace_sub.add_parser("show", help="Show recent trace events")
+    trace_show.add_argument("--limit", "-n", type=int, default=20, help="How many recent events")
+    trace_show.add_argument("--workdir", type=Path, default=Path("."), help="Project workdir")
+    trace_sub.add_parser("path", help="Print the trace file path")
+
+    eval_p = sub.add_parser("eval", help="Run the eval suite and report")
+    eval_p.add_argument("--workdir", type=Path, default=Path("."), help="Project workdir")
+    eval_p.add_argument("--html", type=Path, default=None, help="Write HTML report to FILE")
+    eval_p.add_argument("--fail-under", type=int, default=100, help="Exit non-zero if score < N (default 100)")
+
     return parser
 
 
@@ -92,6 +105,36 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "run":
         run_repl(resume=args.resume)
+        return 0
+
+    if args.command == "trace":
+        workdir = args.workdir.resolve()
+        if args.trace_command == "path":
+            print(default_path_for(workdir))
+            return 0
+        if args.trace_command == "show":
+            tr = Trace(workdir, session_id="cli-show")
+            events = tr.recent(n=args.limit)
+            if not events:
+                print(f"(no trace events at {tr.path})")
+                return 0
+            for e in events:
+                ts = e.get("ts", "?")
+                ev = e.get("event", "?")
+                sid = e.get("session_id", "?")
+                rest = {k: v for k, v in e.items() if k not in ("ts", "event", "session_id")}
+                print(f"{ts} {sid} {ev} {rest}")
+            return 0
+
+    if args.command == "eval":
+        from loop.eval import run_evals
+        workdir = args.workdir.resolve()
+        try:
+            score = run_evals(workdir=workdir, html_output=args.html)
+        except SystemExit as exc:
+            return int(exc.code) if exc.code is not None else 1
+        if score < args.fail_under:
+            return 1
         return 0
 
     parser.print_help()

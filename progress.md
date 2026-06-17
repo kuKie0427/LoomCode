@@ -439,3 +439,57 @@ User pointed out: the original Phase 4 plan (MessageBus + Task Board + Coordinat
 - Task dependency graph: parent agent does ordering itself.
 - Background agents: not needed; REPL is synchronous.
 - Complex lifecycle: 4 existing hooks are enough.
+
+## Session: f-observability (Phase 5: Observability + Eval Suite)
+
+**Goal**: structured trace + 32 eval cases + `loop trace` / `loop eval` CLI + review→rule convention in AGENTS.md.
+
+### Done
+
+- **`loop/agent/trace.py`** (94 LOC): `Trace` class with thread-safe append-only JSONL, `start()` / `stop()` / `current()` module-level handles. Schema: `{ts, session_id, event, ...fields}`. Writes to `.minicode/trace.jsonl`.
+- **Trace integration** in `loop/agent/loop.py` and `loop/agent/tools.py`: events `session_start`, `session_end`, `llm_response`, `tool_batch`, `tool_denied`, `autocompact`, `checkpoint_save`, `subagent_start`, `subagent_end`. `uuid.uuid4().hex[:12]` for session_id.
+- **`loop trace show`** / **`loop trace path`** CLI subcommands.
+- **`loop eval`** CLI with `--html` + `--fail-under N`.
+- **`loop/eval/` package**: `EvalCase` / `EvalResult` / `discover_evals` / `run_one` / `run_all` / `format_report` / `html_report`. Auto-discovers subclasses from `loop.eval.cases.*`.
+- **32 eval cases** across init (6) / audit (4) / detect (7) / memory+skills (8) / integration (7) — including `loop-audit-scores-itself` which checks the project scores itself ≥ 70.
+- **`tests/test_trace.py` (10 tests)** + **`tests/test_eval_runner.py` (9 tests)** = 19 new unit tests.
+- **AGENTS.md update**: rewrote layout for `loop/agent/` module + new CLI commands; added **Rule 7 (Review→Rule)** and **Rule 8 (Eval cases are first-class tests)**; updated verification commands.
+- **Idempotent eval re-runs**: added `exist_ok=True` to `mkdir(parents=True)` in 4 places (memory-q3-foreign, skills-q2 ×2, skills-body) so back-to-back eval runs don't `FileExistsError`.
+
+### Verification
+
+```
+$ uv run python -m loop.cli eval --html /tmp/eval.html
+HTML report written to /tmp/eval.html
+
+$ test -f /tmp/eval.html && wc -c /tmp/eval.html
+4218 /tmp/eval.html
+
+$ ./init.sh
+============================= 225 passed in 1.14s ==============================
+=== Verification Complete (all green) ===
+```
+
+### Decisions
+
+- **Single trace file per workdir** (`.minicode/trace.jsonl`), append-only, one row per event. Mirrors `checkpoint.json` placement. No rotation; session_id field tags which run each row belongs to.
+- **Eval cases = product regression net** (not pytest). pytest stays for unit correctness (mockable, fast); eval suite drives the actual CLI as a black box. Review→Rule (Rule 7) + Eval-cases-are-tests (Rule 8) encode this in AGENTS.md.
+- **`run_one` catches `setup()` exceptions** as well as `run()` exceptions — added when a test for the runner itself surfaced the asymmetry.
+- **Helper-kwarg separation in `_util.py`**: `--setup` and `--existing-workdir` are helper kwargs, not loop-CLI args. `_util.run_loop_cli` also passes `target_name` as a positional `target` to `loop init`, using `workdir.resolve()` so cwd-of-subprocess doesn't double-nest.
+- **HTML report is minimal hand-rolled CSS** (~4KB) — no JS, no external deps. Stays self-contained.
+
+### Working tree
+
+Modified files (not yet committed):
+- `loop/agent/trace.py` (new)
+- `loop/agent/loop.py` (trace integration)
+- `loop/agent/tools.py` (subagent trace)
+- `loop/cli.py` (trace/eval subcommands)
+- `loop/eval/__init__.py`, `_util.py`, `runner.py` (new)
+- `loop/eval/cases/{init,audit,detect,memory_skills,integration}.py` (new)
+- `tests/test_trace.py`, `tests/test_eval_runner.py` (new)
+- `AGENTS.md` (rules 7+8, layout, commands)
+
+### Next
+
+- Awaiting user OK to commit (`feat: f-observability structured trace + eval runner`).
