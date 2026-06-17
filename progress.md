@@ -243,3 +243,93 @@ Keep the outer try/except (sensible defensive add), revert the LLM-failure branc
 - `not-started`: 4 (unchanged: f-memory-persistence / f-skill-runtime / f-multi-agent / f-observability)
 
 **Working tree after fix**: 5 of 7 p4 files left untouched (user's other p4 work — `hook.py` / `main.py` / `models.py` / `prompt.py` / `tests/test_agent_loop.py`). These are the agent-loop integration pieces; they interact with the new context.py but are not strictly required for the p4 test to pass. They can be committed separately when the user is ready.
+
+---
+
+## Phase 2: f-memory-persistence (2026-06-17 14:35)
+
+Implemented Q3-decision memory persistence + three-tier context loading.
+
+**New files** (3 + 1 test):
+
+- `loop/memory/__init__.py` — public surface (MemoryStore, is_own_project, load_tier1/2/3)
+- `loop/memory/paths.py` — `memory_dir()`, `memory_file()`, `find_project_root()`, `is_own_project()`. Q3 implementation: walk up from memory path to `.minicode/`, check if its parent is inside WORKDIR.
+- `loop/memory/store.py` — `MemoryStore` dataclass + read/write/append/search + session event log (`<session-id>.jsonl`). Hard caps: 200 lines / 25 KB (from memory-persistence reference). Caps raise on overflow so callers can detect and rotate to topic files.
+- `loop/memory/context.py` — three-tier loading with hard caps. `load_tier1` (~500 tokens): feature status + memory index. `load_tier2` (~2000 tokens): AGENTS.md / CLAUDE.md. `load_tier3` (no cap): on-demand. `combined_tier1_tier2` re-truncates to keep Tier 1+2 ≤ 2500 tokens.
+- `tests/test_memory.py` — 29 tests: paths (Q3 detection including own / sibling-project / orphan / parent-workdir boundaries), store (idempotent init, read/write/append/search, cap enforcement, session log), token_count, truncate, tier 1/2/3 + combined budgets.
+
+**Modified** (5):
+
+- `prompt.py` — `SystemPrompt` upgraded from 2 segments (static + dynamic) to 3 (static + session + memory). `add_dynamic` preserved as alias for `add_session` (backwards compatible with existing main.py). `build()` now conditionally emits BOUNDARY only when the next segment has content (no spurious boundary for empty prompts).
+- `main.py` — added `run_memory_read` / `run_memory_search` / `run_memory_write` tool handlers, registered in `TOOLS` and `TOOL_HANDLERS`. Tier 1 + Tier 2 added to `system_prompt.memory` segment before `build()` at module load.
+- `tests/test_prompt.py` — updated `test_add_dynamic_appends_newline` to check `sp.session` (the new field name). Added 4 new tests: TestAddSession, TestAddMemory, build-with-static-only, build-static-session-memory-with-two-boundaries.
+- `.gitignore` — added `.minicode/` (runtime data: memory, mailboxes, traces, checkpoints).
+- `feature_list.json` — f-memory-persistence now done with real evidence.
+
+**Acceptance evidence**:
+
+- 29 new memory tests pass. Total: **160 pass / 0 fail**.
+- `./init.sh` exit 0 in "all green" mode (smart pass-gate still not triggered).
+- **Cold-start verified**: write → new instance → read returns persisted entries. Search across "restart" returns matches. Memory timestamps preserved.
+- **Q3 detection**: own / sibling-project / orphan / parent-workdir all distinct (own=True, sibling=False, orphan=False, parent=False because parent workdir contains its own subdir but the subdir is not `.minicode/`).
+- **Tier budget invariant**: Tier 1 ≤ 500 tokens, Tier 2 ≤ 2000 tokens, combined ≤ 2500 tokens. Each enforced by `truncate_to_tokens()`.
+- `loop audit .` still scores 92/100 (no false positives / negatives from new code).
+
+**Decisions made**:
+
+- **Phase 2 simplification vs two-step save**: the reference prescribes topic files + index for memory > 25 KB. Phase 2 ships the simpler single-file MEMORY.md and raises `ValueError` on overflow. Topic files are an extension point for Phase 4 (when memory volume justifies it). The `_enforce_caps` method is the seam.
+- **Q3 implementation choice**: detection by walk-up + `is_relative_to(workdir)` rather than by `WORKDIR/.minicode/ == project_root/.minicode/`. This works whether memory is in the user's project root or any nested subdirectory.
+- **Backwards compat for `add_dynamic`**: kept as alias to `add_session`. main.py's existing calls (`add_dynamic(...)` for workdir + git context) continue to work unchanged. The semantic shift is that "dynamic" content now sits between two BOUNDARY markers, not at the tail.
+- **Memory tools stay simple**: `memory_read` / `memory_search` / `memory_write` don't implement Q3 explicit-consent for foreign reads — that would require hook integration which is out of Phase 2 scope. The current handlers always operate on the agent's own project. Q3 enforcement happens via the `is_own_project()` API exposed in `loop.memory.paths`; a future iteration wires it into the read_file PreToolUse hook for foreign MEMORY.md reads.
+- **.minicode/ gitignored**: matches the Q2/Q4 decision storage location (skills, checkpoints) — none of these are version-controlled.
+
+**Working tree**: 3 files remain unstaged (user's p4 work: hook.py / models.py / tests/test_agent_loop.py).
+
+---
+
+## f-architecture-unify (2026-06-17 14:50)
+
+Closed the architecture split. Product is now self-contained in `loop/agent/`; the harness tooling is no longer a separate concern.
+
+**Renames (git tracks as renames, no content change for code semantics)**:
+
+- `main.py` → `loop/agent/tools.py` (extracts all tool handlers + TOOLS/TOOL_HANDLERS + spawn_subagent)
+- `context.py` → `loop/agent/context.py` (Context class)
+- `hook.py` → `loop/agent/hooks.py` (Hooks class + permission pipeline)
+- `models.py` → `loop/agent/llm.py` (LLMClient — renamed for clarity)
+- `prompt.py` → `loop/agent/prompt.py` (SystemPrompt with 3-segment support)
+
+**New file**: `loop/agent/loop.py` (extracted from main.py — contains agent_loop, run_repl, configure_logging, build_system_prompt, and the module-level globals `SYSTEM`, `context`, `hooks`, `llm_client`).
+
+**CLI integration**:
+
+- `loop/cli.py` adds `run` subcommand: `loop run` invokes `run_repl()`. This replaces `python main.py`.
+- `loop --help` now shows: `init / audit / run`.
+
+**Tests updated**:
+
+- `test_prompt.py`: `from prompt import BOUNDARY, SystemPrompt` → `from loop.agent.prompt import ...`
+- `test_hook.py`: `import hook as hook_module; from hook import ...` → `import loop.agent.hooks as hook_module; from loop.agent.hooks import ...`
+- `test_agent_loop.py`: `import main` → `import loop.agent.loop as main`; `main.spawn_subagent(...)` → `loop.agent.tools.spawn_subagent(...)` (test imports the actual location rather than relying on module re-exports)
+- `test_context.py`: `from context import Context` → `from loop.agent.context import Context`
+- `test_models.py`: `from models import LLMClient` + `mocker.patch("models.Anthropic")` → `from loop.agent.llm import LLMClient` + `mocker.patch("loop.agent.llm.Anthropic")`
+- `test_tools.py`: `import main` → `import loop.agent.tools as main`
+
+**init.sh**: the mypy invocation now targets `uv run mypy loop/` (was: `mypy main.py context.py hook.py models.py prompt.py`).
+
+**Acceptance evidence**:
+
+- 160 tests pass / 0 fail.
+- `./init.sh` exit 0 in "all green" mode (no blocked-feature notice, no failures).
+- `uv run loop --help` shows the new `run` subcommand.
+- `uv run python -c "from loop.cli import main; print(callable(main))"` returns True.
+- `loop audit .` still scores 92/100 (unchanged — no functional change, just relocation).
+
+**Decision rationale**:
+
+- **Single Python package (`loop/`)** keeps the product, harness tooling, and templates under one namespace. The previous split (root-level agent + `loop/` package) was a path-of-least-resistance choice at each phase; this commit collapses it.
+- **The `loop` CLI command** now serves all three concerns: tool the agent to a project (`init`), score a project (`audit`), and run the agent itself (`run`). Single entry point, single import graph.
+- **`loop/agent/` vs `loop/memory/` vs `loop/{detect,init,audit}_cmd.py`** — the agent module is grouped under `agent/` (it's the product proper); memory is grouped under `memory/` (it's a cross-cutting concern shared with future Phase 4+ features); harness tooling stays at the `loop/` top level.
+- **Backward compat for tests**: kept `import loop.agent.loop as main` style aliases in test_agent_loop.py and test_tools.py to minimize churn. The `reset_hooks` fixture still works because module globals (`hooks`, `context`, `llm_client`) are still module-level in `loop.agent.loop`.
+
+**Working tree**: clean. The user's earlier p4 work (changes in `hook.py`, `models.py`, `tests/test_agent_loop.py`) rode along with the rename — they're now in `loop/agent/hooks.py`, `loop/agent/llm.py`, `tests/test_agent_loop.py` with the same content.

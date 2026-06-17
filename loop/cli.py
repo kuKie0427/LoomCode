@@ -11,6 +11,7 @@ import argparse
 from pathlib import Path
 
 from loop import __version__
+from loop.agent import run_repl
 from loop.audit_cmd import audit
 from loop.detect import detect_project
 from loop.init_cmd import format_results, init
@@ -52,6 +53,8 @@ def _build_parser() -> argparse.ArgumentParser:
     audit_p.add_argument("--html", type=Path, default=None, help="Write an HTML report to FILE")
     audit_p.add_argument("--min-score", type=int, default=70, help="Exit non-zero if overall < N (default 70)")
 
+    sub.add_parser("run", help="Run the loop coding agent REPL")
+
     return parser
 
 
@@ -84,6 +87,10 @@ def main(argv: list[str] | None = None) -> int:
             )
         except SystemExit as exc:
             return int(exc.code) if exc.code is not None else 1
+        return 0
+
+    if args.command == "run":
+        run_repl()
         return 0
 
     parser.print_help()

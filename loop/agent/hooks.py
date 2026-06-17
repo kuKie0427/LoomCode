@@ -1,6 +1,6 @@
 from pathlib import Path
+
 from loguru import logger
-from functools import partial
 
 WORKDIR = Path.cwd()
 
@@ -25,7 +25,7 @@ class Hooks:
     def trigger_hooks(self, event: str, *args):
         for callback in HOOKS[event]:
             result = callback(event, *args)
-            if result is not None: 
+            if result is not None:
                 return result
         return None
 
@@ -40,10 +40,9 @@ class Hooks:
             decision = self._ask_user(block.name, block.input, reason)
             if decision == "deny":
                 return "Permission denied."
-        return None  
+        return None
 
     def log_hook(self, event, *args):
-        """Unified logger for all 4 hook events."""
         if event == "PreToolUse":
             block = args[0]
             logger.info("> {} {}", block.name, block.input)
@@ -61,25 +60,22 @@ class Hooks:
             if pattern in command:
                 return f"Blocked: '{pattern}' is on the deny list"
         return None
-    
+
     def _check_rules(self, tool_name: str, args: dict) -> str | None:
         for rule in PERMISSION_RULES:
             if tool_name in rule["tools"] and rule["check"](args):
                 return rule["message"]
         return None
 
-
-    # Gate 3: User approval — wait for confirmation after rule match
     def _ask_user(self, tool_name: str, args: dict, reason: str) -> str:
         logger.warning("⚠  {}", reason)
         logger.info("   Tool: {} ({})", tool_name, args)
         choice = input("   Allow? [y/N] ").strip().lower()
         return "allow" if choice in ("y", "yes") else "deny"
-    
+
 
 if __name__ == "__main__":
     hooks = Hooks()
-    # Simulate a tool call
     class Block:
         def __init__(self, name, input):
             self.name = name

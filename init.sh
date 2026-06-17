@@ -21,7 +21,7 @@ uv run ruff check .
 
 echo ""
 echo "=== 3/4 Type check (mypy) ==="
-uv run mypy main.py context.py hook.py models.py prompt.py
+uv run mypy loop/
 
 echo ""
 echo "=== 4/4 Tests (pytest) ==="

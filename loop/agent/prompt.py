@@ -61,7 +61,6 @@ class SystemPrompt:
 if __name__ == "__main__":
     sp = SystemPrompt()
     WORKDIR1 = Path.cwd()
-    WORKDIR2 = Path("/Users/lanf/minio")
     sp.add_static("你是一个编程主智能体，协助我进行开发任务。")
     sp.add_static("行为准则：小心操作，不破坏系统，不泄露数据。")
     sp.add_static("语言风格：简洁、直接、无废话。")

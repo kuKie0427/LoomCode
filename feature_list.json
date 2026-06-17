@@ -112,6 +112,15 @@
       "evidence": null
     },
     {
+      "id": "f-architecture-unify",
+      "name": "架构统一：产品全部内迁 loop/agent/",
+      "description": "原根目录的 main.py / context.py / hook.py / models.py / prompt.py 全部内迁到 loop/agent/。三层加载从 loop/memory/context.py 并入 loop/agent/prompt.py（消除概念分裂）。loop CLI 加 run subcommand 替代 python main.py。",
+      "dependencies": ["f-memory-persistence"],
+      "status": "in-progress",
+      "verification": "uv run pytest tests/ -v && uv run loop audit . | grep 'Overall'",
+      "evidence": null
+    },
+    {
       "id": "f-observability",
       "name": "Phase 5: Observability + Eval 套件",
       "description": "结构化 .minicode/trace.jsonl + 30+ eval cases (10 来自 harness-creator 基线 + 20 产品专属) + HTML 报告 + review→rule 闭环 + ablation 实验。",

@@ -1,6 +1,6 @@
-"""Unit tests for LLMClient in models.py."""
+from loop.agent.llm import LLMClient
 
-from models import LLMClient
+ANTHROPIC_PATCH = "loop.agent.llm.Anthropic"
 
 
 def test_init_creates_anthropic_client(mocker, monkeypatch):
@@ -8,7 +8,7 @@ def test_init_creates_anthropic_client(mocker, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.com")
 
-    mock_anthropic_cls = mocker.patch("models.Anthropic")
+    mock_anthropic_cls = mocker.patch(ANTHROPIC_PATCH)
     client = LLMClient(model="test-model")
 
     mock_anthropic_cls.assert_called_once()
@@ -23,7 +23,7 @@ def test_init_uses_env_config(mocker, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "my-api-key")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://custom.example.com")
 
-    mocker.patch("models.Anthropic")
+    mocker.patch(ANTHROPIC_PATCH)
     spy = mocker.patch.object(LLMClient, "_llm_client")
 
     LLMClient(model="test-model")
@@ -36,7 +36,7 @@ def test_change_model_updates_model_attr(mocker, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.com")
 
-    mocker.patch("models.Anthropic")
+    mocker.patch(ANTHROPIC_PATCH)
     client = LLMClient(model="original-model")
 
     client.change_model("new-model")
@@ -49,7 +49,7 @@ def test_get_context_window_known_model(mocker, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.com")
 
-    mocker.patch("models.Anthropic")
+    mocker.patch(ANTHROPIC_PATCH)
     client = LLMClient(model="deepseek-v4-flash")
 
     assert client.get_context_window() == 1_000_000
@@ -60,7 +60,7 @@ def test_get_context_window_unknown_model(mocker, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.com")
 
-    mocker.patch("models.Anthropic")
+    mocker.patch(ANTHROPIC_PATCH)
     client = LLMClient(model="unknown-model")
 
     assert client.get_context_window() == 128_000
@@ -71,7 +71,7 @@ def test_get_context_window_after_change(mocker, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.com")
 
-    mocker.patch("models.Anthropic")
+    mocker.patch(ANTHROPIC_PATCH)
     client = LLMClient(model="unknown-model")
 
     client.change_model("deepseek-v4-flash")

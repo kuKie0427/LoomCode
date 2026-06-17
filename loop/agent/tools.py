@@ -1,70 +1,14 @@
-import os
 import subprocess
 from pathlib import Path
 
-import dotenv
 from anthropic.types import MessageParam, ToolParam
 from loguru import logger
 
-from context import Context
-from hook import Hooks
-from loop.memory import MemoryStore, load_tier1, load_tier2
-from models import LLMClient
-from prompt import SystemPrompt
+from loop.memory import MemoryStore
 
-dotenv.load_dotenv()
 WORKDIR = Path.cwd()
 
-# ── Loguru 配置 ──
-logger.remove()
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-logger.add(
-    sink=lambda msg: __import__("sys").stdout.write(msg),
-    format="<green>{time:HH:mm:ss}</green> | <level>{level:7}</level> | <level>{message}</level>",
-    level=LOG_LEVEL,
-    colorize=True,
-)
-logger.add(
-    WORKDIR / "loop.log",
-    format="{time:YYYY-MM-DD HH:mm:ss} | {level:7} | {message}",
-    level="DEBUG",
-    rotation="10 MB",
-    retention=3,
-)
-
-system_prompt = SystemPrompt()
-system_prompt.add_static("你是MiniCode,一个编程助手,协助用户进行开发任务。")
-system_prompt.add_static("行为准则：小心操作，不破坏系统，不泄露数据。")
-system_prompt.add_static("语言风格：简洁、直接、无废话。")
-
-system_prompt.add_dynamic(f"工作目录: {WORKDIR}")
-system_prompt.add_dynamic(system_prompt.get_git_context(WORKDIR))
-
-memory_tier1 = load_tier1(WORKDIR)
-memory_tier2 = load_tier2(WORKDIR)
-if memory_tier1 or memory_tier2:
-    system_prompt.add_memory(memory_tier1 + ("\n\n" if memory_tier1 and memory_tier2 else "") + memory_tier2)
-
-SYSTEM = system_prompt.build()
-
-SUB_SYSTEM = (
-    f"你是一个编程子智能体，工作在{WORKDIR}. "
-    "完成委派给你的任务，完成后输出一个简洁的摘要。"
-    "不要进一步委派。"
-)
-
-context = Context()
-
-hooks = Hooks()
-hooks.register_hook("PreToolUse", hooks.check_permission_hook)
-hooks.register_hook("PreToolUse", hooks.log_hook)
-hooks.register_hook("PostToolUse", hooks.log_hook)
-hooks.register_hook("AgentStart", hooks.log_hook)
-hooks.register_hook("AgentStop", hooks.log_hook)
-hooks.register_hook("AgentStop", context.microcompact) 
-
-
-llm_client = LLMClient(model=os.getenv("MODEL", "deepseek-v4-flash"))
+CURRENT_TODOS: list = []
 
 def run_bash(command: str) -> str:
     dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
@@ -74,7 +18,7 @@ def run_bash(command: str) -> str:
         r = subprocess.run(
             command, shell=True, cwd=WORKDIR,
             capture_output=True, text=True,
-            encoding="utf-8", errors="replace", 
+            encoding="utf-8", errors="replace",
             timeout=120
         )
         out = (r.stdout + r.stderr).strip()
@@ -136,7 +80,6 @@ def run_glob(pattern: str) -> str:
 
 def run_todo_write(todos: list) -> str:
     global CURRENT_TODOS
-    # validate required fields
     for i, t in enumerate(todos):
         if "content" not in t or "status" not in t:
             return f"Error: todos[{i}] missing 'content' or 'status'"
@@ -151,27 +94,23 @@ def run_todo_write(todos: list) -> str:
     return f"Updated {len(CURRENT_TODOS)} tasks"
 
 
-
 def run_memory_read() -> str:
-    store = MemoryStore(WORKDIR)
-    return store.read()
+    return MemoryStore(WORKDIR).read()
 
 def run_memory_search(query: str) -> str:
-    store = MemoryStore(WORKDIR)
-    matches = store.search(query)
+    matches = MemoryStore(WORKDIR).search(query)
     if not matches:
         return f"(no matches for {query!r})"
     return "\n".join(matches)
 
 def run_memory_write(entry: str, heading: str | None = None) -> str:
-    store = MemoryStore(WORKDIR)
     try:
-        store.append(entry, heading=heading)
+        MemoryStore(WORKDIR).append(entry, heading=heading)
     except ValueError as e:
         return f"Memory cap exceeded: {e}"
     return f"Appended {len(entry)} chars to MEMORY.md"
 
-TOOLS:list[ToolParam]= [
+TOOLS: list[ToolParam] = [
     {"name": "bash", "description": "Run a shell command.",
      "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
     {"name": "read_file", "description": "Read file contents.",
@@ -198,7 +137,7 @@ TOOL_HANDLERS = {
     "memory_read": run_memory_read, "memory_search": run_memory_search, "memory_write": run_memory_write,
 }
 
-SUB_TOOLS:list[ToolParam] = [
+SUB_TOOLS: list[ToolParam] = [
     {"name": "bash", "description": "Run a shell command.",
      "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
     {"name": "read_file", "description": "Read file contents.",
@@ -210,25 +149,31 @@ SUB_TOOLS:list[ToolParam] = [
     {"name": "glob", "description": "Find files matching a glob pattern.",
      "input_schema": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}},
 ]
-# NO "task" tool — prevent recursive spawning
 
 SUB_HANDLERS = {
     "bash": run_bash, "read_file": run_read, "write_file": run_write,
     "edit_file": run_edit, "glob": run_glob,
 }
 
+SUB_SYSTEM = ""
+
+
 def extract_text(content) -> str:
-    """Extract text from message content blocks."""
     if not isinstance(content, list):
         return str(content)
     return "\n".join(getattr(b, "text", "") for b in content if getattr(b, "type", None) == "text")
 
-def spawn_subagent(description: str) -> str:
-    """Spawn a subagent with fresh messages[], return summary only."""
-    hooks.trigger_hooks("AgentStart")
-    messages:list[MessageParam] = [{"role": "user", "content": description}]  
 
-    for _ in range(30):  
+def spawn_subagent(description: str, llm_client=None, hooks=None) -> str:
+    if llm_client is None or hooks is None:
+        from loop.agent.loop import hooks as _hooks
+        from loop.agent.loop import llm_client as _llm_client
+        llm_client = llm_client or _llm_client
+        hooks = hooks or _hooks
+    hooks.trigger_hooks("AgentStart")
+    messages: list[MessageParam] = [{"role": "user", "content": description}]
+
+    for _ in range(30):
         response = llm_client.client.messages.create(
             model=llm_client.model, system=SUB_SYSTEM,
             messages=messages, tools=SUB_TOOLS, max_tokens=8000,
@@ -263,69 +208,16 @@ def spawn_subagent(description: str) -> str:
     hooks.trigger_hooks("AgentStop", messages)
     return result
 
+
 TOOLS.append({
     "name": "task",
     "description": "Launch a subagent to handle a complex subtask. Returns only the final conclusion.",
     "input_schema": {"type": "object", "properties": {"description": {"type": "string"}}, "required": ["description"]},
 })
-TOOL_HANDLERS["task"] = spawn_subagent
-
-def agent_loop(messages: list):
-    hooks.trigger_hooks("AgentStart")
-    while True:
-
-        is_compact_needed = context.should_compact(messages,llm_client.get_context_window())  # 压缩检查
-        if is_compact_needed:
-            context.autocompact(messages, llm_client.client, llm_client.model, llm_client.get_context_window())
-        response = llm_client.client.messages.create(
-            model=llm_client.model, system=SYSTEM, messages=messages,
-            tools=TOOLS, max_tokens=8000,
-        )
-        context.update(len(messages), response)  # 更新上下文状态，供下一轮使用
-
-        messages.append({"role": "assistant", "content": response.content})
-
-        if response.stop_reason != "tool_use":
-            hooks.trigger_hooks("AgentStop", messages)
-            return
-
-        results = []
-        for block in response.content:
-            if block.type != "tool_use":
-                continue
-
-            blocked = hooks.trigger_hooks("PreToolUse", block)
-            if blocked is not None:
-                results.append({"type": "tool_result", "tool_use_id": block.id,
-                                "content": blocked, "is_error": True})
-                continue
-            handler = TOOL_HANDLERS.get(block.name)
-            output = handler(**block.input) if handler else f"Unknown: {block.name}"
-            hooks.trigger_hooks("PostToolUse", block, output)
-            results.append({"type": "tool_result", "tool_use_id": block.id, "content": output, "is_error": False})
-
-        messages.append({"role": "user", "content": results})
 
 
+def run_task(description: str) -> str:
+    return spawn_subagent(description)
 
 
-if __name__ == "__main__":
-    print("输入问题，回车发送。\n")
-
-    history = []
-    while True:
-        try:
-            query = input("\033[36m >> \033[0m")
-        except (EOFError, KeyboardInterrupt):
-            break
-        if query.strip().lower() in ("exit", ""):
-            break
-        history.append({"role": "user", "content": query})
-        agent_loop(history)
-        for msg in history:
-            for block in msg["content"]:
-                if getattr(block, "type", None) == "thinking":
-                    print(f"\033[35m{block.thinking}\033[0m")
-                if getattr(block, "type", None) == "text":
-                    print(block.text)
-        print()
+TOOL_HANDLERS["task"] = run_task

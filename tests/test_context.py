@@ -1,6 +1,6 @@
 """Unit tests for Context in context.py."""
 
-from context import Context
+from loop.agent.context import Context
 
 
 def test_estimate_tokens_approx_chars_div_4():

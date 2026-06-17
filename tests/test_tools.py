@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-import main
+import loop.agent.tools as main
 
 # ── run_bash ──────────────────────────────────────────────────────────────
 
