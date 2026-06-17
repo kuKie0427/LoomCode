@@ -116,8 +116,17 @@
       "name": "架构统一：产品全部内迁 loop/agent/",
       "description": "原根目录的 main.py / context.py / hook.py / models.py / prompt.py 全部内迁到 loop/agent/。三层加载从 loop/memory/context.py 并入 loop/agent/prompt.py（消除概念分裂）。loop CLI 加 run subcommand 替代 python main.py。",
       "dependencies": ["f-memory-persistence"],
-      "status": "in-progress",
+      "status": "done",
       "verification": "uv run pytest tests/ -v && uv run loop audit . | grep 'Overall'",
+      "evidence": "160/0 tests pass. init.sh 'all green'. loop audit 92/100. loop --help shows init/audit/run. Renames tracked by git (R status)."
+    },
+    {
+      "id": "f-skill-runtime",
+      "name": "Phase 3: Skill Runtime + Tool Registry",
+      "description": ".minicode/skills/<name>/SKILL.md 目录约定 + SKILL.md frontmatter 解析 + load_skill 工具 + ToolRegistry 类 (含 is_read_only / is_concurrent_safe / enable/disable) + Q2 项目覆盖用户全局实现。",
+      "dependencies": ["f-architecture-unify"],
+      "status": "in-progress",
+      "verification": "uv run pytest tests/test_skills.py tests/test_tool_registry.py -v && echo 'body content' > /tmp/x/.minicode/skills/demo/SKILL.md && uv run loop audit .",
       "evidence": null
     },
     {

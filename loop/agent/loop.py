@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import cast
 
 import dotenv
 from loguru import logger
@@ -13,6 +14,7 @@ from loop.agent.tools import (
     TOOLS,
 )
 from loop.memory import load_tier1, load_tier2
+from loop.skills import build_skill_index
 
 dotenv.load_dotenv()
 WORKDIR = Path.cwd()
@@ -45,10 +47,18 @@ def build_system_prompt(workdir: Path = WORKDIR) -> SystemPrompt:
     sp.add_dynamic(f"工作目录: {workdir}")
     sp.add_dynamic(sp.get_git_context(workdir))
 
-    memory_tier1 = load_tier1(workdir)
-    memory_tier2 = load_tier2(workdir)
-    if memory_tier1 or memory_tier2:
-        sp.add_memory(memory_tier1 + ("\n\n" if memory_tier1 and memory_tier2 else "") + memory_tier2)
+    memory_parts: list[str] = []
+    skill_index = build_skill_index(workdir).list_for_prompt()
+    if skill_index:
+        memory_parts.append(skill_index)
+    tier1 = load_tier1(workdir)
+    if tier1:
+        memory_parts.append(tier1)
+    tier2 = load_tier2(workdir)
+    if tier2:
+        memory_parts.append(tier2)
+    if memory_parts:
+        sp.add_memory("\n\n".join(memory_parts))
 
     return sp
 
@@ -76,7 +86,7 @@ def agent_loop(messages: list) -> None:
             context.autocompact(messages, llm_client.client, llm_client.model, llm_client.get_context_window())
         response = llm_client.client.messages.create(
             model=llm_client.model, system=SYSTEM, messages=messages,
-            tools=TOOLS, max_tokens=8000,
+            tools=cast(list, TOOLS), max_tokens=8000,
         )
         context.update(len(messages), response)
 

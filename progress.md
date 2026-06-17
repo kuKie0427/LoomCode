@@ -333,3 +333,50 @@ Closed the architecture split. Product is now self-contained in `loop/agent/`; t
 - **Backward compat for tests**: kept `import loop.agent.loop as main` style aliases in test_agent_loop.py and test_tools.py to minimize churn. The `reset_hooks` fixture still works because module globals (`hooks`, `context`, `llm_client`) are still module-level in `loop.agent.loop`.
 
 **Working tree**: clean. The user's earlier p4 work (changes in `hook.py`, `models.py`, `tests/test_agent_loop.py`) rode along with the rename — they're now in `loop/agent/hooks.py`, `loop/agent/llm.py`, `tests/test_agent_loop.py` with the same content.
+
+---
+
+## Phase 3: f-skill-runtime (2026-06-17 15:05)
+
+Implemented Q2-decision skill runtime + ToolRegistry. Skills are now plug-and-play: drop a `SKILL.md` into a project's `.minicode/skills/`, restart the agent, and the skill index appears in the system prompt.
+
+**New files (3)**:
+
+- `loop/skills/__init__.py` — public surface: `Skill`, `SkillIndex`, `build_skill_index`, `discover_skills`, `parse_skill_md`
+- `loop/skills/discovery.py` — `list_skill_dirs(workdir)`, `discover_skills(workdir)`, `user_global_skills_dir()`. Q2 implementation: user-global + project-local, project wins on conflict.
+- `loop/skills/registry.py` — `Skill` / `SkillIndex` dataclasses + `parse_skill_md()` (markdown frontmatter parser) + `build_skill_index()`.
+
+**New file (1) in `loop/agent/`**:
+
+- `loop/agent/tool_registry.py` — `Tool` dataclass + `ToolRegistry` class. Methods: `register`, `disable`, `enable`, `is_enabled`, `get`, `names`, `all`, `to_anthropic_schema`, `handler_for`. Tools now carry `is_read_only` + `is_concurrent_safe` flags per the tool-registry-pattern reference.
+
+**Modified**:
+
+- `loop/agent/tools.py` — `TOOLS = [...]` literal replaced by `TOOL_REGISTRY.register(Tool(...))` for each of 11 tools. `TOOLS` and `TOOL_HANDLERS` are now derived from the registry (backwards compat preserved). New tool `load_skill` registered (read-only).
+- `loop/agent/loop.py` — `build_system_prompt()` now includes the skill index as the first segment of the memory tier (before Tier 1 / Tier 2). `SYSTEM` rebuilt with skills in place.
+- `pyproject.toml` — no change needed; no new dependencies (markdown-only SKILL.md parser avoids YAML deps).
+
+**Tests**:
+
+- `tests/test_skills.py` — 13 tests: discovery path order, project overrides user, missing-skill-md-ignored, full/minimal SKILL.md parsing, skill index for prompt, body lookup.
+- `tests/test_tool_registry.py` — 12 tests: register, duplicate-raises, disable/enable, schema excludes disabled, handler_for returns None when disabled, sorted names, defaults (read_only / concurrent_safe), plus 2 integration tests verifying loop's tools are registered correctly (all 11 tools present; read-only tools flagged correctly).
+
+**Acceptance evidence**:
+
+- 25 new tests pass (13 skills + 12 tool registry). Total: **185 pass / 0 fail**.
+- `./init.sh` exit 0 in "all green" mode.
+- `loop audit .` still scores 92/100.
+- **Cold-start verified**: dropped `SKILL.md` into `/tmp/skill-coldstart/.minicode/skills/run-pytest/`. `build_skill_index(Path('/tmp/skill-coldstart'))` returns SkillIndex with the skill. `idx.list_for_prompt()` produces "# Available Skills\n- **run-pytest**: Run the project's test suite with concise output. — triggers: run pytest, run tests, test the code". `idx.body('run-pytest')` returns the full markdown body. Verifies that the Q2 contract holds: a skill in the project-local `.minicode/skills/` is discovered and made available.
+
+**Decisions made**:
+
+- **Skill format**: markdown-only, no YAML frontmatter. SKILL.md is a single file with sections (`# name`, description, `## Triggers`, `## Steps`, etc.). This avoids adding `pyyaml` as a dependency and keeps skill files human-editable without learning YAML conventions.
+- **Skill scope in prompt**: skill index is included as part of the memory segment (alongside Tier 1 / Tier 2). It's small (~500 bytes) and per-turn, but tool bodies are loaded on-demand via `load_skill`. This matches the progressive-disclosure pattern from `context-engineering-pattern.md`.
+- **Tool flags**: `is_read_only` and `is_concurrent_safe` are set on tools that are obviously safe (read_file, glob, memory_read, memory_search, load_skill). These are flags for a future async permission pipeline (Phase 4 deliverable). Today's synchronous permission pipeline doesn't act on them, but the flags are in place.
+- **`Path.home()` caching**: initial implementation had `USER_SKILLS_PATH = Path.home() / ".minicode" / "skills"` at module level — broke when tests monkeypatched `HOME`. Replaced with a `user_global_skills_dir()` function that computes on each call. This makes the discovery testable.
+- **`load_skill` not in `SUB_TOOLS`**: subagents don't load skills. The subagent prompt (`SUB_SYSTEM`) is fixed; skill loading is a parent-agent concern. Subagents inherit the parent's registered tools but not the skill index.
+
+**Deferred to future iterations**:
+
+- **`harness.toml [tools]` section**: per the roadmap, end users should be able to declare "disable bash" or "replace bash with restricted version". The registry now has the data (`enabled` flag, `is_read_only` flag), but the loader for `harness.toml` is deferred — no project currently ships one.
+- **Async permission pipeline**: the synchronous `_ask_user()` in `hook.py` works fine for CLI; the roadmap says async is for TUI/HTTP frontends later.

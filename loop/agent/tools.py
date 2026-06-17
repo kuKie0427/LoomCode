@@ -4,7 +4,9 @@ from pathlib import Path
 from anthropic.types import MessageParam, ToolParam
 from loguru import logger
 
+from loop.agent.tool_registry import Tool, ToolRegistry
 from loop.memory import MemoryStore
+from loop.skills import build_skill_index
 
 WORKDIR = Path.cwd()
 
@@ -110,32 +112,104 @@ def run_memory_write(entry: str, heading: str | None = None) -> str:
         return f"Memory cap exceeded: {e}"
     return f"Appended {len(entry)} chars to MEMORY.md"
 
-TOOLS: list[ToolParam] = [
-    {"name": "bash", "description": "Run a shell command.",
-     "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
-    {"name": "read_file", "description": "Read file contents.",
-     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["path"]}},
-    {"name": "write_file", "description": "Write content to a file.",
-     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},
-    {"name": "edit_file", "description": "Replace exact text in a file once.",
-     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}}, "required": ["path", "old_text", "new_text"]}},
-    {"name": "glob", "description": "Find files matching a glob pattern.",
-     "input_schema": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}},
-    {"name": "todo_write", "description": "Create and manage a task list for your current coding session.",
-     "input_schema": {"type": "object", "properties": {"todos": {"type": "array", "items": {"type": "object", "properties": {"content": {"type": "string"}, "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]}}, "required": ["content", "status"]}}}, "required": ["todos"]}},
-    {"name": "memory_read", "description": "Read the project's MEMORY.md (long-term cross-session memory).",
-     "input_schema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "memory_search", "description": "Search MEMORY.md for lines containing the query (case-insensitive).",
-     "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
-    {"name": "memory_write", "description": "Append a dated entry to MEMORY.md.",
-     "input_schema": {"type": "object", "properties": {"entry": {"type": "string"}, "heading": {"type": "string"}}, "required": ["entry"]}},
-]
 
-TOOL_HANDLERS = {
-    "bash": run_bash, "read_file": run_read, "write_file": run_write,
-    "edit_file": run_edit, "glob": run_glob,
-    "memory_read": run_memory_read, "memory_search": run_memory_search, "memory_write": run_memory_write,
+def run_load_skill(name: str) -> str:
+    skill = build_skill_index(WORKDIR).get(name)
+    if skill is None:
+        return f"Error: skill {name!r} not found in {WORKDIR / '.minicode/skills'}"
+    if not skill.has_body:
+        return f"Error: skill {name!r} has no body (SKILL.md is empty after the metadata section)"
+    return skill.body
+
+
+TOOL_REGISTRY = ToolRegistry()
+TOOL_REGISTRY.register(Tool(
+    name="bash",
+    description="Run a shell command.",
+    input_schema={"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]},
+    handler=run_bash,
+))
+TOOL_REGISTRY.register(Tool(
+    name="read_file",
+    description="Read file contents.",
+    input_schema={"type": "object", "properties": {"path": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["path"]},
+    handler=run_read,
+    is_read_only=True,
+    is_concurrent_safe=True,
+))
+TOOL_REGISTRY.register(Tool(
+    name="write_file",
+    description="Write content to a file.",
+    input_schema={"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]},
+    handler=run_write,
+))
+TOOL_REGISTRY.register(Tool(
+    name="edit_file",
+    description="Replace exact text in a file once.",
+    input_schema={"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}}, "required": ["path", "old_text", "new_text"]},
+    handler=run_edit,
+))
+TOOL_REGISTRY.register(Tool(
+    name="glob",
+    description="Find files matching a glob pattern.",
+    input_schema={"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]},
+    handler=run_glob,
+    is_read_only=True,
+    is_concurrent_safe=True,
+))
+TODO_WRITE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "todos": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string"},
+                    "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
+                },
+                "required": ["content", "status"],
+            },
+        },
+    },
+    "required": ["todos"],
 }
+TOOL_REGISTRY.register(Tool(
+    name="todo_write",
+    description="Create and manage a task list for your current coding session.",
+    input_schema=TODO_WRITE_SCHEMA,
+    handler=run_todo_write,
+))
+TOOL_REGISTRY.register(Tool(
+    name="memory_read",
+    description="Read the project's MEMORY.md (long-term cross-session memory).",
+    input_schema={"type": "object", "properties": {}, "required": []},
+    handler=run_memory_read,
+    is_read_only=True,
+))
+TOOL_REGISTRY.register(Tool(
+    name="memory_search",
+    description="Search MEMORY.md for lines containing the query (case-insensitive).",
+    input_schema={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+    handler=run_memory_search,
+    is_read_only=True,
+))
+TOOL_REGISTRY.register(Tool(
+    name="memory_write",
+    description="Append a dated entry to MEMORY.md.",
+    input_schema={"type": "object", "properties": {"entry": {"type": "string"}, "heading": {"type": "string"}}, "required": ["entry"]},
+    handler=run_memory_write,
+))
+TOOL_REGISTRY.register(Tool(
+    name="load_skill",
+    description="Load a skill's body into context by name. Call after seeing the skill index in your system prompt.",
+    input_schema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+    handler=run_load_skill,
+    is_read_only=True,
+))
+
+TOOLS = TOOL_REGISTRY.to_anthropic_schema()
+TOOL_HANDLERS = {name: TOOL_REGISTRY.handler_for(name) for name in TOOL_REGISTRY.names()}
 
 SUB_TOOLS: list[ToolParam] = [
     {"name": "bash", "description": "Run a shell command.",
