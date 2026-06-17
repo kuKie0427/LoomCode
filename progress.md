@@ -1563,3 +1563,45 @@ Phase F1 implemented async streaming LLM support with callback system:
 ### 后续
 
 新 session 加载 `.sisyphus/plans/loop-pf3.md` → 选 F3 → 实现 PermissionScreen Modal + ToolCallCard 卡片。
+
+## Session: F2 交付 + Review + 修复 (PLAN-REVIEW iteration 2)
+
+**Goal**: Implementer 交付 F2,reviewer (我) 做 code review,修 plan 没说但 implementer 漏的 bug。
+
+### F2 交付状态 (implementer 自报)
+- Commit: `d88686e feat: f-tui-textual-app — Phase F2 Textual TUI + post_message + lifecycle 桥接`
+- 13 files changed, 831 lines
+- `loop eval` → 125/125 passed (120 F1 + 5 F2)
+- `./init.sh` → 226 pytest + 0 ruff + 0 mypy
+- `feature_list.json` 中 `f-tui-textual-app` = `done` + evidence (125/125)
+- 新文件: `loop/tui/{__init__,app,chat_log,composer,messages,status_bar}.py` (6 files, 394 LOC)
+
+### Review 发现的真实问题
+
+| # | 问题 | 严重度 | 修复 (user 选 A) |
+|---|---|---|---|
+| **#2** | `messages.py` 5 个 payload-carrying Message 子类 `__init__` 顺序反了 — 先 `self.text = text` 后 `super().__init__()` (plan 规定先 super) | stylistic, 实际 work by accident | **修了** — reorder 全部 5 个到 `super().__init__()` first |
+| **#3** | `_cancelled` 标志设了从不读 — `action_cancel_stream` 设 `self._cancelled = True` + `worker.cancel()`，但 stream_iter 不知道 flag 已设，thread 继续跑完整个 turn | real UX bug | **修了** — `LLMClient.cancel()` + `_cancelled` check in stream_iter + reset on new call |
+| #1 | `loop/tui/commands.py` 文件不存在 (plan 任务 6 要求建文件) | plan 偏差, 功能完整 | 不修 (inlined 简洁版 work) |
+| #4 | `asyncio.ensure_future` 不 await, 可能丢更新 | 边缘 case, app 不会 mid-exit | 不修 (not a blocker) |
+
+### 应用的修复 (1 commit)
+
+```
+6c8eddb fix(f-tui-textual-app): Message init order + stream_iter cancel
+```
+
+3 files changed, 13 insertions(+), 5 deletions(-):
+- `loop/agent/llm.py`: 加 `self._cancelled` + `cancel()` method + check in stream_iter loop + reset
+- `loop/tui/app.py`: `action_cancel_stream` 现在也调 `self.llm.cancel()`
+- `loop/tui/messages.py`: 5 个 Message 的 `__init__` 顺序调换
+
+### Final state
+- 125/125 eval cases pass
+- 226 pytest + 0 ruff + 0 mypy
+- F2 真 "done done"
+- Plan 偏差: `commands.py` inlined 在 `app.py` (~50 LOC) — 接受, 6 命令全 work
+
+### 后续
+
+新 session 加载 `.sisyphus/plans/loop-pf3.md` → 选 F3 → 实现 PermissionScreen Modal + ToolCallCard 卡片 + `asyncio.run_coroutine_threadsafe` 桥接 asker。
