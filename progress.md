@@ -1124,3 +1124,80 @@ $ uv run python -m loop.cli eval --fail-under 100
 ### Status
 
 **f-user-harness-health-score**: done. A + E roadmap complete.
+
+## Session: f-loop-call-depth-guard (OOM fix)
+
+**Goal**: 修 E3 OOM bug。第三方报告 900+ python3 进程 / 19.6GB RAM,挂的是 loop.cli。诊断后定位真因。
+
+### OOM 真因(不是 daemon,不是无限 fork)
+
+**递归触发链**:
+1. `loop eval` 跑 4 个 audit case
+2. audit case 调 `loop audit <tmp_path>` **没传 --skip-self-test**(plan 没显式要求)
+3. `loop audit` 看到 workdir 有 6 个 harness 文件 → 跑 `_run_self_test` → 启 `loop eval <workdir>`
+4. 那个 `loop eval` 又跑 4 个 audit case → 启 4 个 `loop audit` → 每个又 self-test → 又启 `loop eval`
+5. 几何爆炸:98 × 98 × 98 × ... 每个 case 启 1-2 个 subprocess × 50MB+ → 19.6GB
+
+第三方报告看到的"父 PID = launchd"是因为这堆进程最终都从最初跑 `loop eval` 的 python 进程继承。
+
+### 修复
+
+**1. `loop/eval/cases/audit.py` 4 个 case 加 `--skip-self-test`**
+- `audit-text-mentions-all-subsystems`
+- `audit-json-is-valid`
+- `audit-html-is-valid`
+- (第 4 个 `audit-exits-non-zero-when-below-min` 之前就传 `--min-score 999` 不受影响)
+- 全部加 `--min-score 0` 避免默认 min-score=70 触发 exit 1 误判
+
+**2. `loop/cli.py` 加 LOOP_CALL_DEPTH 防御**
+- `_MAX_LOOP_CALL_DEPTH = 3` 模块常量
+- `main()` 在 `parse_args` **之前** 检查 + 增量 env var(避免 `--help` 绕过)
+- depth >= 3 → logger.error + return 1
+- 每次启动 depth += 1,写到 env 传给子进程
+
+**3. `loop/eval/cases/loop_call_depth.py` 3 个新 case**
+- `loop-call-depth-enforced-at-max`: LOOP_CALL_DEPTH=3 → rc=1 + 含 "LOOP_CALL_DEPTH" stderr
+- `loop-call-depth-increments-across-calls`: 父 python 设 depth=1,子 loop 调得 depth=1(env 传递)
+- `loop-call-depth-allows-normal-call`: depth 未设 → rc=0(没误伤)
+
+### 验证
+
+```
+$ uv run python -m loop.cli eval --fail-under 100
+Eval results: 101/101 passed
+# 3 次连续跑全绿,无 OOM:
+$ uv run python -m loop.cli eval --fail-under 100
+Eval results: 101/101 passed
+$ uv run python -m loop.cli eval --fail-under 100
+Eval results: 101/101 passed
+
+$ ./init.sh
+============================= 226 pytest passed, 0 ruff, 0 mypy ==============================
+=== Verification Complete (all green) ===
+```
+
+### Debug 中遇到的小坑
+
+1. **`--help` 绕过 depth guard**:第一版 depth check 在 `parse_args` 之后,`loop audit --help` 在 parse_args 时就 print + 退出了,没到 check。修:check 提到 `parse_args` 之前。
+2. **uv run 隔离 env**:`uv run python` 会重置 env(去掉 LOOP_CALL_DEPTH)。改成 case 用 `sys.executable`(走 .venv/bin/python)直接调 subprocess 测。
+3. **子进程 env 是 dict copy**:python `-c` 内 `os.environ["LOOP_CALL_DEPTH"] = "2"` 不传回父进程。case 改测"子进程**读到**的值"不是"子进程改写后的值"。
+4. **--min-score 副作用**:audit 默认 min-score=70,`--skip-self-test` 关闭 self-test 后总分掉到 30 → exit 1 → 3 个 case 误判 fail。加 `--min-score 0` 解决。
+
+### Review 失职记录
+
+E3 review 时:
+- 看了 `_run_self_test` 实现 ✅
+- 看了 5 个 E3 case(用了 --skip-self-test)✅
+- **没看 audit.py 4 个老 case 是否传 --skip-self-test** ❌
+- **没真跑 `loop eval` full suite** ❌(只跑了 pytest 226)
+
+下次 review **必须真跑 `loop eval` 作为 exit-gate 一步**,不是只跑 pytest。
+
+### Working tree (this commit)
+
+- `M  loop/cli.py` (LOOP_CALL_DEPTH guard)
+- `M  loop/eval/cases/audit.py` (4 case 加 --skip-self-test --min-score 0)
+- `M  loop/eval/cases/__init__.py` (register loop_call_depth)
+- `M  feature_list.json` (f-loop-call-depth-guard)
+- `M  progress.md`
+- `?? loop/eval/cases/loop_call_depth.py`

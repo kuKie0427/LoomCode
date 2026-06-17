@@ -234,7 +234,9 @@
       "id": "f-session-start-end-hooks",
       "name": "Phase A1: SessionStart / SessionEnd 事件触发点",
       "description": "在 loop.agent.hooks 加 SessionStart 和 SessionEnd 事件。HOOKS dict 加 2 个 key。agent_loop 启动时 trigger_hooks('SessionStart')。run_repl 退出(exit/EOF/Ctrl-C)时 trigger_hooks('SessionEnd', messages, tool_call_count)。不实现 user hook 脚本发现(那是 A4)。本 phase 只接骨架。",
-      "dependencies": ["f-user-side-resume-benchmark"],
+      "dependencies": [
+        "f-user-side-resume-benchmark"
+      ],
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval --fail-under 100 → 75/75 passed (was 70/70, +5 session-hooks cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loop/agent/hooks.py (HOOKS dict +2 keys, log_hook +2 branches), loop/agent/loop.py (SessionStart/End triggers), loop/eval/cases/session_hooks.py (5 new cases), loop/eval/cases/__init__.py (register cases), tests/test_agent_loop.py (reset_hooks fixture updated for new keys)."
@@ -243,7 +245,9 @@
       "id": "f-user-hook-discovery",
       "name": "Phase A4: 用户 hook 脚本自动发现",
       "description": "loop 启动时扫描 .minicode/hooks/{session_start,session_end,pre_compact,user_prompt_submit}.{sh,py},把找到的脚本作为 callback 注册到 HOOKS。脚本可执行(exit 0 = success),stdout 是空或 JSON。",
-      "dependencies": ["f-session-start-end-hooks"],
+      "dependencies": [
+        "f-session-start-end-hooks"
+      ],
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval --fail-under 100 → 80/80 passed (+5 user_hooks cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loop/agent/user_hooks.py (new, 54 lines, discover_user_hooks + make_shell_callback), loop/agent/loop.py (hook registration in run_repl), loop/eval/cases/user_hooks.py (5 new cases), loop/eval/cases/__init__.py (register cases), feature_list.json (new entry)."
@@ -252,7 +256,9 @@
       "id": "f-session-end-mandatory-init-sh",
       "name": "Phase A3: SessionEnd 强制度量 — 跑 init.sh 失败 warn",
       "description": "loop run 退出时,如果 ./init.sh 存在,自动跑它(非阻塞,失败只 warn 不退出非零)。roadmap §10 Q4 决议的核心:\"machine-enforced, not agent-self-reported\"。不存在的 init.sh 跳过。",
-      "dependencies": ["f-user-hook-discovery"],
+      "dependencies": [
+        "f-user-hook-discovery"
+      ],
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval --fail-under 100 → 84/84 passed (+4 init_sh_session_end cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loop/agent/config.py (run_init_sh_on_session_end bool), loop/agent/loop.py (init.sh handler at SessionEnd, warn-only), loop/eval/cases/init_sh_session_end.py (4 new cases). Design: warn-only, does NOT affect loop run exit code, default True, opt-out via HarnessConfig."
@@ -261,7 +267,9 @@
       "id": "f-pre-compact-hook",
       "name": "Phase A2: PreCompact hook — 压缩前用户能干预",
       "description": "autocompact 触发前 trigger_hooks('PreCompact', messages, last_input_tokens),让用户能写 .minicode/hooks/pre_compact.sh 在压缩前注入\"这段要保留\"或\"这段删掉\"(通过 stdout JSON)。不在本 phase 实现 stdout 解析(只触发 + 留口子)。",
-      "dependencies": ["f-session-end-mandatory-init-sh"],
+      "dependencies": [
+        "f-session-end-mandatory-init-sh"
+      ],
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval --fail-under 100 → 88/88 passed (+4 pre_compact_hook cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loop/agent/hooks.py (HOOKS dict +PreCompact key, log_hook +PreCompact branch), loop/agent/loop.py (PreCompact trigger before autocompact), loop/eval/cases/pre_compact_hook.py (4 new cases)."
@@ -270,7 +278,9 @@
       "id": "f-telemetry-optional-sink",
       "name": "Phase E1: telemetry sink — 用户自定义数据外流",
       "description": "harness.toml 加 [telemetry] sink_command = \"/path/to/collector\"。trace.record() 写完一行 JSON 后,如果有 sink_command 就 fork-exec 这个命令,把 JSON 通过 stdin 传过去。不阻塞(sink 失败只 warn)。让用户能挂自己的 metrics / logging 后端。",
-      "dependencies": ["f-pre-compact-hook"],
+      "dependencies": [
+        "f-pre-compact-hook"
+      ],
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval --fail-under 100 → 93/93 passed (+5 telemetry_sink cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loop/agent/config.py (TelemetryConfig + _parse_telemetry_section + skeleton), loop/agent/trace.py (sink_command param + subprocess.run in record + set_sink), loop/agent/loop.py (apply_config wires sink_command), loop/eval/cases/telemetry_sink.py (5 new eval cases)."
@@ -279,10 +289,23 @@
       "id": "f-user-harness-health-score",
       "name": "Phase E3: audit 第 6 维 — 跑用户项目上的 eval",
       "description": "loop audit 加第 6 维 'self-test': 进用户项目跑 loop eval --fail-under 100,report pass/total。把 audit 从 'harness 文件存在与否' 升级到 'harness 真的能工作'。",
-      "dependencies": ["f-telemetry-optional-sink"],
+      "dependencies": [
+        "f-telemetry-optional-sink"
+      ],
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run pytest tests/test_audit_cmd.py -v → 17/17 passed; 5 new audit_self_test eval cases individually PASS; ./init.sh → 226 pytest passed, 0 ruff, 0 mypy. Changes: loop/audit_cmd.py (6th dim self-test + _run_self_test + --skip-self-test param), loop/cli.py (--skip-self-test flag), loop/eval/cases/audit_self_test.py (5 new eval cases), loop/eval/cases/__init__.py (register cases)."
+    },
+    {
+      "id": "f-loop-call-depth-guard",
+      "name": "Fix OOM: LOOP_CALL_DEPTH recursion guard + --skip-self-test in audit cases",
+      "description": "诊断 E3 OOM 真因:loop eval → audit case(无 --skip-self-test)→ loop audit → _run_self_test → loop eval → 递归 → 900+ 进程 / 19.6GB。修:1) loop/eval/cases/audit.py 4 个 case 加 --skip-self-test --min-score 0;2) loop/cli.py 加 LOOP_CALL_DEPTH env var 防御,>=3 退出 1;3) 3 个 eval case 锁住深度行为。3 次跑全绿,101/101,不再 OOM。",
+      "dependencies": [
+        "f-user-harness-health-score"
+      ],
+      "status": "done",
+      "verification": "uv run python -m loop.cli eval --fail-under 100 (3 consecutive runs)",
+      "evidence": "uv run python -m loop.cli eval → 101/101 passed (3 consecutive runs, no OOM); ./init.sh → 226 pytest passed, 0 ruff, 0 mypy. Fix: 1) loop/eval/cases/audit.py — 4 case 加 --skip-self-test --min-score 0;2) loop/cli.py — _MAX_LOOP_CALL_DEPTH=3,depth guard in main() before parse_args,env var LOOP_CALL_DEPTH auto-increments;3) 3 new eval cases in loop/eval/cases/loop_call_depth.py — depth-enforced-at-max (LOOP_CALL_DEPTH=3 → rc=1), depth-increments-across-calls (parent=1, child=1), depth-allows-normal-call (rc=0)."
     }
   ]
 }

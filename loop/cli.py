@@ -11,12 +11,16 @@ import argparse
 import os
 from pathlib import Path
 
+from loguru import logger
+
 from loop import __version__
 from loop.agent import run_repl
 from loop.agent.trace import Trace, default_path_for
 from loop.audit_cmd import audit
 from loop.detect import detect_project
 from loop.init_cmd import format_results, init
+
+_MAX_LOOP_CALL_DEPTH = 3
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -80,6 +84,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    depth = int(os.environ.get("LOOP_CALL_DEPTH", "0"))
+    if depth >= _MAX_LOOP_CALL_DEPTH:
+        logger.error(
+            "LOOP_CALL_DEPTH={} >= {} — refusing to recurse further. "
+            "Set LOOP_CALL_DEPTH=0 if this is intentional.",
+            depth, _MAX_LOOP_CALL_DEPTH,
+        )
+        return 1
+    os.environ["LOOP_CALL_DEPTH"] = str(depth + 1)
+
     parser = _build_parser()
     args = parser.parse_args(argv)
 

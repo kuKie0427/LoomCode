@@ -9,6 +9,7 @@ from loop.eval.cases import (
     init,  # noqa: F401  — triggers case class definitions
     init_sh_session_end,  # noqa: F401
     integration,  # noqa: F401
+    loop_call_depth,  # noqa: F401
     memory_skills,  # noqa: F401
     permission_unify,  # noqa: F401
     phase5_coverage,  # noqa: F401

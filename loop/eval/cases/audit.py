@@ -54,7 +54,7 @@ class AuditTextMentionsAllSubsystems(EvalCase):
     def run(self) -> EvalResult:
         wd = make_empty_workdir("audit-text")
         _seed_minimal_harness(wd)
-        r = run_loop_cli("audit", str(wd))
+        r = run_loop_cli("audit", "--skip-self-test", "--min-score", "0", str(wd))
         if r.returncode != 0:
             return EvalResult(name=self.name, passed=False, detail=f"exit {r.returncode}: {r.stderr[:200]}")
         text = r.stdout
@@ -71,7 +71,7 @@ class AuditJsonIsValid(EvalCase):
     def run(self) -> EvalResult:
         wd = make_empty_workdir("audit-json")
         _seed_minimal_harness(wd)
-        r = run_loop_cli("audit", "--json", str(wd))
+        r = run_loop_cli("audit", "--skip-self-test", "--json", "--min-score", "0", str(wd))
         if r.returncode != 0:
             return EvalResult(name=self.name, passed=False, detail=f"exit {r.returncode}: {r.stderr[:200]}")
         import json
@@ -94,7 +94,7 @@ class AuditHtmlIsValid(EvalCase):
         wd = make_empty_workdir("audit-html")
         _seed_minimal_harness(wd)
         report = wd / "harness-assessment.html"
-        r = run_loop_cli("audit", "--html", str(report), str(wd))
+        r = run_loop_cli("audit", "--skip-self-test", "--html", str(report), "--min-score", "0", str(wd))
         if r.returncode != 0:
             return EvalResult(name=self.name, passed=False, detail=f"exit {r.returncode}: {r.stderr[:200]}")
         if not report.exists():
@@ -115,7 +115,7 @@ class AuditExitsNonZeroWhenBelowMin(EvalCase):
     def run(self) -> EvalResult:
         wd = make_empty_workdir("audit-fail")
         _seed_minimal_harness(wd)
-        r = run_loop_cli("audit", "--min-score", "999", str(wd))
+        r = run_loop_cli("audit", "--skip-self-test", "--min-score", "999", str(wd))
         if r.returncode == 0:
             return EvalResult(name=self.name, passed=False, detail="expected non-zero exit, got 0")
         return EvalResult(name=self.name, passed=True, detail=f"exit {r.returncode} as expected")

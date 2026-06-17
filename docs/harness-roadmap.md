@@ -227,15 +227,15 @@ f-test-framework-p0 ─→ p1 ─→ p2 ─→ p3 ─→ p4 (BLOCKED)
 
 `f-harness-scaffold` is the only Phase 0 deliverable. Phases 1–5 each depend on the previous (except `f-product-init-cmd` and `f-memory-persistence` which both branch from `f-harness-scaffold` and can run in parallel).
 
-## 8. Status Snapshot (2026-06-17)
+## 8. Status Snapshot (2026-06-17 — A+E roadmap complete)
+
+All 18 features are now `done`. The A+E roadmap (Phases A1-A4, E1-E3) is fully delivered.
 
 | Status | Count | Features |
 |---|---|---|
-| `done` | 7 | `f-test-framework-p0` / `p1` / `p2` / `p3`, `f-harness-scaffold`, `f-product-init-cmd`, `f-product-audit-cmd` |
-| `blocked` | 1 | `f-test-framework-p4` (LLM-failure fallback test) |
-| `not-started` | 4 | `f-memory-persistence` / `f-skill-runtime` / `f-multi-agent` / `f-observability` |
+| `done` | 18 | All features in `feature_list.json` |
 
-Current `./init.sh` exit code: **0** (smart pass-gate tolerates the one blocked feature).
+Current `./init.sh` exit code: **0** (226 pytest passed, 0 ruff, 0 mypy).
 
 ## 9. References
 
