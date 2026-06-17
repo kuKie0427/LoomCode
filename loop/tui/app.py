@@ -210,17 +210,17 @@ class AgentTUIApp(App):
             ),
         }
 
-        @work(exclusive=True, group="agent-turn")
-        async def _turn() -> None:
-            await asyncio.to_thread(
-                agent_loop,
-                self.history,
-                self.llm,
-                callbacks,
-                self.llm.stream_iter,
-            )
+        self._run_turn(callbacks)
 
-        _turn()
+    @work(exclusive=True, group="agent-turn")
+    async def _run_turn(self, callbacks: dict) -> None:
+        await asyncio.to_thread(
+            agent_loop,
+            self.history,
+            self.llm,
+            callbacks,
+            self.llm.stream_iter,
+        )
 
     def action_cancel_stream(self) -> None:
         self._cancelled = True
