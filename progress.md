@@ -1465,3 +1465,50 @@ Phase F1 implemented async streaming LLM support with callback system:
 
 新 session 加载 `.sisyphus/plans/loop-pf2.md` → 选 F2 → 实现 Textual TUI app + 6 slash commands。
 
+## Session: F1 交付 + Review + 修复 (PLAN-REVIEW iteration 1)
+
+**Goal**: Implementer 交付 F1,reviewer (我) 做 code review,修 plan 没说但 implementer 漏的 bug。
+
+### F1 交付状态 (implementer 自报)
+- Commit: `2f81b0f feat: f-async-streaming-llm — Phase F1 真流式 LLM + 6 callbacks`
+- 6 files changed, 1030 lines
+- `loop eval` → 119/119 passed (106 + 13)
+- `./init.sh` → 226 pytest passed, 0 ruff, 0 mypy
+- `feature_list.json` 中 `f-async-streaming-llm` = `done` + evidence
+
+### Review 发现的真实问题
+
+| # | 问题 | 严重度 | 修复 |
+|---|---|---|---|
+| **#1** | `stream_iter` 中 `json.loads(current_tool["input_json"])` 没有 try/except。Plan 明确规定了 try/except JSONDecodeError,implementer 漏了 | medium (edge case 但 plan 明确要求) | 加 try/except + logger.warning,fallback 到 `{}` |
+| **#2** | 13 个 eval case 没测 malformed JSON 这个 edge case | minor (test coverage) | 加 case 14: `llm-client-stream-iter-handles-malformed-json` (mock AsyncAnthropic stream with unclosed-brace input_json_delta,验证 tool_input={}) |
+| #3 | Working tree 不干净 (`docs/harness-roadmap.md` 修改未提交,`.DS_Store` 未 gitignore) | admin | `docs` 单独 commit + `.DS_Store` 加 gitignore + 单独 commit |
+
+### Review 肯定的实现 (没毛病)
+
+- StreamEvent 协议完全按 plan 实现 (3 kind, 8 fields)
+- `stream_iter` 用 `asyncio.run` 包装生成器 (按 plan)
+- `+=` 累积 `partial_json` (Momus 3rd review 误判为错,Anthropic 官方 SDK `_messages.py:477` 验证 `+=` 是对的)
+- agent_loop streaming path 重组 Message (TextBlock + ToolUseBlock + Usage)
+- 6 个 callback 触发位置精确
+- 13 个 case 设计合理 (mock 依赖,setup/teardown 隔离)
+- commit message 遵循 `feat: f-<id> — <Name>` 约定
+
+### 应用的修复 (3 commits)
+
+```
+776346b fix(f-async-streaming-llm): handle malformed tool_use JSON + add regression case
+7fc1155 chore: ignore .DS_Store (macOS metadata)
+26fcdae docs(harness-roadmap): update status snapshot + F roadmap overview
+```
+
+### Final state
+- 120/120 eval cases pass (含 case 14)
+- 226 pytest passed, 0 ruff, 0 mypy
+- working tree clean
+- F1 真 "done done"
+
+### 后续
+
+新 session 加载 `.sisyphus/plans/loop-pf2.md` → 选 F2 → 实现 Textual TUI app + 6 斜杠命令 + post_message 桥接 + apply_config 集成 + asyncio.run 包装 pilot test。
+
