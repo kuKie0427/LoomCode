@@ -88,6 +88,8 @@ def apply_config(config: HarnessConfig) -> None:
     """Apply a loaded HarnessConfig to the module-level hooks + checkpoint thresholds."""
     global _active_config
     _active_config = config
+    if config.telemetry.sink_command:
+        trace_mod.set_sink(config.telemetry.sink_command)
     hooks.policy = config.policy
     hooks.disabled_tools = config.disabled_tools
 hooks.register_hook("AgentStop", context.microcompact)

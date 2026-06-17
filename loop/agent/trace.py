@@ -16,10 +16,13 @@ Public surface:
 from __future__ import annotations
 
 import json
+import subprocess
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from loguru import logger
 
 TRACE_FILENAME = "trace.jsonl"
 
@@ -36,9 +39,10 @@ def _now_iso() -> str:
 
 
 class Trace:
-    def __init__(self, workdir: Path, session_id: str) -> None:
+    def __init__(self, workdir: Path, session_id: str, sink_command: str | None = None) -> None:
         self.workdir = Path(workdir)
         self.session_id = session_id
+        self.sink_command = sink_command
         self.path = default_path_for(self.workdir)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
@@ -54,9 +58,23 @@ class Trace:
         with self._lock:
             with self.path.open("a", encoding="utf-8") as f:
                 f.write(line)
+        if self.sink_command is not None:
+            try:
+                subprocess.run(
+                    [self.sink_command],
+                    input=line,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                logger.warning("telemetry sink failed: {}", exc)
 
     def flush(self) -> None:
         pass
+
+    def set_sink(self, sink_command: str | None) -> None:
+        self.sink_command = sink_command
 
     def recent(self, n: int = 20) -> list[dict]:
         if not self.path.exists():
@@ -79,13 +97,20 @@ def current() -> Trace | None:
     return _CURRENT
 
 
-def start(workdir: Path, session_id: str) -> Trace:
+def start(workdir: Path, session_id: str, sink_command: str | None = None) -> Trace:
     """Initialize a Trace for this session and make it the current one."""
     global _CURRENT
     with _CURRENT_LOCK:
-        tr = Trace(workdir, session_id)
+        tr = Trace(workdir, session_id, sink_command=sink_command)
         _CURRENT = tr
         return tr
+
+
+def set_sink(sink_command: str | None) -> None:
+    """Update the active Trace's sink command."""
+    with _CURRENT_LOCK:
+        if _CURRENT is not None:
+            _CURRENT.sink_command = sink_command
 
 
 def stop() -> None:

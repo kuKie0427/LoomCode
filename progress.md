@@ -1019,3 +1019,49 @@ This phase implements Q4's "machine-enforced, not agent-self-reported" mandate f
 | `loop/eval/cases/init_sh_session_end.py` | New file — 176 lines, 4 EvalCase classes |
 | `loop/eval/cases/__init__.py` | +1 import line |
 | `progress.md` | This section |
+
+---
+
+## Phase E1 — f-telemetry-optional-sink (2026-06-17)
+
+**Session ID:** ses_12a7a9740ffeB8ZGLLgvqdsPiE
+**Base commit:** 1079b24 (f-pre-compact-hook)
+
+### What's Done
+
+- [x] Task 1-3: `loop/agent/config.py` — Added `TelemetryConfig` frozen dataclass (`sink_command: str | None = None`), `_parse_telemetry_section()` validator, wired into `HarnessConfig.telemetry` + `load_config()`, documented in `_SKELETON`
+- [x] Task 4: `loop/agent/trace.py` — Added `sink_command` param to `Trace.__init__`, `set_sink()` instance + module-level methods, `subprocess.run()` with stdin pipe in `record()` (OUTSIDE lock), failure logged as warning
+- [x] Task 5: `loop/agent/loop.py` — `apply_config()` wires `config.telemetry.sink_command` → `trace_mod.set_sink()`
+- [x] Task 6-7: Created `loop/eval/cases/telemetry_sink.py` with 5 eval cases, registered in `__init__.py`
+
+### 5 new eval cases (88 → 93)
+
+| Case | What it locks down |
+|---|---|
+| `telemetry-config-parses-sink-command` | `[telemetry] sink_command = "/usr/bin/true"` parsed correctly |
+| `telemetry-config-default-no-sink` | No `[telemetry]` section → `sink_command is None` |
+| `telemetry-config-rejects-non-string-sink` | `sink_command = 123` raises `ConfigError` |
+| `telemetry-trace-calls-sink-with-stdin` | `Trace.record()` pipes JSON via stdin to sink script |
+| `telemetry-sink-failure-doesnt-break-trace` | Missing sink → warning logged, trace still written |
+
+### Verification
+
+```
+$ uv run python -m loop.cli eval --fail-under 100
+Eval results: 93/93 passed   (+5 telemetry_sink cases, was 88)
+
+$ ./init.sh
+============================= 225 pytest passed, 0 ruff, 0 mypy ==============================
+=== Verification Complete (all green) ===
+```
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `feature_list.json` | +9 lines — new feature entry, status→done |
+| `loop/agent/config.py` | +25 lines — TelemetryConfig + parser + skeleton |
+| `loop/agent/trace.py` | +28/-3 lines — sink_command param + subprocess + set_sink |
+| `loop/agent/loop.py` | +2 lines — apply_config wires sink_command to trace |
+| `loop/eval/cases/telemetry_sink.py` | New file — 159 lines, 5 EvalCase classes |
+| `loop/eval/cases/__init__.py` | +1 import line |

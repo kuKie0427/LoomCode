@@ -14,5 +14,6 @@ from loop.eval.cases import (
     pre_compact_hook,  # noqa: F401
     resume_benchmark,  # noqa: F401
     session_hooks,  # noqa: F401
+    telemetry_sink,  # noqa: F401
     user_hooks,  # noqa: F401
 )

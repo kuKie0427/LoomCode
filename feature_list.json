@@ -265,6 +265,15 @@
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval --fail-under 100 → 88/88 passed (+4 pre_compact_hook cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loop/agent/hooks.py (HOOKS dict +PreCompact key, log_hook +PreCompact branch), loop/agent/loop.py (PreCompact trigger before autocompact), loop/eval/cases/pre_compact_hook.py (4 new cases)."
+    },
+    {
+      "id": "f-telemetry-optional-sink",
+      "name": "Phase E1: telemetry sink — 用户自定义数据外流",
+      "description": "harness.toml 加 [telemetry] sink_command = \"/path/to/collector\"。trace.record() 写完一行 JSON 后,如果有 sink_command 就 fork-exec 这个命令,把 JSON 通过 stdin 传过去。不阻塞(sink 失败只 warn)。让用户能挂自己的 metrics / logging 后端。",
+      "dependencies": ["f-pre-compact-hook"],
+      "status": "done",
+      "verification": "uv run python -m loop.cli eval --fail-under 100",
+      "evidence": "uv run python -m loop.cli eval --fail-under 100 → 93/93 passed (+5 telemetry_sink cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loop/agent/config.py (TelemetryConfig + _parse_telemetry_section + skeleton), loop/agent/trace.py (sink_command param + subprocess.run in record + set_sink), loop/agent/loop.py (apply_config wires sink_command), loop/eval/cases/telemetry_sink.py (5 new eval cases)."
     }
   ]
 }

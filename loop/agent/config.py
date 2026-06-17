@@ -61,9 +61,21 @@ class CheckpointConfig:
 
 
 @dataclass(frozen=True)
+class TelemetryConfig:
+    """Telemetry sink configuration.
+
+    sink_command: Path to a command that receives JSON events via stdin.
+    If None, telemetry is disabled.
+    """
+
+    sink_command: str | None = None
+
+
+@dataclass(frozen=True)
 class HarnessConfig:
     policy: PermissionPolicy
     checkpoint: CheckpointConfig
+    telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
     disabled_tools: frozenset[str] = field(default_factory=frozenset)
     run_init_sh_on_session_end: bool = True
 
@@ -167,6 +179,15 @@ def _parse_tools_section(section: dict | None) -> frozenset[str]:
     return frozenset(disabled)
 
 
+def _parse_telemetry_section(section: dict | None) -> TelemetryConfig:
+    if not section:
+        return TelemetryConfig()
+    sink = section.get("sink_command")
+    if sink is not None and not isinstance(sink, str):
+        raise ConfigError("[telemetry] sink_command must be a string or absent")
+    return TelemetryConfig(sink_command=sink)
+
+
 def load_config(workdir: Path) -> HarnessConfig:
     """Read `<workdir>/harness.toml` and return a HarnessConfig.
 
@@ -190,6 +211,7 @@ def load_config(workdir: Path) -> HarnessConfig:
     return HarnessConfig(
         policy=_parse_policy_section(data.get("permissions")),
         checkpoint=_parse_checkpoint_section(data.get("checkpoint")),
+        telemetry=_parse_telemetry_section(data.get("telemetry")),
         disabled_tools=_parse_tools_section(data.get("tools")),
     )
 
@@ -223,4 +245,7 @@ _SKELETON = """# harness.toml — per-project loop agent config
 
 # [tools.bash]
 # enabled = false          # disable the bash tool entirely
+
+# [telemetry]
+# sink_command = "/usr/local/bin/loop-collector"  # Receives JSON events via stdin
 """
