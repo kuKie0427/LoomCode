@@ -15,6 +15,7 @@ EXPECTED_HARNESS_FILES = (
     "feature_list.json",
     "progress.md",
     "session-handoff.md",
+    "harness.toml",
 )
 
 

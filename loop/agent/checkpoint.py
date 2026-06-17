@@ -75,10 +75,15 @@ def save(
     return path
 
 
-def is_due(tool_call_count: int, new_tokens_since_checkpoint: int) -> bool:
+def is_due(
+    tool_call_count: int,
+    new_tokens_since_checkpoint: int,
+    every_tool_calls: int = CHECKPOINT_EVERY_TOOL_CALLS,
+    every_tokens: int = CHECKPOINT_EVERY_TOKENS,
+) -> bool:
     return (
-        tool_call_count >= CHECKPOINT_EVERY_TOOL_CALLS
-        or new_tokens_since_checkpoint >= CHECKPOINT_EVERY_TOKENS
+        tool_call_count >= every_tool_calls
+        or new_tokens_since_checkpoint >= every_tokens
     )
 
 
@@ -89,7 +94,10 @@ def maybe_save(
     context: Context,
     tool_call_count: int,
     new_tokens_since_checkpoint: int,
+    every_tool_calls: int = CHECKPOINT_EVERY_TOOL_CALLS,
+    every_tokens: int = CHECKPOINT_EVERY_TOKENS,
 ) -> Path | None:
-    if not is_due(tool_call_count, new_tokens_since_checkpoint):
+    if not is_due(tool_call_count, new_tokens_since_checkpoint,
+                  every_tool_calls, every_tokens):
         return None
     return save(workdir, messages, llm_client, context, tool_call_count)

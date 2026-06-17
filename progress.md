@@ -676,3 +676,77 @@ $ ./init.sh
 - `M  progress.md`
 - `M  loop/eval/cases/__init__.py` (register cross_session_resume)
 - `?? loop/eval/cases/cross_session_resume.py`
+
+## Session: f-harness-toml
+
+**Goal**: finally land the per-project `harness.toml` config that roadmap §3 promised three separate times (Phase 1 §3, Phase 3 §3, Phase 4 §5/Q4) but never delivered.
+
+### Done
+
+- **New `loop/agent/config.py`** (~150 LOC):
+  - `HarnessConfig(policy, checkpoint, disabled_tools)` frozen dataclass
+  - `CheckpointConfig(every_tool_calls, every_tokens)` dataclass
+  - `load_config(workdir)` reads `<workdir>/harness.toml` via stdlib `tomllib`
+  - `_compile_check(expression)` sandboxed Python `args -> bool` eval for `permissions.rules.add.check`
+  - `write_default_config(workdir)` writes the 741-char commented skeleton
+  - `ConfigError` exception with helpful message (path + stdlib's own message)
+- **Modified `loop/agent/checkpoint.py`**: `is_due` and `maybe_save` now take `every_tool_calls` and `every_tokens` parameters (default to module constants). Fully backward-compatible.
+- **Modified `loop/agent/hooks.py`**: `Hooks(policy, disabled_tools)` constructor; `check_permission_hook` now rejects tools in `disabled_tools` with message `'Tool X disabled by harness.toml'` BEFORE checking deny list / rules.
+- **Modified `loop/agent/loop.py`**: new module-level `_active_config: HarnessConfig`; `apply_config(config)` mutates hooks in-place; `agent_loop` reads `_active_config.checkpoint` for `is_due`; `run_repl` calls `apply_config(load_config(WORKDIR))` at startup.
+- **Modified `loop/init_cmd.py`**: `init` now scaffolds `harness.toml` skeleton (alongside the existing 5-file set). Respects `force=False` skip semantics.
+- **Modified `loop/eval/_util.py`**: `EXPECTED_HARNESS_FILES` grows to 6 items.
+- **Modified `tests/test_init_cmd.py`**: `EXPECTED_FILES` grows to 7 items (was 6).
+- **Modified `loop/eval/cases/memory_skills.py::MemoryStoreRoundtrip`** and **`loop/eval/cases/phase5_coverage.py::MemorySearchFindsPriorContent`**: pre-existing sandbox-state flakes; both got `shutil.rmtree(wd)` for idempotency.
+
+### 8 new eval cases (60 → 68)
+
+| Case | What it locks down |
+|---|---|
+| `harness-toml-missing-uses-defaults` | No file → `HarnessConfig.from_defaults()`, no error |
+| `harness-toml-deny-patterns-replace` | `[permissions] deny_patterns = [...]` REPLACES defaults (sudo gone) |
+| `harness-toml-deny-patterns-add-merges` | `[permissions] deny_patterns_add = [...]` APPENDS (sudo still there) |
+| `harness-toml-checkpoint-thresholds-override` | `[checkpoint] every_tool_calls = 5` → `is_due(5, 0, ...)` fires |
+| `harness-toml-tool-disable-blocks-call` | `[tools.bash] enabled = false` → `Hooks(...).check_permission_hook` rejects bash |
+| `harness-toml-invalid-raises-clear-error` | Bad TOML → `ConfigError` (not silent skip) with `harness.toml` + `line` / `Expected` in message |
+| `harness-toml-partial-overrides-keep-other-defaults` | Only `[permissions]` set → `[checkpoint]` and `[tools]` keep defaults |
+| `harness-toml-init-scaffolds-skeleton` | `loop init` writes a 741-char commented skeleton with all 3 sections + load_config preserves defaults |
+
+### Verification
+
+```
+$ uv run python -m loop.cli eval --fail-under 100
+Eval results: 68/68 passed   (was 60, +8)
+# idempotent:
+$ uv run python -m loop.cli eval --fail-under 100
+Eval results: 68/68 passed
+
+$ ./init.sh
+============================= 225 pytest passed, 0 ruff, 0 mypy ==============================
+=== Verification Complete (all green) ===
+```
+
+### Decisions / surprises
+
+- **TOML stdlib surprise**: `tomllib.TOMLDecodeError` in Python 3.11+ does NOT expose `lineno` or `msg` as attributes — those live only in `str(exc)` ("at line X, column Y"). My first cut referenced `exc.lineno` which raised `AttributeError` instead of `ConfigError`. Fixed by using `str(exc)` directly in the message. The eval case now checks for "Expected" or "line" substrings instead of structured attributes.
+- **Sandboxed `eval` for `permissions.rules.add.check`**: User writes Python expressions in their TOML; we compile + eval with `{"__builtins__": {}}` (no imports, no attribute access). Tested in the eval case `permission-policy-is-data-driven` from f-permission-unify that constructs custom rules.
+- **`apply_config` mutates module-level hooks in-place** rather than re-creating them, because hooks are registered globally via `hooks.register_hook(...)` at module import. Re-creating would lose the registered callbacks. Mutation is simpler and works.
+- **Backward compat preserved**: `Hooks(policy=None)` still works (uses DEFAULT_POLICY); `is_due(tool_count, tokens)` still works (uses module defaults). All existing 60 eval cases pass without modification (only EXPECTED_HARNESS_FILES grew).
+- **`loop run` now actually loads harness.toml**: tested via the end-to-end `checkpoint-resume-cli-restores-history` case (subprocess invokes `loop run --resume` in a tmpdir with no harness.toml → defaults → still restores history correctly).
+- **Added 1 extra ruff fix on top of --fix**: ruff complained about the version-conditional `import tomllib` ("remove outdated version block" — project requires Python 3.11+, so unconditional import is fine).
+- **Pre-existing test bug surfaced**: `tests/test_init_cmd.py::EXPECTED_FILES` was 6 items; needed 7 once init started writing harness.toml. The test name `test_creates_all_six_files` is now technically wrong (creates 7) — kept the name as a future-bug-finding artifact.
+
+### Working tree (this commit)
+
+- `M  loop/agent/loop.py` (apply_config + checkpoint thresholds)
+- `M  loop/agent/hooks.py` (disabled_tools)
+- `M  loop/agent/checkpoint.py` (configurable thresholds)
+- `M  loop/init_cmd.py` (scaffold harness.toml)
+- `M  loop/eval/_util.py` (EXPECTED_HARNESS_FILES)
+- `M  loop/eval/cases/__init__.py` (register harness_toml)
+- `M  loop/eval/cases/memory_skills.py` (idempotent rmtree)
+- `M  loop/eval/cases/phase5_coverage.py` (idempotent rmtree)
+- `M  tests/test_init_cmd.py` (EXPECTED_FILES)
+- `M  feature_list.json` (f-harness-toml lifecycle)
+- `M  progress.md`
+- `?? loop/agent/config.py`
+- `?? loop/eval/cases/harness_toml.py`

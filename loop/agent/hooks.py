@@ -22,8 +22,13 @@ HOOKS_LOCK = threading.Lock()
 
 class Hooks:
 
-    def __init__(self, policy: PermissionPolicy | None = None) -> None:
+    def __init__(
+        self,
+        policy: PermissionPolicy | None = None,
+        disabled_tools: frozenset[str] | None = None,
+    ) -> None:
         self.policy = policy if policy is not None else DEFAULT_POLICY
+        self.disabled_tools = disabled_tools if disabled_tools is not None else frozenset()
 
     def register_hook(self, event: str, callback):
         with HOOKS_LOCK:
@@ -39,6 +44,9 @@ class Hooks:
         return None
 
     def check_permission_hook(self, event, block) -> str | None:
+        if block.name in self.disabled_tools:
+            logger.warning("⛔ Tool '{}' disabled by harness.toml", block.name)
+            return f"Tool '{block.name}' disabled by harness.toml"
         if block.name == "bash":
             reason = self._check_deny_list(block.input.get("command", ""))
             if reason:

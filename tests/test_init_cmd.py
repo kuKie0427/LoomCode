@@ -13,6 +13,7 @@ EXPECTED_FILES = (
     "progress.md",
     "session-handoff.md",
     "init.sh",
+    "harness.toml",
 )
 
 

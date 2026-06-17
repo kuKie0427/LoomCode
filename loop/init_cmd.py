@@ -112,6 +112,14 @@ def init(
         _write(init_path, content, executable=True)
         results.append(FileResult(init_path, "written"))
 
+    from loop.agent.config import write_default_config
+    harness_path = target / "harness.toml"
+    if harness_path.exists() and not force:
+        results.append(FileResult(harness_path, "skipped", "exists"))
+    else:
+        write_default_config(target)
+        results.append(FileResult(harness_path, "written"))
+
     return results
 
 

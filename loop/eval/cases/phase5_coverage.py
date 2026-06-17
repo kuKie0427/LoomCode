@@ -208,9 +208,13 @@ class MemorySearchFindsPriorContent(EvalCase):
     description = "MemoryStore.search returns lines matching query (cross-session recovery)"
 
     def run(self) -> EvalResult:
+        import shutil
+
         from loop.eval._util import make_empty_workdir
         from loop.memory import MemoryStore
         wd = make_empty_workdir("memory-search")
+        shutil.rmtree(wd, ignore_errors=True)
+        wd.mkdir(parents=True, exist_ok=True)
         store = MemoryStore(wd)
         store.append("User prefers tabs over spaces.")
         store.append("Project: loop test consumer.")

@@ -9,6 +9,7 @@ from loguru import logger
 
 import loop.agent.checkpoint as checkpoint
 import loop.agent.trace as trace_mod
+from loop.agent.config import HarnessConfig, load_config
 from loop.agent.context import Context
 from loop.agent.hooks import Hooks
 from loop.agent.llm import LLMClient
@@ -77,6 +78,16 @@ hooks.register_hook("PreToolUse", hooks.log_hook)
 hooks.register_hook("PostToolUse", hooks.log_hook)
 hooks.register_hook("AgentStart", hooks.log_hook)
 hooks.register_hook("AgentStop", hooks.log_hook)
+
+_active_config: HarnessConfig = HarnessConfig.from_defaults()
+
+
+def apply_config(config: HarnessConfig) -> None:
+    """Apply a loaded HarnessConfig to the module-level hooks + checkpoint thresholds."""
+    global _active_config
+    _active_config = config
+    hooks.policy = config.policy
+    hooks.disabled_tools = config.disabled_tools
 hooks.register_hook("AgentStop", context.microcompact)
 
 llm_client = LLMClient(model=os.getenv("MODEL", "deepseek-v4-flash"))
@@ -160,7 +171,9 @@ def agent_loop(messages: list) -> None:
         messages.append({"role": "user", "content": results})
 
         new_tokens = context.current_tokens(messages) - tokens_at_last_checkpoint
-        if checkpoint.is_due(tool_call_count, new_tokens):
+        ckpt_cfg = _active_config.checkpoint
+        if checkpoint.is_due(tool_call_count, new_tokens,
+                             ckpt_cfg.every_tool_calls, ckpt_cfg.every_tokens):
             saved_path = checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
             if tr is not None:
                 tr.record("checkpoint_save", path=str(saved_path),
@@ -169,8 +182,9 @@ def agent_loop(messages: list) -> None:
 
 
 def run_repl(resume: bool = False) -> None:
+    apply_config(load_config(WORKDIR))
     print("输入问题，回车发送。\n")
-    history: list = []
+    history: list = []                                   
     if resume and checkpoint.exists(WORKDIR):
         ckpt = checkpoint.load(WORKDIR)
         if ckpt is not None:
