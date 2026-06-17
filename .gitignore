@@ -32,3 +32,4 @@ loop.log
 .mypy_cache/
 
 
+.DS_Store
