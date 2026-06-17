@@ -227,15 +227,26 @@ f-test-framework-p0 ─→ p1 ─→ p2 ─→ p3 ─→ p4 (BLOCKED)
 
 `f-harness-scaffold` is the only Phase 0 deliverable. Phases 1–5 each depend on the previous (except `f-product-init-cmd` and `f-memory-persistence` which both branch from `f-harness-scaffold` and can run in parallel).
 
-## 8. Status Snapshot (2026-06-17 — A+E roadmap complete)
+## 8. Status Snapshot (2026-06-18 — A+E roadmap complete; F roadmap planned)
 
-All 18 features are now `done`. The A+E roadmap (Phases A1-A4, E1-E3) is fully delivered.
+All 28 features from A+E roadmap are now `done`. The F roadmap (TUI / IDE integration, F1-F3) is **planned** but not yet started — see `.sisyphus/plans/loop-pf-roadmap.md` for the 3-phase delivery plan.
 
 | Status | Count | Features |
 |---|---|---|
-| `done` | 18 | All features in `feature_list.json` |
+| `done` | 28 | All A+E features + f-scope-wip1-enforcement |
+| `not-started` | 3 | f-async-streaming-llm (F1), f-tui-textual-app (F2), f-tui-permission-modal (F3) |
 
-Current `./init.sh` exit code: **0** (226 pytest passed, 0 ruff, 0 mypy).
+Current `./init.sh` exit code: **0** (226 pytest passed, 0 ruff, 0 mypy). `loop eval --fail-under 100` reports **106/106 passed** (3 consecutive runs, idempotent).
+
+### F roadmap overview (planned, not started)
+
+The F roadmap adds a Textual-based TUI as a **new entry point** (`loop tui`) — additive to the existing CLI REPL. No existing 28 features are modified or removed.
+
+- **F1 — `f-async-streaming-llm`**: `LLMClient.stream()` (AsyncAnthropic) + `agent_loop(messages, callbacks=...)` hook points. CLI path unchanged.
+- **F2 — `f-tui-textual-app`**: `loop/tui/` package + 6 slash commands + `MarkdownStream` for live token rendering. First real consumer of F1 callbacks.
+- **F3 — `f-tui-permission-modal`**: `PermissionScreen` modal + `ToolCallCard` widget + 3 snapshot tests + injectable `hooks._asker` to replace blocking `input()`.
+
+Detailed per-phase plans: `.sisyphus/plans/loop-pf1.md` / `loop-pf2.md` / `loop-pf3.md`. Roadmap navigation: `.sisyphus/plans/loop-pf-roadmap.md`.
 
 ## 9. References
 
