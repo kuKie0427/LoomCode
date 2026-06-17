@@ -11,6 +11,8 @@ is reported as the candidate bottleneck.
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from html import escape as html_escape
@@ -22,6 +24,7 @@ SUBSYSTEMS: tuple[str, ...] = (
     "verification",
     "scope",
     "lifecycle",
+    "self-test",
 )
 
 HARNESS_FILES: tuple[str, ...] = (
@@ -101,7 +104,33 @@ def _text_check(text: str, needles: Iterable[str], message: str) -> CheckResult:
     return CheckResult(pass_=_text_has(text, needles), message=message)
 
 
-def score_harness(files: list[HarnessFile]) -> HarnessScore:
+def _run_self_test(workdir: Path) -> tuple[int, int, str]:
+    """Run ``loop eval`` in workdir; return (passed, total, stderr_excerpt)."""
+    try:
+        proc = subprocess.run(  # noqa: S603
+            [sys.executable, "-m", "loop.cli", "eval", "--fail-under", "0"],
+            cwd=workdir, capture_output=True, text=True, timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        return 0, 0, "timed out"
+    except FileNotFoundError:
+        return 0, 0, "python not found"
+    if proc.returncode != 0 and not proc.stdout:
+        return 0, 0, proc.stderr[:200]
+    for line in proc.stdout.splitlines():
+        if "Eval results:" in line:
+            parts = line.split("/")
+            if len(parts) >= 2:
+                try:
+                    passed = int(parts[0].split()[-1])
+                    total = int(parts[1].split()[0])
+                    return passed, total, ""
+                except (ValueError, IndexError):
+                    pass
+    return 0, 0, "could not parse Eval results line"
+
+
+def score_harness(files: list[HarnessFile], *, target: Path, skip_self_test: bool = False) -> HarnessScore:
     by_path = {f.path: f.content for f in files}
     all_text = "\n\n".join(f"{f.path}\n{f.content}" for f in files)
     agents = by_path.get("AGENTS.md") or by_path.get("CLAUDE.md") or ""
@@ -171,6 +200,31 @@ def score_harness(files: list[HarnessFile]) -> HarnessScore:
             total=len(sub_checks),
             checks=sub_checks,
         )
+
+    # --- 6th dimension: self-test ---
+    if not skip_self_test and files:
+        passed_evals, total_evals, err = _run_self_test(target)
+        if total_evals > 0:
+            self_test_score = max(1, round(passed_evals * 5 / total_evals))
+            self_test_checks = [
+                CheckResult(pass_=passed_evals > 0, message=f"Eval results: {passed_evals}/{total_evals} passed"),
+            ]
+            if err:
+                self_test_checks.append(CheckResult(pass_=False, message=f"Stderr: {err[:100]}"))
+        else:
+            self_test_score = 1
+            self_test_checks = [CheckResult(pass_=False, message=f"Self-test could not run: {err[:100] if err else 'no evals found'}")]
+    else:
+        self_test_score = 0
+        self_test_checks = [CheckResult(pass_=True, message=f"Self-test N/A{' (skipped by flag)' if skip_self_test else ' — no harness files found'}")]
+
+    subsystems["self-test"] = SubsystemScore(
+        name="self-test",
+        score=self_test_score,
+        passed=sum(1 for c in self_test_checks if c.pass_),
+        total=len(self_test_checks),
+        checks=self_test_checks,
+    )
 
     total = sum(s.score for s in subsystems.values())
     overall = round((total / (len(SUBSYSTEMS) * 5)) * 100)
@@ -264,10 +318,11 @@ def audit(
     min_score: int = 70,
     json_output: bool = False,
     html_output: Path | None = None,
+    skip_self_test: bool = False,
 ) -> HarnessScore:
     target = target.resolve()
     files = load_harness_files(target)
-    result = score_harness(files)
+    result = score_harness(files, target=target, skip_self_test=skip_self_test)
     title = f"Harness Assessment: {target.name}"
 
     if json_output:

@@ -274,6 +274,15 @@
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval --fail-under 100 → 93/93 passed (+5 telemetry_sink cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loop/agent/config.py (TelemetryConfig + _parse_telemetry_section + skeleton), loop/agent/trace.py (sink_command param + subprocess.run in record + set_sink), loop/agent/loop.py (apply_config wires sink_command), loop/eval/cases/telemetry_sink.py (5 new eval cases)."
+    },
+    {
+      "id": "f-user-harness-health-score",
+      "name": "Phase E3: audit 第 6 维 — 跑用户项目上的 eval",
+      "description": "loop audit 加第 6 维 'self-test': 进用户项目跑 loop eval --fail-under 100,report pass/total。把 audit 从 'harness 文件存在与否' 升级到 'harness 真的能工作'。",
+      "dependencies": ["f-telemetry-optional-sink"],
+      "status": "done",
+      "verification": "uv run python -m loop.cli eval --fail-under 100",
+      "evidence": "uv run pytest tests/test_audit_cmd.py -v → 17/17 passed; 5 new audit_self_test eval cases individually PASS; ./init.sh → 226 pytest passed, 0 ruff, 0 mypy. Changes: loop/audit_cmd.py (6th dim self-test + _run_self_test + --skip-self-test param), loop/cli.py (--skip-self-test flag), loop/eval/cases/audit_self_test.py (5 new eval cases), loop/eval/cases/__init__.py (register cases)."
     }
   ]
 }

@@ -54,6 +54,11 @@ def _build_parser() -> argparse.ArgumentParser:
     audit_p.add_argument("--json", dest="json_output", action="store_true", help="Emit JSON instead of text")
     audit_p.add_argument("--html", type=Path, default=None, help="Write an HTML report to FILE")
     audit_p.add_argument("--min-score", type=int, default=70, help="Exit non-zero if overall < N (default 70)")
+    audit_p.add_argument(
+        "--skip-self-test",
+        action="store_true",
+        help="Skip the self-test (eval runner) dimension",
+    )
 
     run_p = sub.add_parser("run", help="Run the loop coding agent REPL")
     run_p.add_argument("--resume", action="store_true", help="Resume from checkpoint if present")
@@ -100,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
                 min_score=args.min_score,
                 json_output=args.json_output,
                 html_output=args.html,
+                skip_self_test=args.skip_self_test,
             )
         except SystemExit as exc:
             return int(exc.code) if exc.code is not None else 1

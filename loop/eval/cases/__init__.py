@@ -1,5 +1,6 @@
 from loop.eval.cases import (
     audit,  # noqa: F401
+    audit_self_test,  # noqa: F401
     ci,  # noqa: F401
     cross_session_resume,  # noqa: F401
     detect,  # noqa: F401
