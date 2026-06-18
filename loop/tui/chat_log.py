@@ -238,6 +238,37 @@ class ThinkingMarker(Static):
             self.update(f"◦ thought · {self._final_elapsed}")
 
 
+class CollapsibleToolOutput(Vertical):
+    DEFAULT_CSS = """
+    CollapsibleToolOutput {
+        max-height: 20;
+        overflow-y: auto;
+        background: $surface;
+        padding: 1 2;
+        margin: 0 0 1 2;
+        border: none;
+        display: none;
+    }
+    CollapsibleToolOutput.visible {
+        display: block;
+    }
+    """
+
+    def __init__(self, output: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._output = output
+
+    def compose(self) -> ComposeResult:
+        yield Markdown(_truncate(self._output))
+
+    def toggle(self) -> None:
+        self.toggle_class("visible")
+
+    def set_output(self, text: str) -> None:
+        md = self.query_one(Markdown)
+        md.update(_truncate(text))
+
+
 class ToolCallModal(ModalScreen):
     BINDINGS = [("escape", "dismiss", "Close")]
 
@@ -324,12 +355,23 @@ class ToolCallMarker(Static):
         self._output_str = ""
         self._is_error = False
         self._complete = False
+        self._output_widget: CollapsibleToolOutput | None = None
 
     def on_click(self, event: Click) -> None:
-        self._open_modal()
+        if event.chain == 2:
+            self._open_modal()
+        else:
+            self._toggle_output()
 
     def on_press(self) -> None:
-        self._open_modal()
+        self._toggle_output()
+
+    def set_output_widget(self, widget: CollapsibleToolOutput) -> None:
+        self._output_widget = widget
+
+    def _toggle_output(self) -> None:
+        if self._output_widget is not None:
+            self._output_widget.toggle()
 
     def _open_modal(self) -> None:
         self.app.push_screen(ToolCallModal(
@@ -358,7 +400,6 @@ class ChatLog(Vertical):
             self._sticky = True
 
     def compose(self) -> Any:
-        self._stream: Any = None
         self._current_body: Markdown | None = None
         self._current_overlay: StreamingOverlay | None = None
         self._thinking_widget: ThinkingMarker | None = None
@@ -369,6 +410,7 @@ class ChatLog(Vertical):
         self._spinner_tick: int = 0
         self._thinking_reasoning: str = ""
         self._tool_markers: dict[str, ToolCallMarker] = {}
+        self._tool_outputs: dict[str, CollapsibleToolOutput] = {}
         self._assistant_label_mounted: bool = False
         self._stream_full_text: str = ""
         self._stream_flush_timer: Any = None
@@ -376,10 +418,10 @@ class ChatLog(Vertical):
         return iter(())
 
     async def append_user_message(self, text: str) -> None:
-        self._stream = None
         self._current_body = None
         self._assistant_label_mounted = False
         self._stream_full_text = ""
+        self._tool_outputs.clear()
         self._sticky = True
         label = TurnLabel("▎ you", classes="role-user")
         body = UserMessage(text)
@@ -391,7 +433,6 @@ class ChatLog(Vertical):
         if self._thinking_display is not None:
             self._thinking_display.add_class("hidden")
         self._dismiss_thinking_widget()
-        self._stream = None
         self._current_body = None
         if not self._assistant_label_mounted:
             asyncio.create_task(self._mount_async(TurnLabel("▎ assistant", classes="role-assistant")))
@@ -400,24 +441,11 @@ class ChatLog(Vertical):
         self._thinking_display = None
         self._thinking_stream = None
         self._mount_thinking_widget()
-        self._start_new_body()
-
-    def _start_new_body(self) -> None:
-        if self._current_body is not None:
-            return
-        body_md = AssistantMessage()
-        self._current_body = body_md
-        asyncio.create_task(self._mount_and_open_stream(body_md))
 
     def _start_new_overlay(self) -> None:
         overlay = StreamingOverlay()
         self._current_overlay = overlay
         asyncio.create_task(self._mount_async(overlay))
-
-    async def _mount_and_open_stream(self, body_md: Markdown) -> None:
-        await self.mount(body_md)
-        if self._current_body is body_md:
-            self._stream = Markdown.get_stream(body_md)
 
     def _mount_thinking_widget(self) -> None:
         if self._thinking_widget is not None:
@@ -522,40 +550,37 @@ class ChatLog(Vertical):
         await self.mount(final)
         self._current_body = final
 
-    async def _write_stream(self, text: str) -> None:
-        await self._stream.write(_normalize_for_stream(text))
-        if self._sticky:
-            self.scroll_end()
-
-    async def _update_body(self, text: str) -> None:
-        if self._current_body is not None:
-            if not _has_markdown_syntax(text):
-                await self._current_body.update(text)
-            else:
-                await self._current_body.update(_normalize_for_stream(text))
-            if self._stream_flush_timer is not None and self._sticky:
-                self.scroll_end()
-
     def add_tool_call_inline(self, name: str, inp: dict, tool_id: str) -> None:
         self._force_flush_stream_buffer()
         self._dismiss_thinking_widget()
         self._finalize_streaming()
         args_str = json.dumps(inp, ensure_ascii=False, indent=2) if inp else ""
         marker = ToolCallMarker(name, args_str)
+        output = CollapsibleToolOutput("")
+        marker.set_output_widget(output)
         self._tool_markers[tool_id] = marker
+        self._tool_outputs[tool_id] = output
         asyncio.create_task(self._mount_async(marker))
-        self._stream = None
+        asyncio.create_task(self._mount_tool_output(marker, output))
+
+    async def _mount_tool_output(
+        self, marker: ToolCallMarker, output: CollapsibleToolOutput
+    ) -> None:
+        await self.mount(output, after=marker)
 
     def complete_tool_call_inline(self, tool_id: str, output: str, is_error: bool) -> None:
         marker = self._tool_markers.pop(tool_id, None)
         if marker is not None:
             marker.set_complete(output, is_error)
+        out_widget = self._tool_outputs.get(tool_id)
+        if out_widget is not None:
+            out_widget.set_output(output)
         self._thinking_display = None
         self._thinking_stream = None
 
     def append_system_note(self, text: str) -> None:
         self._force_flush_stream_buffer()
-        self._stream = None
+        self._finalize_streaming()
         self._current_body = None
         asyncio.create_task(self._mount_async(SystemNote(f"· {text}")))
 
@@ -565,7 +590,7 @@ class ChatLog(Vertical):
         for child in list(self.children):
             await child.remove()
         self._tool_markers.clear()
-        self._stream = None
+        self._tool_outputs.clear()
         self._current_body = None
         self._current_overlay = None
         self._thinking_display = None

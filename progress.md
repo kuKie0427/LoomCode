@@ -1880,3 +1880,60 @@ uv run python -m loop.cli eval --fail-under 100  # 130/130 passed
 
 - **f-tui-collapsible-tools** (Phase P2): Clickable tool cards with inline expand/collapse. Already planned in `.sisyphus/plans/loop-tui-opt-p2.md`.
 - **Markdown parse cache** (P2): LRU cache for `_normalize_for_stream` on identical text.
+
+---
+
+## Phase P2 — Collapsible Tool Output (f-tui-collapsible-tools) — DONE
+
+### What was done
+
+Replaced `ToolCallMarker` click-to-open-modal with click-to-toggle-inline-output. Single click expands/collapses a `CollapsibleToolOutput` panel directly below the marker in the chat flow; double-click still opens `ToolCallModal` as backup.借鉴 OpenCode `BasicTool.tsx` + `Collapsible.tsx` (collapsible content, no modal interruption).
+
+### Implementation highlights
+
+- **New `CollapsibleToolOutput(Vertical)` widget** in `loop/tui/chat_log.py` — `max-height: 20`, `overflow-y: auto`, `display: none` by default, `.visible` CSS class toggles visibility. Holds a `Markdown` child rendering the truncated tool output via `_truncate` (reuse existing fn).
+- **`ToolCallMarker` rewired** — added `_output_widget` field + `set_output_widget()` + `_toggle_output()` helper. `on_click(event)` branches on `event.chain`: `chain==2` (double-click) → `_open_modal()`; `chain==1` (single-click) → `_toggle_output()`. `on_press()` (keyboard) always toggles.
+- **`ChatLog._tool_outputs: dict[str, CollapsibleToolOutput]`** parallel to `_tool_markers`. `add_tool_call_inline` creates both, wires marker→output, schedules **two** mount tasks: marker mount + `_mount_tool_output(marker, output)` (mounts output `after=marker`).
+- **`complete_tool_call_inline`** now also calls `out_widget.set_output(text)` (uses `query_one(Markdown).update(_truncate(text))`).
+- **`clear_content`** and **`append_user_message`** both clear `_tool_outputs` (prevents stale outputs leaking across turns).
+
+### Key decisions
+
+- **`event.chain == 2`** instead of `on_double_click`: Textual has no separate `DoubleClick` event class. `Click` event carries `chain` attribute (2=double, 3=triple). Idiomatic Textual.
+- **`_tool_outputs` dict keyed by `tool_id`**: mirrors `_tool_markers` lookup pattern.
+- **No accordion mode** (only-one-expanded): per plan, multiple outputs may be expanded simultaneously — simpler implementation, no special coordination needed.
+- **`set_output` uses `query_one(Markdown)`**: fail-fast on widget-tree corruption; tests mock it.
+- **Double-click → modal** (not right-click): native, no new infrastructure (ContextMenu).
+
+### Verification commands
+
+```bash
+uv run ruff check .               # All checks passed!
+uv run mypy loop/                 # Success: no issues found in 64 source files
+uv run pytest tests/              # 327 passed (was 311, +16 P2 tests)
+uv run pytest tests/test_chat_log_p2.py -v    # 16/16 passed
+uv run pytest tests/test_tui_snapshot.py -v   # 3/3 snapshots passed
+uv run python -m loop.cli eval --fail-under 100  # 133/133 passed (was 130, +3 P2 cases)
+./init.sh                         # Verification Complete (all green)
+```
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `loop/tui/chat_log.py` | +CollapsibleToolOutput class (29 lines), ToolCallMarker: +_output_widget/set_output_widget/_toggle_output/on_click(chain-based), ChatLog: +_tool_outputs dict + _mount_tool_output helper, add_tool_call_inline schedules 2 mounts, complete_tool_call_inline updates output, clear_content + append_user_message reset dict |
+| `tests/test_chat_log_p2.py` | NEW — 16 tests, 175 lines |
+| `loop/eval/cases/tui_collapsible.py` | NEW — 3 eval cases (Vertical subclass / toggle / click dispatch) |
+| `loop/eval/cases/__init__.py` | import tui_collapsible |
+| `feature_list.json` | `f-tui-collapsible-tools` entry: not-started → done with evidence |
+| `.sisyphus/notepads/loop-tui-opt-p2/learnings.md` | NEW — full implementation summary + 2 new working rules (#13, #14) |
+
+### Working Rules added
+
+- **Rule #13**: Textual double-click is a `Click` event with `chain=2`, not a separate `DoubleClick` event class. There is no `textual.events.DoubleClick` — use `event.chain == 2` inside `on_click`.
+- **Rule #14**: When modifying widget click handlers in tests, mock the dispatched method (e.g. `_open_modal`) rather than the property-accessed app (`self.app.push_screen`). Textual Widget `app` is a property without a setter; patching the dispatch method is simpler and verifies the right thing.
+
+### Next steps
+
+- **Manual smoke test**: Run `uv run python -m loop.cli run`, send a prompt that triggers a tool call, click the tool marker — verify inline expand/collapse works; double-click — verify modal opens.
+- **Potential Phase P3**: Markdown parse cache (LRU on `_normalize_for_stream`), further chat_log refactors.

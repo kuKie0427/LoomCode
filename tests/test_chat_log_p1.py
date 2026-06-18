@@ -201,11 +201,6 @@ class TestAddToolCallInline:
         assert "tool_1" in log_no_async._tool_markers
         assert isinstance(log_no_async._tool_markers["tool_1"], ToolCallMarker)
 
-    def test_add_tool_call_clears_stream(self, log_no_async):
-        log_no_async.append_streaming_text("text")
-        log_no_async.add_tool_call_inline("run_bash", {}, "tool_1")
-        assert log_no_async._stream is None
-
     def test_add_tool_call_with_no_stream_yet(self, log_no_async):
         log_no_async.add_tool_call_inline("run_bash", {"k": "v"}, "tool_x")
         assert "tool_x" in log_no_async._tool_markers
@@ -258,4 +253,40 @@ class TestClearContent:
             asyncio.run(log_no_async.clear_content())
 
         assert log_no_async._current_overlay is None
+        assert log_no_async._current_body is None
+
+
+class TestSystemNoteFinalizesStreaming:
+    def test_system_note_with_active_overlay_clears_overlay(self, log_no_async):
+        log_no_async.append_streaming_text("streaming text")
+        assert log_no_async._current_overlay is not None
+        log_no_async._current_overlay.update_content = MagicMock()
+        log_no_async.append_system_note("note")
+        assert log_no_async._current_overlay is None
+        assert log_no_async._stream_full_text == ""
+
+    def test_system_note_without_overlay_is_noop(self, log_no_async):
+        assert log_no_async._current_overlay is None
+        log_no_async.append_system_note("note")
+        assert log_no_async._current_overlay is None
+
+    def test_system_note_stops_flush_timer(self, log_no_async):
+        log_no_async.append_streaming_text("hi")
+        log_no_async._current_overlay.update_content = MagicMock()
+        assert log_no_async._stream_flush_timer is not None
+        log_no_async.append_system_note("note")
+        assert log_no_async._stream_flush_timer is None
+
+
+class TestShowThinkingSpinnerNoBodyLeak:
+    def test_show_thinking_spinner_does_not_create_body(self, log_no_async):
+        assert log_no_async._current_body is None
+        log_no_async.show_thinking_spinner()
+        assert log_no_async._current_body is None
+
+    def test_show_thinking_spinner_resets_stale_body(self, log_no_async):
+        from loop.tui.chat_log import AssistantMessage
+
+        log_no_async._current_body = AssistantMessage("stale")
+        log_no_async.show_thinking_spinner()
         assert log_no_async._current_body is None

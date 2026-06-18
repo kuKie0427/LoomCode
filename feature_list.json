@@ -360,6 +360,15 @@
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval --fail-under 100 → 130/130 passed; ./init.sh → 311 pytest passed (was 283, +28 P1 tests), 0 ruff, 0 mypy, 3 snapshots passed → 'Verification Complete (all green)'. Changes: loop/tui/chat_log.py (StreamingOverlay class + _current_overlay field + _start_new_overlay + _finalize_streaming + _mount_final_message, rewired append_streaming_text / _flush_stream_buffer / _force_flush_stream_buffer / add_tool_call_inline / clear_content), loop/tui/app.py (on_assistant_turn_end calls chat_log._finalize_streaming), tests/test_chat_log_p1.py (NEW, 28 tests covering overlay creation / flush / finalize / tool call interrupt / multiple streaming segments)."
+    },
+    {
+      "id": "f-tui-collapsible-tools",
+      "name": "Phase P2: 可折叠工具卡片 (inline expand/collapse)",
+      "description": "替换 ToolCallMarker 点击弹窗为点击就地展开/收起。新增 CollapsibleToolOutput widget(max-height 20, overflow-y auto, display:none 默认隐藏),on_click 调用 output.toggle() 显示在 marker 正下方;on_double_click(event.chain==2) 仍打开 ToolCallModal 作为备用入口。借鉴 OpenCode BasicTool.tsx + Collapsible.tsx 的可折叠内容,不打断对话流。",
+      "dependencies": ["f-tui-stream-separation"],
+      "status": "done",
+      "verification": "uv run python -m loop.cli eval --fail-under 100",
+      "evidence": "uv run python -m loop.cli eval --fail-under 100 → 133/133 passed (was 130, +3 P2 cases). Changes: loop/tui/chat_log.py (CollapsibleToolOutput class + ToolCallMarker._output_widget/set_output_widget/on_click double-click-handling via event.chain + ChatLog._tool_outputs dict + _mount_tool_output async helper + add_tool_call_inline + complete_tool_call_inline updates output content + clear_content + append_user_message clear _tool_outputs), tests/test_chat_log_p2.py (NEW, 16 tests covering toggle / click-toggle / double-click-modal / add-creates-output / complete-updates-output / clear-resets), loop/eval/cases/tui_collapsible.py (NEW, 3 eval cases)."
     }
   ]
 }
