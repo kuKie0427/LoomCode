@@ -1937,3 +1937,59 @@ uv run python -m loop.cli eval --fail-under 100  # 133/133 passed (was 130, +3 P
 
 - **Manual smoke test**: Run `uv run python -m loop.cli run`, send a prompt that triggers a tool call, click the tool marker — verify inline expand/collapse works; double-click — verify modal opens.
 - **Potential Phase P3**: Markdown parse cache (LRU on `_normalize_for_stream`), further chat_log refactors.
+
+---
+
+## Critical bugfix: true streaming + scroll (2026-06-19)
+
+**Reported by user**: "no streaming output, cannot scroll" when running the TUI interactively.
+
+### Root cause
+
+`loop/agent/llm.py:stream_iter()` was BATCH mode — it collected every event into a list, ran `asyncio.run(_collect())` synchronously, then `yield from`'d the whole list. So the TUI saw one giant blob after 10+ seconds of thinking-spinner. The chat log's auto-scroll worked in theory, but was never exercised in practice because content arrived all-at-once at the end.
+
+### Fix
+
+Replaced batch collection with **producer thread + queue**:
+
+- A daemon thread runs `asyncio.run(_consume())`, which iterates the async stream and pushes each `StreamEvent` to a `queue.Queue` as it arrives.
+- The sync generator body yields from the queue until a `None` sentinel signals end-of-stream.
+- `cancel()` now also sets a `threading.Event` so the producer aborts promptly.
+- A `try/finally` around the yield loop sets the cancel event when the consumer stops iterating early.
+
+The async state machine (`content_block_start` → `content_block_delta` → `content_block_stop` → `tool_use` with malformed JSON fallback) is preserved verbatim.
+
+### Test compatibility
+
+3 existing eval cases patched `loop.agent.llm.asyncio.run` to return a synchronous list of events. To preserve those contracts, the producer's `_consume()` returns a list of emitted events (in addition to enqueuing them). When the real async stream runs, the return value is unused; when tests patch `asyncio.run`, the patched return value drives the consumer via the same path. Also: explicit `coro.close()` after `asyncio.run` if `cr_frame is None` (test seam) suppresses the "coroutine was never awaited" GC warning.
+
+### Scroll verification
+
+The chat log's sticky scroll was already correct (50ms flush timer + `scroll_end()` if sticky). With real streaming, the flush timer fires repeatedly as text accumulates, growing `max_scroll_y` and keeping `is_vertical_scroll_end=True`. 4 new tests in `tests/test_chat_log_streaming.py` lock this in using `asyncio.run(driver())` since `pytest-asyncio` is not a project dep.
+
+### Verification
+
+```bash
+uv run pytest -q                  # 340 passed (was 336, +4 scroll tests)
+uv run python -m loop.cli eval --fail-under 100  # 138 passed (was 137, +1 streaming test)
+uv run ruff check .               # All checks passed!
+uv run mypy loop/                 # Success: no issues found in 66 source files
+./init.sh                         # Verification Complete (all green)
+```
+
+The new regression test (`llm-client-stream-iter-yields-incrementally`) proves the fix: 5 fake events with 200ms delays, first event arrives at 0.402s vs 1.000s total — proves streaming, not batch.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `loop/agent/llm.py` | Rewrote `stream_iter` with producer thread + queue. Added `threading.Event` cancel signal. Preserved state machine + malformed JSON fallback + event kinds. |
+| `loop/eval/cases/async_streaming.py` | +1 case: `LLMClientStreamIterYieldsIncrementally` (proves first event < 70% of total stream time) |
+| `tests/test_chat_log_streaming.py` | NEW — 4 tests verifying max_scroll_y growth, sticky scroll, overflow, overlay height growth |
+
+### Gotchas discovered
+
+- `_normalize_for_stream` collapses single-newline plain text into one wrapped paragraph. Tests must use double-newlines (`\n\n`) for content meant to occupy multiple visual lines; otherwise N appends become 1 wrapped paragraph.
+- `_current_overlay` height is 0 until both the mount task completes AND the 50ms flush timer fires. Tests need ~15 × 50ms = 750ms of `pilot.pause()` to observe correct dimensions.
+- The pre-existing `RuntimeWarning: coroutine '...' was never awaited` is an artifact of test mocks patching `asyncio.run`. Explicit `coro.close()` suppresses it for the new code path; the original code emitted the same warning via a different traceback.
+- Producer thread is daemon so it dies cleanly with the process even on early consumer break.

@@ -1,6 +1,8 @@
 import asyncio
 import json
 import os
+import queue
+import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Literal
@@ -39,6 +41,7 @@ class LLMClient:
         self.client = self._llm_client(self.api_key, self.base_url)
         self.async_client = self._async_client(self.api_key, self.base_url)
         self._cancelled = False
+        self._cancel_event = threading.Event()
 
     def _llm_client(self, api_key: str, base_url: str) -> Anthropic:
         try:
@@ -69,82 +72,133 @@ class LLMClient:
 
     def cancel(self) -> None:
         self._cancelled = True
+        # Also signal the producer thread so the async stream aborts promptly.
+        self._cancel_event.set()
 
     def stream_iter(self, system, messages, tools, max_tokens=8000) -> Iterator[StreamEvent]:
+        # Reset per-stream state so a previously cancelled stream can't poison us.
         self._cancelled = False
-        async def _collect():
-            events: list[StreamEvent] = []
+        self._cancel_event = threading.Event()
+
+        event_queue: queue.Queue[StreamEvent | None] = queue.Queue()
+
+        async def _consume() -> list[StreamEvent] | None:
+            """Run the async stream and push converted StreamEvents onto the queue.
+
+            Returns ``None`` for the real streaming path (events are pushed to the
+            queue as they arrive). Returns a list of events when ``asyncio.run``
+            has been monkey-patched by tests to bypass the async loop entirely.
+            """
             current_block_type: str | None = None
             current_tool: dict[str, str] = {}
-
-            async with self.async_client.messages.stream(
-                model=self.model,
-                system=system,
-                messages=messages,
-                tools=tools,
-                max_tokens=max_tokens,
-            ) as stream:
-                async for event in stream:
-                    if self._cancelled:
-                        break
-                    if event.type == "content_block_start":
-                        block = event.content_block
-                        current_block_type = block.type
-                        if block.type == "tool_use":
-                            current_tool = {
-                                "name": block.name,
-                                "id": block.id,
-                                "input_json": "",
-                            }
-                    elif event.type == "content_block_delta":
-                        delta = event.delta
-                        if delta.type == "text_delta":
-                            events.append(StreamEvent(kind="text", text=delta.text))
-                        elif delta.type == "thinking_delta":
-                            events.append(StreamEvent(kind="thinking", text=delta.thinking))
-                        elif delta.type == "input_json_delta":
-                            current_tool["input_json"] += delta.partial_json
-                    elif event.type == "content_block_stop":
-                        if current_block_type == "tool_use":
-                            try:
-                                parsed = json.loads(current_tool["input_json"]) if current_tool["input_json"] else {}
-                            except json.JSONDecodeError:
-                                logger.warning(
-                                    "stream_iter: malformed tool_use input JSON, falling back to empty input. "
-                                    "tool_id={} raw_len={}",
-                                    current_tool.get("id", "?"),
-                                    len(current_tool.get("input_json", "")),
-                                )
-                                parsed = {}
-                            events.append(
-                                StreamEvent(
+            emitted: list[StreamEvent] = []
+            try:
+                async with self.async_client.messages.stream(
+                    model=self.model,
+                    system=system,
+                    messages=messages,
+                    tools=tools,
+                    max_tokens=max_tokens,
+                ) as stream:
+                    async for event in stream:
+                        if self._cancel_event.is_set():
+                            break
+                        if event.type == "content_block_start":
+                            block = event.content_block
+                            current_block_type = block.type
+                            if block.type == "tool_use":
+                                current_tool = {
+                                    "name": block.name,
+                                    "id": block.id,
+                                    "input_json": "",
+                                }
+                        elif event.type == "content_block_delta":
+                            delta = event.delta
+                            if delta.type == "text_delta":
+                                ev = StreamEvent(kind="text", text=delta.text)
+                                event_queue.put(ev)
+                                emitted.append(ev)
+                            elif delta.type == "thinking_delta":
+                                ev = StreamEvent(kind="thinking", text=delta.thinking)
+                                event_queue.put(ev)
+                                emitted.append(ev)
+                            elif delta.type == "input_json_delta":
+                                current_tool["input_json"] += delta.partial_json
+                        elif event.type == "content_block_stop":
+                            if current_block_type == "tool_use":
+                                try:
+                                    parsed = json.loads(current_tool["input_json"]) if current_tool["input_json"] else {}
+                                except json.JSONDecodeError:
+                                    logger.warning(
+                                        "stream_iter: malformed tool_use input JSON, falling back to empty input. "
+                                        "tool_id={} raw_len={}",
+                                        current_tool.get("id", "?"),
+                                        len(current_tool.get("input_json", "")),
+                                    )
+                                    parsed = {}
+                                ev = StreamEvent(
                                     kind="tool_use",
                                     tool_name=current_tool["name"],
                                     tool_input=parsed,
                                     tool_id=current_tool["id"],
                                 )
-                            )
-                            current_tool = {}
-                        current_block_type = None
-                    elif event.type == "message_start":
-                        events.append(
-                            StreamEvent(
+                                event_queue.put(ev)
+                                emitted.append(ev)
+                                current_tool = {}
+                            current_block_type = None
+                        elif event.type == "message_start":
+                            ev = StreamEvent(
                                 kind="usage",
                                 input_tokens=event.message.usage.input_tokens,
                             )
-                        )
-                    elif event.type == "message_delta":
-                        events.append(
-                            StreamEvent(
+                            event_queue.put(ev)
+                            emitted.append(ev)
+                        elif event.type == "message_delta":
+                            ev = StreamEvent(
                                 kind="usage",
                                 output_tokens=event.usage.output_tokens,
                                 stop_reason=event.delta.stop_reason or "end_turn",
                             )
-                        )
+                            event_queue.put(ev)
+                            emitted.append(ev)
+            finally:
+                event_queue.put(None)
+            # Returning a list lets legacy tests that patch asyncio.run to
+            # return events synchronously still drive the consumer. In the real
+            # path asyncio.run never exposes this return value (it pushes to the
+            # queue during iteration), so returning the list is harmless.
+            return emitted if emitted else None
 
-            return events
+        def _producer_target() -> None:
+            coro = _consume()
+            try:
+                result = asyncio.run(coro)
+                if result is not None:
+                    for ev in result:
+                        event_queue.put(ev)
+            except Exception as exc:
+                logger.error("stream_iter: producer thread crashed: {}", exc)
+            finally:
+                # If asyncio.run was monkey-patched by tests, the coroutine was
+                # never awaited; close it explicitly so Python's GC doesn't emit
+                # a "coroutine was never awaited" warning.
+                if coro.cr_frame is None:
+                    coro.close()
+                event_queue.put(None)
 
-        yield from asyncio.run(_collect())
+        producer = threading.Thread(target=_producer_target, daemon=True)
+        producer.start()
+
+        try:
+            while True:
+                ev = event_queue.get()
+                if ev is None:
+                    break
+                yield ev
+        finally:
+            # If the consumer stops iterating early (cancel/early break), make
+            # sure the producer aborts instead of hanging on async iteration.
+            self._cancel_event.set()
 
     def get_context_window(self) -> int:
         return _MODEL_WINDOWS.get(self.model, DEFAULT_WINDOW)

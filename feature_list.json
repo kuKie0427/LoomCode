@@ -369,6 +369,15 @@
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval --fail-under 100 → 133/133 passed (was 130, +3 P2 cases). Changes: loop/tui/chat_log.py (CollapsibleToolOutput class + ToolCallMarker._output_widget/set_output_widget/on_click double-click-handling via event.chain + ChatLog._tool_outputs dict + _mount_tool_output async helper + add_tool_call_inline + complete_tool_call_inline updates output content + clear_content + append_user_message clear _tool_outputs), tests/test_chat_log_p2.py (NEW, 16 tests covering toggle / click-toggle / double-click-modal / add-creates-output / complete-updates-output / clear-resets), loop/eval/cases/tui_collapsible.py (NEW, 3 eval cases)."
+    },
+    {
+      "id": "f-streaming-true-regression-fix",
+      "name": "Critical fix: stream_iter 真正流式 (不是 batch) + chat log 增量滚动",
+      "description": "用户报告 TUI 无流式输出、无法滚动。Root cause: stream_iter 用 yield from asyncio.run(_collect()) 把所有事件收集到一个 list 才 yield,等于 batch 模式。修复:producer thread + queue.Queue 模式,daemon thread 跑 asyncio.run(_consume()),_consume 把每个 event 立即 put 进 queue,generator body yield from queue。cancel() 加 threading.Event 信号让 producer 提前退出。state machine (content_block_start/delta/stop + tool_use) 和 malformed JSON fallback 完整保留。AsyncAnthropic.messages.stream 的事件顺序 + asyncio.run 作为 test seam 的契约兼容 (返回 list 模式仍能驱动 consumer)。",
+      "dependencies": ["f-async-streaming-llm"],
+      "status": "done",
+      "verification": "uv run pytest -q && uv run python -m loop.cli eval --fail-under 100 && uv run ruff check . && uv run mypy loop/ && ./init.sh",
+      "evidence": "uv run pytest -q → 340 passed (was 336, +4 chat_log_streaming tests); uv run python -m loop.cli eval --fail-under 100 → 138 passed (was 137, +1 streaming-yields-incrementally case); uv run ruff check . → All checks passed!; uv run mypy loop/ → Success: no issues found in 66 source files; ./init.sh → 'Verification Complete (all green)'. The new regression test proves the fix: 5 fake events with 200ms delays → first event at 0.402s vs 1.000s total stream time (first event in < 70% of total, proving streaming not batch). Changes: loop/agent/llm.py (rewrote stream_iter with producer thread + queue.Queue + threading.Event cancel signal), loop/eval/cases/async_streaming.py (+LLMClientStreamIterYieldsIncrementally case using _FakeStreamCM async context manager with artificial delays), tests/test_chat_log_streaming.py (NEW, 4 tests verifying max_scroll_y growth + sticky scroll + overflow + overlay virtual_size growth using pilot)."
     }
   ]
 }

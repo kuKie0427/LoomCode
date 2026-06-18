@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import os
+import time
 from unittest.mock import MagicMock, patch
 
 from anthropic import AsyncAnthropic
@@ -12,6 +14,7 @@ from anthropic.types import (
     RawContentBlockStopEvent,
     RawMessageStartEvent,
     TextBlock,
+    TextDelta,
     ToolUseBlock,
     Usage,
 )
@@ -712,3 +715,144 @@ class AgentLoopFiresOnCompactAndMessageEnd(EvalCase):
 
         return EvalResult(name=self.name, passed=True,
                           detail=f"on_compact({c_args[0]}→{c_args[1]}) + on_message_end({e_args[0]}, {e_args[1]})")
+
+
+# ── Case 14: stream_iter yields incrementally (not batch) ─────────────────────
+
+class LLMClientStreamIterYieldsIncrementally(EvalCase):
+    name = "llm-client-stream-iter-yields-incrementally"
+    description = (
+        "stream_iter yields the first event well before the underlying async "
+        "stream completes (proves true streaming, not batch collection)"
+    )
+
+    def run(self) -> EvalResult:
+        # Build fake async stream events with 200ms delays between each one.
+        # Total stream time will be 3 * 200ms = 600ms.
+        events_with_delays = [
+            (
+                0.20,
+                RawContentBlockStartEvent(
+                    type="content_block_start",
+                    index=0,
+                    content_block=TextBlock(type="text", text=""),
+                ),
+            ),
+            (
+                0.20,
+                RawContentBlockDeltaEvent(
+                    type="content_block_delta",
+                    index=0,
+                    delta=TextDelta(type="text_delta", text="chunk1"),
+                ),
+            ),
+            (
+                0.20,
+                RawContentBlockDeltaEvent(
+                    type="content_block_delta",
+                    index=0,
+                    delta=TextDelta(type="text_delta", text="chunk2"),
+                ),
+            ),
+            (
+                0.20,
+                RawContentBlockDeltaEvent(
+                    type="content_block_delta",
+                    index=0,
+                    delta=TextDelta(type="text_delta", text="chunk3"),
+                ),
+            ),
+            (
+                0.20,
+                RawContentBlockStopEvent(type="content_block_stop", index=0),
+            ),
+        ]
+
+        class _FakeStreamCM:
+            def __init__(self, events_with_delays):
+                self._events = list(events_with_delays)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if not self._events:
+                    raise StopAsyncIteration
+                delay, event = self._events.pop(0)
+                await asyncio.sleep(delay)
+                return event
+
+        def fake_stream(**_kwargs):
+            return _FakeStreamCM(events_with_delays)
+
+        mock_async = MagicMock()
+        mock_async.messages.stream = fake_stream
+
+        client = LLMClient("test-model")
+        client.async_client = mock_async
+
+        # Iterate the generator, recording the time when each event arrives.
+        gen = client.stream_iter("sys", [], [])
+        first_event_time: float | None = None
+        all_event_times: list[float] = []
+        all_events: list[StreamEvent] = []
+
+        t_start = time.monotonic()
+        try:
+            for ev in gen:
+                t_now = time.monotonic() - t_start
+                all_event_times.append(t_now)
+                all_events.append(ev)
+                if first_event_time is None:
+                    first_event_time = t_now
+        finally:
+            # Ensure the generator is closed so the producer thread cancels cleanly.
+            gen.close()
+
+        if first_event_time is None:
+            return EvalResult(name=self.name, passed=False,
+                              detail="No events were yielded from stream_iter")
+
+        # The first text_delta event is the 2nd in the stream (after content_block_start).
+        # With 200ms per event and 4 events before completion, the first text_delta
+        # should arrive after ~400ms (after the no-op content_block_start at 200ms).
+        # We assert: first_event_time < total_stream_time (proves streaming).
+        # Total stream time = 5 events × 200ms = 1000ms.
+        # First event must arrive well before that.
+        total_stream_time = 0.20 * len(events_with_delays)  # 1.0s
+        # First event must arrive in < 70% of total stream time (streaming threshold).
+        streaming_threshold = total_stream_time * 0.7
+
+        if first_event_time >= streaming_threshold:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=(
+                    f"First event arrived at {first_event_time:.3f}s, "
+                    f">= {streaming_threshold:.3f}s threshold (total stream: "
+                    f"{total_stream_time:.3f}s). Streaming is BATCH mode — all "
+                    f"events waited for stream completion."
+                ),
+            )
+
+        # Also verify we got actual content (not just one event).
+        text_events = [e for e in all_events if e.kind == "text"]
+        if len(text_events) < 3:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=f"Expected ≥3 text events, got {len(text_events)}",
+            )
+
+        return EvalResult(
+            name=self.name, passed=True,
+            detail=(
+                f"First event at {first_event_time:.3f}s (well before "
+                f"{total_stream_time:.3f}s total). {len(all_events)} events "
+                f"yielded incrementally."
+            ),
+        )
