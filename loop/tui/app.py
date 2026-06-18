@@ -144,6 +144,8 @@ class AgentTUIApp(App):
 
     def on_assistant_turn_end(self, message: AssistantTurnEnd) -> None:
         self.tool_call_count = self.tool_call_count + message.tool_calls
+        chat_log = self.query_one(ChatLog)
+        chat_log._finalize_streaming()
 
     async def on_composer_submitted(self, event: Composer.Submitted) -> None:
         user_msg = event.value.strip()

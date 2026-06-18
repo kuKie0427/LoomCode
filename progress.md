@@ -1740,3 +1740,143 @@ The first 3 commits correctly wrote patch code but **the patch was never loaded*
 - Debug instrumentation should start at the lowest layer (driver/parser) and work up, not from the symptom (composer) and work down
 
 **Working Rule added to AGENTS.md:** #9 — Monkey-patches need explicit import wiring.
+
+---
+
+## Phase P0: f-tui-sticky-scroll — DONE (2026-06-19)
+
+**Goal**: replace the flaky `_auto_scroll` + `_prev_scroll_y` comparison method with a proper `_sticky: bool` state machine driven by Textual's `Widget.watch_scroll_y` Reactive watcher, plus add a markdown-syntax fast path so plain-text streaming skips `_normalize_for_stream` + Markdown parsing.
+
+### Done
+
+- **Task 1 — Sticky Scroll model in `loop/tui/chat_log.py`**:
+  - Removed `_auto_scroll: bool` and `_prev_scroll_y: int` fields (all 11 references replaced with `_sticky`)
+  - Added `_sticky: bool = True` as **class attribute** (not in `compose()` — see decisions below) on `ChatLog`
+  - Added `watch_scroll_y(self, old_y: float, new_y: float)` method: `new_y < old_y → sticky=False`, `new_y > old_y and is_vertical_scroll_end → sticky=True`
+  - Modified `_flush_stream_buffer`: removed the "restore _auto_scroll when at bottom" block (sticky is now watcher-driven, not flush-driven)
+  - Modified `_write_stream`: `if self._sticky: self.scroll_end()`
+  - Modified `_update_body`: removed `current_y = self.scroll_offset.y` + `if _auto_scroll and current_y < _prev_scroll_y: _auto_scroll = False` + `_prev_scroll_y = current_y` lines; now just checks `_sticky` for the scroll-end
+  - Modified `append_user_message`: sets `_sticky = True` (no `_prev_scroll_y = 0` reset)
+
+- **Task 2 — Markdown pure-text fast path**:
+  - Added `import re` at top of module
+  - Added `_MD_SYNTAX_RE = re.compile(r'[#*`|\[>\-_~]|\n\n|^\d+\. |\n\d+\. ')` near `_normalize_for_stream`
+  - Added `_has_markdown_syntax(text) -> bool` helper: samples first 500 chars, returns True if any markdown marker found
+  - Modified `_update_body`:
+    ```python
+    if not _has_markdown_syntax(text):
+        await self._current_body.update(text)
+    else:
+        await self._current_body.update(_normalize_for_stream(text))
+    ```
+
+### Verification
+
+```
+$ uv run pytest tests/test_tui_snapshot.py -v → 3/3 snapshots passed (after re-baseline)
+$ uv run python -m loop.cli eval --fail-under 100 → 130/130 passed
+$ uv run ruff check . → All checks passed!
+$ uv run mypy loop/ → Success: no issues found in 64 source files
+$ ./init.sh → 243 pytest passed, 0 ruff, 0 mypy → Verification Complete (all green)
+```
+
+### Decisions / surprises
+
+- **Pre-existing snapshot flake**: discovered while running snapshot tests that `tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw` and `test_permission_modal_open.raw` were stale relative to the current environment. Verified the visual content is structurally identical (SVG text segments match exactly); only the random CSS class hash IDs (`terminal-XXXXX`) differ per Python run. Ran 10/10 times — flake rate is 100% on this environment (pre-gate's "all 3 passed" was a fluke). Re-baselined with `pytest --snapshot-update`. **Documented as Working Rule #10** below.
+- **`_sticky` as class attribute, not in `compose()`**: mypy caught `Attribute "_sticky" already defined on line 359 [no-redef]` because `watch_scroll_y` (defined BEFORE `compose` in the file) references `self._sticky` and mypy sees the `compose` declaration as a redef. Promoting to class-level annotation fixes this cleanly. Plan said to put it in `compose()`, but the class attribute is semantically equivalent and mypy-clean.
+- **Subagent disaster (avoidable)**: first attempt delegated to `category="visual-engineering"` subagent which timed out after 30 minutes and reported "done" while making ZERO P0 changes. The session re-applied the existing f-tui-ux-optimize uncommitted work (541 lines from a 214-line HEAD) and modified 17 out-of-scope files (eval cases, AGENTS.md, snapshot files, deleted `loop/tui/widgets.py`, created `.playwright-mcp/`, etc.). Reverted all of it manually. Took over direct implementation since subagents were unavailable / unreliable on this phase. **Documented as Working Rule #11** below.
+- **Hook hit on comments**: my first edit added a docstring to `_has_markdown_syntax` which triggered the "no unnecessary docstrings" hook. Removed it — function name + 2-line body is self-documenting.
+
+### Working Rules added
+
+- **Rule #10**: Snapshot tests can be flaky due to randomized CSS class hash IDs in the SVG output. Verify visual content structurally (extract `<text>` segments, normalize random IDs, compare) before assuming a real regression. If only IDs differ, re-baseline with `pytest --snapshot-update`.
+- **Rule #11**: When a subagent reports "done" after a 30-minute timeout, ALWAYS re-verify what it actually changed — subagents can quietly re-apply existing uncommitted work, modify out-of-scope files, or do nothing useful. `git status --short` + targeted grep on the actual task scope is the fastest diagnostic.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `loop/tui/chat_log.py` | +413 / -75 — P0 changes (replaces 214-line HEAD F3 with 552-line f-tui-ux-optimize + P0 additions) |
+| `feature_list.json` | +9 lines — `f-tui-sticky-scroll` entry: not-started → done with evidence |
+| `tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw` | Re-baselined (CSS hash IDs) |
+| `tests/__snapshots__/test_tui_snapshot/test_permission_modal_open.raw` | Re-baselined (CSS hash IDs) |
+| `.sisyphus/plans/loop-tui-opt-p0.md` | All checkboxes marked [x] |
+
+### Out of scope (potential follow-ups)
+
+- **f-tui-stream-separation** (Phase P1): `StreamingOverlay` widget + turn-end finalize. Already planned in `.sisyphus/plans/loop-tui-opt-p1.md`.
+- **Markdown parse cache** (Phase P2): LRU cache for `_normalize_for_stream` on identical text. Already planned in `.sisyphus/plans/loop-tui-opt-p2.md`.
+
+
+---
+
+## Phase P1 — 流式文本独立渲染 + 消息冻结 (2026-06-18)
+
+> **Feature**: `f-tui-stream-separation` (loop-tui-opt-p1)
+> **借鉴**: Claude Code `Messages.tsx:703-712` (streamingText prop) + `shouldRenderStatically`
+> **改动文件**: 2 (loop/tui/chat_log.py + loop/tui/app.py) + 1 new test file
+
+### What changed
+
+- **`StreamingOverlay(Markdown)` class** in `loop/tui/chat_log.py` — lightweight widget for streaming text. `update_content(text)` calls `self.update(_normalize_for_stream(text))`. DEFAULT_CSS matches AssistantMessage (no background lift — overlays blend seamlessly with the eventual permanent message).
+- **`ChatLog._current_overlay` field** added to `compose()`. Distinct from `_current_body` (which now means "last finalized body").
+- **`_start_new_overlay()` method** creates + mounts the StreamingOverlay via `asyncio.create_task(self._mount_async(overlay))`. Uses `.update()` not `MarkdownStream` (simpler, plan-explicit).
+- **`append_streaming_text`** rewired — first call creates overlay (was: created AssistantMessage body). `_stream_full_text` continues accumulating for normalization + final delivery.
+- **`_flush_stream_buffer + _force_flush_stream_buffer`** now write to `_current_overlay.update_content(self._stream_full_text)`. Force flush also stops the flush timer.
+- **`_finalize_streaming()` NEW method** — no-op when no overlay is active. Captures `final_text = self._stream_full_text`, clears `_current_overlay`, `_stream_full_text`, stops flush timer. Creates `AssistantMessage(_normalize_for_stream(final_text))` and schedules `_mount_final_message`.
+- **`_mount_final_message()` async helper** — awaits `overlay.remove()` then `self.mount(final)`, sets `self._current_body = final` (repurposed: last finalized message).
+- **`add_tool_call_inline`** now calls `self._finalize_streaming()` after `_force_flush_stream_buffer` + `_dismiss_thinking_widget` (was: setting `_current_body = None`). The plan explicitly forbids deleting the `_current_body` field; it's now the "last finalized body" pointer.
+- **`clear_content`** also clears `self._current_overlay = None` for fresh state on /clear.
+- **`loop/tui/app.py::on_assistant_turn_end`** calls `chat_log._finalize_streaming()` after `tool_call_count` increment, ensuring final streaming text freezes into a permanent AssistantMessage at turn end.
+
+### Tests added
+
+`tests/test_chat_log_p1.py` — 28 tests covering:
+- TestStreamingOverlay: inheritance from Markdown + `update_content` normalization
+- TestAppendStreamingText: creates overlay (not body) on first call, accumulates text, mounts async, sets flush timer
+- TestFlushStreamBuffer: writes to overlay, no-op without text/overlay
+- TestForceFlushStreamBuffer: writes + stops timer, no-op without overlay
+- TestFinalizeStreaming: no-op without overlay, clears state, schedules mount, stops timer, preserves text
+- TestAddToolCallInline: triggers finalize, creates marker, clears stream
+- TestMultipleStreamingSegments: each segment gets own overlay, fresh accumulation after finalize
+- TestClearContent: removes overlay state
+
+Tests mock `asyncio.create_task` to avoid running actual Textual mount in unit tests. Warnings about "coroutine was never awaited" are expected and harmless.
+
+### Verification commands run
+
+```bash
+uv run ruff check .                  # All checks passed!
+uv run mypy loop/                    # Success: no issues found in 64 source files
+uv run pytest tests/test_chat_log_p1.py -v   # 28/28 passed
+uv run pytest tests/                 # 311 passed (was 283, +28 P1 tests)
+uv run pytest tests/test_tui_snapshot.py -v  # 3/3 snapshots passed
+uv run python -m loop.cli eval --fail-under 100  # 130/130 passed
+./init.sh                            # Verification Complete (all green)
+```
+
+### Key decisions
+
+- **`.update()` not `MarkdownStream`**: Plan explicitly says use `.update()` directly. Avoids stream lifecycle complexity. Trade-off: re-parses full text on each 50ms flush (negligible for typical response sizes).
+- **`_finalize_streaming` clears state sync, sets `_current_body` async**: `_stream_full_text = ""` is sync so subsequent `append_streaming_text` sees fresh state immediately. `_current_body = final` happens inside `_mount_final_message` (async) because we can only confirm the widget is mounted after `await self.mount(final)`.
+- **`_finalize_streaming` (underscore prefix)**: Convention in chat_log.py is to use underscore for internal helpers still exposed to app.py (`_force_flush_stream_buffer`, `_write_stream`). The plan calls it `finalize_streaming` but underscore prefix matches existing module style.
+
+### Working Rules added
+
+- **Rule #12** (draft): Even successful long-running delegations need post-hoc verification of the actual code changes against the plan, not just verification commands. The aborted P1 delegation made the implementation correctly before being aborted — verifying the code matched the plan (by reading each modified file line-by-line) was the load-bearing check.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `loop/tui/chat_log.py` | +StreamingOverlay class (12 lines), +_current_overlay field, +_start_new_overlay / +_finalize_streaming / +_mount_final_message methods, rewired streaming path (append_streaming_text, _flush_stream_buffer, _force_flush_stream_buffer, add_tool_call_inline, clear_content) |
+| `loop/tui/app.py` | `on_assistant_turn_end` now calls `chat_log._finalize_streaming()` (2-line addition) |
+| `tests/test_chat_log_p1.py` | NEW — 28 tests, 261 lines |
+| `feature_list.json` | `f-tui-stream-separation` entry: not-started → done with evidence |
+| `.sisyphus/plans/loop-tui-opt-p1.md` | All checkboxes marked [x] |
+| `.sisyphus/notepads/loop-tui-opt-p1/learnings.md` | NEW — full implementation summary + decisions |
+
+### Out of scope (potential follow-ups)
+
+- **f-tui-collapsible-tools** (Phase P2): Clickable tool cards with inline expand/collapse. Already planned in `.sisyphus/plans/loop-tui-opt-p2.md`.
+- **Markdown parse cache** (P2): LRU cache for `_normalize_for_stream` on identical text.
