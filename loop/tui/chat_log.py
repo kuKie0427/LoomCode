@@ -10,11 +10,13 @@ import json
 from typing import Any
 
 from textual.containers import VerticalScroll
-from textual.widgets import Markdown
+from textual.widgets import Markdown, Static
 
 MAX_TOOL_OUTPUT_LINES = 30
 _HEAD_LINES = 15
 _TAIL_LINES = 15
+
+_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 
 def _truncate(text: str) -> str:
@@ -37,6 +39,9 @@ class ChatLog(VerticalScroll):
     def compose(self) -> Any:
         yield Markdown(id="md")
         self._stream: Any = None
+        self._thinking_widget: Static | None = None
+        self._spinner_timer: Any = None
+        self._spinner_idx: int = 0
 
     async def append_user_message(self, text: str) -> None:
         md = self.query_one("#md", Markdown)
@@ -48,12 +53,47 @@ class ChatLog(VerticalScroll):
         if self._stream is None:
             self._stream = Markdown.get_stream(md)
         asyncio.create_task(self._stream.write("\n## 🤖 Assistant\n\n"))
+        self._mount_thinking_widget()
+
+    def _mount_thinking_widget(self) -> None:
+        if self._thinking_widget is not None:
+            return
+        widget = Static("⠋ thinking…", id="thinking-spinner", classes="thinking")
+        self._thinking_widget = widget
+        self._spinner_idx = 0
+        self._spinner_timer = self.set_interval(0.1, self._tick_spinner, name="spinner")
+        asyncio.create_task(self._mount_async(widget))
+        self.scroll_end()
+
+    async def _mount_async(self, widget: Static) -> None:
+        await self.mount(widget)
+
+    def _tick_spinner(self) -> None:
+        if self._thinking_widget is None:
+            return
+        self._spinner_idx = (self._spinner_idx + 1) % len(_SPINNER_FRAMES)
+        self._thinking_widget.update(f"{_SPINNER_FRAMES[self._spinner_idx]} thinking…")
+
+    def _dismiss_thinking_widget(self) -> None:
+        if self._thinking_widget is None:
+            return
+        if self._spinner_timer is not None:
+            self._spinner_timer.stop()
+            self._spinner_timer = None
+        widget = self._thinking_widget
+        self._thinking_widget = None
+        asyncio.create_task(self._remove_async(widget))
+
+    async def _remove_async(self, widget: Static) -> None:
+        await widget.remove()
 
     def append_streaming_text(self, text: str) -> None:
+        self._dismiss_thinking_widget()
         asyncio.create_task(self._stream.write(text))
         self.scroll_end()
 
     def add_tool_call_inline(self, name: str, inp: dict, tool_id: str) -> None:
+        self._dismiss_thinking_widget()
         args_str = json.dumps(inp, ensure_ascii=False, indent=2) if inp else ""
         if args_str:
             block = f"\n**🔧 {name}**\n\n```json\n{args_str}\n```\n"
@@ -77,6 +117,7 @@ class ChatLog(VerticalScroll):
         self.scroll_end()
 
     async def clear_content(self) -> None:
+        self._dismiss_thinking_widget()
         md = self.query_one("#md", Markdown)
         md.update("")
         self._stream = None
