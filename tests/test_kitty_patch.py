@@ -90,3 +90,26 @@ def test_works_when_kitty_disabled(monkeypatch):
     events = list(result)
     assert len(events) == 1
     assert events[0].character == "你好"
+
+
+def test_partial_csi_returns_empty():
+    parser = XTermParser.__new__(XTermParser)
+    for partial in ["\x1b[", "\x1b[3", "\x1b[32", "\x1b[32;", "\x1b[32;;", "\x1b[32;;2", "\x1b[32;;20320"]:
+        result = kitty_patch._patched_sequence_to_key_events(parser, partial)
+        events = list(result)
+        assert events == [], f"partial {partial!r} should yield no events, got {events}"
+
+
+def test_complete_csi_passes_through():
+    parser = XTermParser.__new__(XTermParser)
+    result = kitty_patch._patched_sequence_to_key_events(parser, "\x1b[A")
+    events = list(result)
+    assert any(e.key == "up" for e in events)
+
+
+def test_batched_with_u_terminator():
+    parser = XTermParser.__new__(XTermParser)
+    result = kitty_patch._patched_sequence_to_key_events(parser, "\x1b[32;;20320:22909u")
+    events = list(result)
+    assert len(events) == 1
+    assert events[0].character == "你好"
