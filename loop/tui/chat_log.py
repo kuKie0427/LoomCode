@@ -40,7 +40,7 @@ class ChatLog(VerticalScroll):
 
     async def append_user_message(self, text: str) -> None:
         md = self.query_one("#md", Markdown)
-        await md.append(f"## 👤 You\n\n{text}\n\n---\n")
+        await md.append(f"\n\n## 👤 You\n\n{text}\n\n---\n")
         self.scroll_end()
 
     def show_thinking_spinner(self) -> None:
