@@ -378,6 +378,15 @@
       "status": "done",
       "verification": "uv run pytest -q && uv run python -m loop.cli eval --fail-under 100 && uv run ruff check . && uv run mypy loop/ && ./init.sh",
       "evidence": "uv run pytest -q → 340 passed (was 336, +4 chat_log_streaming tests); uv run python -m loop.cli eval --fail-under 100 → 138 passed (was 137, +1 streaming-yields-incrementally case); uv run ruff check . → All checks passed!; uv run mypy loop/ → Success: no issues found in 66 source files; ./init.sh → 'Verification Complete (all green)'. The new regression test proves the fix: 5 fake events with 200ms delays → first event at 0.402s vs 1.000s total stream time (first event in < 70% of total, proving streaming not batch). Changes: loop/agent/llm.py (rewrote stream_iter with producer thread + queue.Queue + threading.Event cancel signal), loop/eval/cases/async_streaming.py (+LLMClientStreamIterYieldsIncrementally case using _FakeStreamCM async context manager with artificial delays), tests/test_chat_log_streaming.py (NEW, 4 tests verifying max_scroll_y growth + sticky scroll + overflow + overlay virtual_size growth using pilot)."
+    },
+    {
+      "id": "f-tui-manual-scroll-global-bindings",
+      "name": "TUI manual scroll: global BINDINGS so keyboard scroll works regardless of focus",
+      "description": "用户报告可以自动滚动但无法手动滚动。Root cause: Composer (TextArea) 在 on_mount() 被 focus(),吃掉 PageUp/PageDown/Home/End 用于 cursor 移动。TextArea 还绑定了 shift+home/shift+end (cursor_line_start/select),shadow 任何 app 级的同名 binding。Mouse wheel 实际可用 (event bubble=True 冒泡到 ChatLog,即使滚在子 Markdown 上),但用户主要用键盘。修复:在 AgentTUIApp 加 4 个全局 BINDINGS — shift+pageup/pagedown (TextArea 不绑,自由落体到 app) + ctrl+home/end (TextArea 也不绑)。action 直接调 chat_log.scroll_y。action_scroll_chat_bottom 额外 set _sticky=True 重启 auto-scroll。还加了 focus 指示器 CSS (background boost 5% on focus / 3% on focus-within) 和 StatusBar 的 '| Shift+PgUp/PgDn, Ctrl+Home/End to scroll' 提示 (仅当 max_scroll_y > 0 时显示)。",
+      "dependencies": ["f-streaming-true-regression-fix"],
+      "status": "done",
+      "verification": "uv run pytest -q && uv run python -m loop.cli eval --fail-under 100 && uv run ruff check . && uv run mypy loop/ && ./init.sh",
+      "evidence": "uv run pytest -q → 347 passed (was 340, +7 manual scroll tests); uv run python -m loop.cli eval --fail-under 100 → 138 passed; uv run ruff check . → All checks passed!; uv run mypy loop/ → Success: no issues found in 66 source files; ./init.sh → 'Verification Complete (all green)'. The 7 new tests in tests/test_tui_manual_scroll.py verify the regression: composer is focused (precondition), pilot.press('shift+pageup') scrolls chat log up, 'shift+pagedown' scrolls down, 'ctrl+end' jumps to bottom + re-enables sticky, 'ctrl+home' jumps to top. Also: bindings are registered (smoke test), focus indicator CSS rule exists, status bar shows scroll hint when chat log overflows. Changes: loop/tui/app.py (4 BINDINGS + 4 action methods + CSS focus indicator), loop/tui/status_bar.py (conditional scroll hint in render()), tests/test_tui_manual_scroll.py (NEW, 7 tests)."
     }
   ]
 }

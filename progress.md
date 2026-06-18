@@ -1993,3 +1993,28 @@ The new regression test (`llm-client-stream-iter-yields-incrementally`) proves t
 - `_current_overlay` height is 0 until both the mount task completes AND the 50ms flush timer fires. Tests need ~15 × 50ms = 750ms of `pilot.pause()` to observe correct dimensions.
 - The pre-existing `RuntimeWarning: coroutine '...' was never awaited` is an artifact of test mocks patching `asyncio.run`. Explicit `coro.close()` suppresses it for the new code path; the original code emitted the same warning via a different traceback.
 - Producer thread is daemon so it dies cleanly with the process even on early consumer break.
+
+## 2026-06-19 — manual scroll fix session
+
+User reported: "可以自动滚动，但无法手动滚动" (auto-scroll works, manual scroll doesn't).
+
+### Root cause
+Composer (TextArea) is focused in `on_mount()` and binds PageUp/PageDown/Home/End/Shift+Home/Shift+End for cursor movement. These keys are consumed by the TextArea BEFORE reaching the app, so chat log scroll bindings never trigger. Mouse wheel actually works (events bubble=True) but user was using keyboard.
+
+Key insight from Textual source: `ScrollableContainer.BINDINGS` include `pageup`/`pagedown`/`home`/`end` which work when the scrollable has focus. But chat log can only be focused by clicking, and user doesn't know to do that.
+
+### Fix
+- 4 global BINDINGS on AgentTUIApp: `shift+pageup`, `shift+pagedown`, `ctrl+home`, `ctrl+end`. Shift+PageUp/Down are NOT bound by TextArea so they fall through to the app. Ctrl+Home/End are also free.
+- 4 action methods that call `chat_log.scroll_y = …` (and re-enable sticky on bottom)
+- Focus indicator CSS: `#chat-log:focus { background: $boost 5%; }` and `#chat-log:focus-within { background: $boost 3%; }`
+- StatusBar shows " | Shift+PgUp/PgDn, Ctrl+Home/End to scroll" hint when `max_scroll_y > 0`
+
+### Verification
+347 pytest (+7), 138 eval (no change), 0 ruff, 0 mypy, 3 snapshots, ./init.sh green.
+
+### Files
+| File | Change |
+|---|---|
+| `loop/tui/app.py` | +4 BINDINGS, +4 action methods, +focus CSS |
+| `loop/tui/status_bar.py` | Conditional scroll hint in `render()` |
+| `tests/test_tui_manual_scroll.py` | NEW — 7 tests (all 4 keys work with composer focused, bindings registered, focus CSS, status bar hint) |

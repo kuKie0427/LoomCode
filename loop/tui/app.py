@@ -54,6 +54,12 @@ class AgentTUIApp(App):
         scrollbar-color-hover: $text;
         scrollbar-size-vertical: 2;
     }
+    #chat-log:focus {
+        background: $boost 5%;
+    }
+    #chat-log:focus-within {
+        background: $boost 3%;
+    }
     #status-bar {
         height: 1;
         dock: bottom;
@@ -92,6 +98,10 @@ class AgentTUIApp(App):
         ("ctrl+c", "cancel_stream", "Cancel"),
         ("ctrl+d", "quit", "Quit"),
         ("ctrl+l", "clear_screen", "Clear"),
+        ("shift+pageup", "scroll_chat_up", "Scroll up"),
+        ("shift+pagedown", "scroll_chat_down", "Scroll down"),
+        ("ctrl+home", "scroll_chat_top", "Top"),
+        ("ctrl+end", "scroll_chat_bottom", "Bottom"),
     ]
 
     def __init__(self, resume: bool = False, model: str | None = None):
@@ -295,6 +305,27 @@ class AgentTUIApp(App):
     def action_clear_screen(self) -> None:
         chat_log = self.query_one(ChatLog)
         asyncio.create_task(chat_log.clear_content())
+
+    def _scroll_chat(self, amount: float) -> None:
+        chat_log = self.query_one(ChatLog)
+        chat_log.scroll_y = max(0.0, min(chat_log.scroll_y + amount, chat_log.max_scroll_y))
+
+    def action_scroll_chat_up(self) -> None:
+        chat_log = self.query_one(ChatLog)
+        self._scroll_chat(-chat_log.container_size.height)
+
+    def action_scroll_chat_down(self) -> None:
+        chat_log = self.query_one(ChatLog)
+        self._scroll_chat(chat_log.container_size.height)
+
+    def action_scroll_chat_top(self) -> None:
+        chat_log = self.query_one(ChatLog)
+        chat_log.scroll_y = 0
+
+    def action_scroll_chat_bottom(self) -> None:
+        chat_log = self.query_one(ChatLog)
+        chat_log.scroll_y = chat_log.max_scroll_y
+        chat_log._sticky = True
 
     async def action_quit(self) -> None:
         """Override default quit to fire SessionEnd + run init.sh first."""
