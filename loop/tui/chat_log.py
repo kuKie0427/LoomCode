@@ -34,11 +34,10 @@ class ChatLog(VerticalScroll):
         md = self.query_one("#md", Markdown)
         if self._stream is None:
             self._stream = Markdown.get_stream(md)
-        asyncio.ensure_future(md.append("### Assistant\n\n"))
+        asyncio.create_task(self._stream.write("### Assistant\n\n"))
 
     def append_streaming_text(self, text: str) -> None:
-        md = self.query_one("#md", Markdown)
-        asyncio.ensure_future(md.append(text))
+        asyncio.create_task(self._stream.write(text))
         self.scroll_end()
 
     def add_tool_card(self, name: str, inp: dict, tool_id: str) -> None:
