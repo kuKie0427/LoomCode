@@ -1,9 +1,5 @@
-import os
-
 from textual.message import Message
 from textual.widgets import TextArea
-
-_DEBUG_LOG = os.environ.get("LOOP_COMPOSER_DEBUG")
 
 
 class Composer(TextArea):
@@ -24,9 +20,6 @@ class Composer(TextArea):
         self.placeholder = "Type a prompt, / for commands"
 
     async def _on_key(self, event) -> None:
-        if _DEBUG_LOG:
-            with open(_DEBUG_LOG, "a") as f:
-                f.write(f"COMPOSER key={event.key!r} char={event.character!r} is_printable={event.is_printable}\n")
         if event.key == "enter":
             event.prevent_default()
             event.stop()

@@ -17,6 +17,7 @@ from textual.widgets import Footer, Header
 
 from loop.agent.llm import LLMClient
 from loop.agent.loop import WORKDIR, agent_loop
+from loop.tui import kitty_patch  # noqa: F401  # side-effect: patches XTermParser
 from loop.tui.chat_log import ChatLog
 from loop.tui.composer import Composer
 from loop.tui.messages import (
@@ -82,6 +83,9 @@ class AgentTUIApp(App):
         """Capture the main event loop for cross-thread async dispatch."""
         self._main_loop = asyncio.get_running_loop()
         self.query_one("#composer", Composer).focus()
+
+    def on_key(self, event) -> None:
+        pass
 
     def _make_tui_asker(self):
         """Build an asker that pushes PermissionScreen onto the app via the main loop.
