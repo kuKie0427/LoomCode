@@ -13,7 +13,7 @@ from loguru import logger
 from textual import work
 from textual.app import App, ComposeResult
 from textual.reactive import reactive
-from textual.widgets import Footer, Header
+from textual.widgets import Header
 
 from loop.agent.llm import LLMClient
 from loop.agent.loop import WORKDIR, agent_loop
@@ -25,6 +25,7 @@ from loop.tui.messages import (
     AssistantTurnStart,
     CompactOccurred,
     TextDelta,
+    ThinkingDelta,
     ToolUseCompleted,
     ToolUseStarted,
 )
@@ -33,10 +34,54 @@ from loop.tui.status_bar import StatusBar
 
 class AgentTUIApp(App):
     CSS = """
-    Screen { layout: vertical; }
-    #chat-log { height: 1fr; border: solid green; }
-    #composer { height: 3; dock: bottom; }
-    #status-bar { height: 1; dock: bottom; background: blue; }
+    Screen {
+        layout: vertical;
+        background: $background;
+    }
+    Header {
+        background: $background;
+        color: $text-muted;
+        text-style: dim;
+    }
+    #chat-log {
+        height: 1fr;
+        background: $background;
+        padding: 1 2 0 2;
+        overflow-y: auto;
+        overflow-x: hidden;
+        scrollbar-background: $background;
+        scrollbar-color: $text-muted;
+        scrollbar-color-hover: $text;
+        scrollbar-size-vertical: 2;
+    }
+    #status-bar {
+        height: 1;
+        dock: bottom;
+        background: $background;
+        color: $text-muted;
+        padding: 0 2;
+    }
+    #composer {
+        height: auto;
+        max-height: 8;
+        min-height: 3;
+        dock: bottom;
+        background: $surface;
+        border: none;
+        padding: 1 2;
+        margin: 0 2 1 2;
+        color: $text;
+    }
+    #composer:focus {
+        background: $boost;
+    }
+    #composer .text-area--cursor {
+        background: $accent;
+        color: $background;
+    }
+    #composer Text {
+        background: transparent;
+    }
     """
 
     _main_loop: asyncio.AbstractEventLoop | None
@@ -112,9 +157,8 @@ class AgentTUIApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield ChatLog(id="chat-log")
-        yield Composer(id="composer")
         yield StatusBar(id="status-bar")
-        yield Footer()
+        yield Composer(id="composer")
 
     def on_assistant_turn_start(self, _: AssistantTurnStart) -> None:
         chat_log = self.query_one(ChatLog)
@@ -123,6 +167,10 @@ class AgentTUIApp(App):
     def on_text_delta(self, message: TextDelta) -> None:
         chat_log = self.query_one(ChatLog)
         chat_log.append_streaming_text(message.text)
+
+    def on_thinking_delta(self, message: ThinkingDelta) -> None:
+        chat_log = self.query_one(ChatLog)
+        chat_log.append_thinking_text(message.text)
 
     def on_tool_use_started(self, message: ToolUseStarted) -> None:
         chat_log = self.query_one(ChatLog)
@@ -211,6 +259,7 @@ class AgentTUIApp(App):
         callbacks = {
             "on_message_start": lambda: self.post_message(AssistantTurnStart()),
             "on_text_delta": lambda chunk: self.post_message(TextDelta(chunk)),
+            "on_thinking_delta": lambda chunk: self.post_message(ThinkingDelta(chunk)),
             "on_tool_use": lambda name, inp, uid: self.post_message(ToolUseStarted(name, inp, uid)),
             "on_tool_result": lambda uid, out, err: self.post_message(
                 ToolUseCompleted(uid, out, err)

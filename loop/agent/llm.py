@@ -21,7 +21,7 @@ DEFAULT_WINDOW = 128000
 @dataclass
 class StreamEvent:
     """A single event from a streaming LLM response."""
-    kind: Literal["text", "tool_use", "usage"]
+    kind: Literal["text", "thinking", "tool_use", "usage"]
     text: str = ""
     tool_name: str = ""
     tool_input: dict | None = None
@@ -100,6 +100,8 @@ class LLMClient:
                         delta = event.delta
                         if delta.type == "text_delta":
                             events.append(StreamEvent(kind="text", text=delta.text))
+                        elif delta.type == "thinking_delta":
+                            events.append(StreamEvent(kind="thinking", text=delta.thinking))
                         elif delta.type == "input_json_delta":
                             current_tool["input_json"] += delta.partial_json
                     elif event.type == "content_block_stop":

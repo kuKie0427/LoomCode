@@ -1,8 +1,8 @@
 """Eval cases for TUI collapsible tool output (f-tui-collapsible-tools).
 
-Phase P2 — 3 EvalCase classes that lock in the collapsible-output contract:
-CollapsibleToolOutput (Vertical + toggle), and ToolCallMarker click-toggle +
-double-click-modal behaviour.
+Phase P2 — 4 EvalCase classes that lock in the collapsible-output contract:
+CollapsibleToolOutput (Vertical + toggle), ToolCallMarker click-toggle +
+double-click-modal behaviour, and the "double-click shows full output" contract.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ class TuiCollapsibleToolOutputExists(EvalCase):
 
 class TuiCollapsibleToolOutputToggleable(EvalCase):
     name = "tui-collapsible-tool-output-toggleable"
-    description = "CollapsibleToolOutput.toggle() exists; instance starts without 'visible' class"
+    description = "CollapsibleToolOutput.toggle() exists; instance starts with display=False"
 
     def run(self) -> EvalResult:
         from loop.tui.chat_log import CollapsibleToolOutput
@@ -50,20 +50,20 @@ class TuiCollapsibleToolOutputToggleable(EvalCase):
                 name=self.name, passed=False,
                 detail="CollapsibleToolOutput.toggle missing or not callable",
             )
-        if out.has_class("visible"):
+        if out.display is not False:
             return EvalResult(
                 name=self.name, passed=False,
-                detail="Freshly-created CollapsibleToolOutput should not have 'visible' class",
+                detail="Freshly-created CollapsibleToolOutput display should be False",
             )
         out.toggle()
-        if not out.has_class("visible"):
+        if out.display is not True:
             return EvalResult(
                 name=self.name, passed=False,
-                detail="toggle() did not add 'visible' class",
+                detail="toggle() should set display=True",
             )
         return EvalResult(
             name=self.name, passed=True,
-            detail="toggle() flips 'visible' class on/off",
+            detail="toggle() flips display property on/off",
         )
 
 
@@ -119,4 +119,43 @@ class TuiToolCallMarkerClickTogglesOutput(EvalCase):
         return EvalResult(
             name=self.name, passed=True,
             detail="single-click toggles output (no modal); double-click opens modal",
+        )
+
+
+# ── Case 4: double-click modal must show full (untruncated) output ────────────
+
+
+class TuiToolCallModalShowsFullOutput(EvalCase):
+    name = "tui-tool-call-modal-shows-full-output"
+    description = (
+        "ToolCallMarker._output_str stores the full (untruncated) tool result "
+        "so that opening the modal (via double-click) shows complete output, not "
+        "the truncated version rendered inline"
+    )
+
+    def run(self) -> EvalResult:
+        from loop.tui.chat_log import ToolCallMarker, _truncate
+
+        marker = ToolCallMarker("bash", "{}")
+        long_output = "line\n" * 100
+        marker.set_complete(long_output, False)
+
+        if marker._output_str != long_output:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=f"_output_str was truncated (len={len(marker._output_str)}, expected {len(long_output)})",
+            )
+        if _truncate(long_output) == long_output:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail="test fixture too short to exercise truncation",
+            )
+        if marker._output_str == _truncate(long_output):
+            return EvalResult(
+                name=self.name, passed=False,
+                detail="_output_str matches _truncate(long_output) — modal will show truncated text",
+            )
+        return EvalResult(
+            name=self.name, passed=True,
+            detail="_output_str stores full output (modal sees complete result)",
         )

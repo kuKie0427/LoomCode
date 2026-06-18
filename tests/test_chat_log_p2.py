@@ -19,6 +19,7 @@ import pytest
 from loop.tui.chat_log import (
     ChatLog,
     CollapsibleToolOutput,
+    ThinkingDisplay,
     ToolCallMarker,
     _truncate,
 )
@@ -57,13 +58,30 @@ class TestCollapsibleToolOutput:
         assert len(children) == 1
         assert isinstance(children[0], Markdown)
 
-    def test_toggle_flips_visible_class(self):
+    def test_toggle_flips_display_property(self):
         out = CollapsibleToolOutput("text")
-        assert not out.has_class("visible")
+        assert out.display is False
         out.toggle()
-        assert out.has_class("visible")
+        assert out.display is True
         out.toggle()
-        assert not out.has_class("visible")
+        assert out.display is False
+
+
+class TestThinkingDisplayStartsHidden:
+    def test_thinking_display_starts_with_display_false(self):
+        from textual.widgets import Markdown
+
+        assert issubclass(ThinkingDisplay, Markdown)
+        td = ThinkingDisplay("sample thinking text")
+        assert td.display is False
+        assert td.styles.display == "none"
+
+    def test_thinking_display_toggle_persists(self):
+        td = ThinkingDisplay("text")
+        td.display = True
+        assert td.styles.display == "block"
+        td.display = False
+        assert td.styles.display == "none"
 
     def test_set_output_updates_markdown_child(self):
         out = CollapsibleToolOutput("")
@@ -71,6 +89,19 @@ class TestCollapsibleToolOutput:
         with patch.object(out, "query_one", return_value=mock_md):
             out.set_output("new output text")
         mock_md.update.assert_called_once_with(_truncate("new output text"))
+
+    def test_set_output_before_mount_does_not_raise(self):
+        out = CollapsibleToolOutput("")
+        with patch.object(out, "query_one", side_effect=Exception("NoMatches")):
+            out.set_output("late output text")
+        assert out._output == "late output text"
+
+    def test_set_output_caches_in_self_output(self):
+        out = CollapsibleToolOutput("initial")
+        mock_md = MagicMock()
+        with patch.object(out, "query_one", return_value=mock_md):
+            out.set_output("new value")
+        assert out._output == "new value"
 
 
 # ── ToolCallMarker click behavior ─────────────────────────────────────────────
@@ -115,6 +146,13 @@ class TestToolCallMarkerClickBehavior:
         event = MagicMock()
         event.chain = 1
         marker.on_click(event)
+
+    def test_set_complete_stores_full_output(self):
+        marker = ToolCallMarker("bash", "{}")
+        long_output = "line\n" * 100
+        marker.set_complete(long_output, False)
+        assert marker._output_str == long_output
+        assert marker._output_str != _truncate(long_output)
 
 
 # ── ChatLog.add_tool_call_inline creates output ──────────────────────────────

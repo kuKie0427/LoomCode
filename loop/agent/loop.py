@@ -32,6 +32,7 @@ AgentCallback = Callable[..., None]
 DEFAULT_CALLBACKS: dict[str, AgentCallback | None] = {
     "on_message_start": None,
     "on_text_delta": None,
+    "on_thinking_delta": None,
     "on_tool_use": None,
     "on_tool_result": None,
     "on_compact": None,
@@ -182,6 +183,9 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                     content_blocks.append(TextBlock(type="text", text=ev.text))
                     if cb["on_text_delta"] is not None:
                         cb["on_text_delta"](ev.text)
+                elif ev.kind == "thinking":
+                    if cb["on_thinking_delta"] is not None:
+                        cb["on_thinking_delta"](ev.text)
                 elif ev.kind == "tool_use":
                     content_blocks.append(ToolUseBlock(
                         type="tool_use",

@@ -24,6 +24,14 @@ class TextDelta(Message):
         self.text = text
 
 
+class ThinkingDelta(Message):
+    """A streaming thinking fragment from the assistant (extended-thinking models)."""
+
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        self.text = text
+
+
 class ToolUseStarted(Message):
     """A tool call has been dispatched."""
 

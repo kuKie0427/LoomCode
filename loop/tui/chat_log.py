@@ -13,7 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.events import Click
 from textual.screen import ModalScreen
 from textual.widgets import Button, Markdown, Static
@@ -166,10 +166,11 @@ class ThinkingDisplay(Markdown):
         text-style: italic;
         border: none;
     }
-    ThinkingDisplay.hidden {
-        display: none;
-    }
     """
+
+    def __init__(self, markdown: str = "", **kwargs: Any) -> None:
+        super().__init__(markdown, **kwargs)
+        self.display = False
 
 
 class ThinkingMarker(Static):
@@ -247,26 +248,27 @@ class CollapsibleToolOutput(Vertical):
         padding: 1 2;
         margin: 0 0 1 2;
         border: none;
-        display: none;
-    }
-    CollapsibleToolOutput.visible {
-        display: block;
     }
     """
 
     def __init__(self, output: str, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._output = output
+        self.display = False
 
     def compose(self) -> ComposeResult:
         yield Markdown(_truncate(self._output))
 
     def toggle(self) -> None:
-        self.toggle_class("visible")
+        self.display = not self.display
 
     def set_output(self, text: str) -> None:
-        md = self.query_one(Markdown)
-        md.update(_truncate(text))
+        self._output = text
+        try:
+            md = self.query_one(Markdown)
+            md.update(_truncate(text))
+        except Exception:
+            pass
 
 
 class ToolCallModal(ModalScreen):
@@ -382,7 +384,7 @@ class ToolCallMarker(Static):
         if self._complete:
             return
         self._complete = True
-        self._output_str = _truncate(output)
+        self._output_str = output
         self._is_error = is_error
         glyph = "⊗" if is_error else "⊙"
         status = "error" if is_error else "done"
@@ -390,7 +392,7 @@ class ToolCallMarker(Static):
         self.add_class("tool-error" if is_error else "tool-done")
 
 
-class ChatLog(Vertical):
+class ChatLog(VerticalScroll):
     _sticky: bool = True
 
     def watch_scroll_y(self, old_y: float, new_y: float) -> None:
@@ -404,7 +406,6 @@ class ChatLog(Vertical):
         self._current_overlay: StreamingOverlay | None = None
         self._thinking_widget: ThinkingMarker | None = None
         self._thinking_display: ThinkingDisplay | None = None
-        self._thinking_stream: Any = None
         self._spinner_timer: Any = None
         self._spinner_idx: int = 0
         self._spinner_tick: int = 0
@@ -431,7 +432,7 @@ class ChatLog(Vertical):
 
     def show_thinking_spinner(self) -> None:
         if self._thinking_display is not None:
-            self._thinking_display.add_class("hidden")
+            self._thinking_display.display = False
         self._dismiss_thinking_widget()
         self._current_body = None
         if not self._assistant_label_mounted:
@@ -439,7 +440,6 @@ class ChatLog(Vertical):
             self._assistant_label_mounted = True
         self._thinking_reasoning = ""
         self._thinking_display = None
-        self._thinking_stream = None
         self._mount_thinking_widget()
 
     def _start_new_overlay(self) -> None:
@@ -465,7 +465,7 @@ class ChatLog(Vertical):
     def _toggle_thinking_display(self, display: "ThinkingDisplay") -> None:
         if display is None:
             return
-        display.toggle_class("hidden")
+        display.display = not display.display
 
     async def _mount_async(self, widget: Any) -> None:
         await self.mount(widget)
@@ -495,19 +495,19 @@ class ChatLog(Vertical):
             self._thinking_display = display
             if self._thinking_widget is not None:
                 self._thinking_widget._display = display
-            asyncio.create_task(self._mount_and_open_thinking_stream(display, text))
-        elif self._thinking_stream is not None:
-            asyncio.create_task(self._thinking_stream.write(_normalize_for_stream(text)))
+            asyncio.create_task(self._mount_thinking_display(display))
+        else:
+            self._thinking_display.update(_normalize_for_stream(self._thinking_reasoning))
 
-    async def _mount_and_open_thinking_stream(self, display: ThinkingDisplay, initial_text: str) -> None:
+    async def _mount_thinking_display(self, display: ThinkingDisplay) -> None:
         body = self._current_body
         if body is not None and body.parent is self:
             await self.mount(display, before=body)
         else:
             await self.mount(display)
-        self._thinking_stream = Markdown.get_stream(display)
-        if initial_text:
-            await self._thinking_stream.write(_normalize_for_stream(initial_text))
+        display.update(_normalize_for_stream(self._thinking_reasoning))
+        if self._sticky:
+            self.scroll_end()
 
     def append_streaming_text(self, text: str) -> None:
         self._dismiss_thinking_widget()
@@ -522,6 +522,8 @@ class ChatLog(Vertical):
     def _flush_stream_buffer(self) -> None:
         if self._stream_full_text and self._current_overlay is not None:
             self._current_overlay.update_content(self._stream_full_text)
+        if self._sticky:
+            self.scroll_end()
 
     def _force_flush_stream_buffer(self) -> None:
         if self._stream_full_text and self._current_overlay is not None:
@@ -529,6 +531,8 @@ class ChatLog(Vertical):
         if self._stream_flush_timer is not None:
             self._stream_flush_timer.stop()
             self._stream_flush_timer = None
+        if self._sticky:
+            self.scroll_end()
 
     def _finalize_streaming(self) -> None:
         if self._current_overlay is None:
@@ -562,6 +566,8 @@ class ChatLog(Vertical):
         self._tool_outputs[tool_id] = output
         asyncio.create_task(self._mount_async(marker))
         asyncio.create_task(self._mount_tool_output(marker, output))
+        if self._sticky:
+            self.scroll_end()
 
     async def _mount_tool_output(
         self, marker: ToolCallMarker, output: CollapsibleToolOutput
@@ -576,13 +582,16 @@ class ChatLog(Vertical):
         if out_widget is not None:
             out_widget.set_output(output)
         self._thinking_display = None
-        self._thinking_stream = None
+        if self._sticky:
+            self.scroll_end()
 
     def append_system_note(self, text: str) -> None:
         self._force_flush_stream_buffer()
         self._finalize_streaming()
         self._current_body = None
         asyncio.create_task(self._mount_async(SystemNote(f"· {text}")))
+        if self._sticky:
+            self.scroll_end()
 
     async def clear_content(self) -> None:
         self._force_flush_stream_buffer()
@@ -594,6 +603,5 @@ class ChatLog(Vertical):
         self._current_body = None
         self._current_overlay = None
         self._thinking_display = None
-        self._thinking_stream = None
         self._thinking_reasoning = ""
         self._assistant_label_mounted = False
