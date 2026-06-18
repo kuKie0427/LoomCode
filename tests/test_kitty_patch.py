@@ -1,80 +1,92 @@
 """Tests for the Kitty protocol batched unicode patch."""
+
 from textual._xterm_parser import XTermParser
 
 from loop.tui import kitty_patch
 
 
 def test_batched_codepoints():
-    """\\x1b[32;;20320:22909u parses to 你好 (20320=你, 22909=好)."""
     parser = XTermParser.__new__(XTermParser)
-    result = kitty_patch._patched_parse_extended_key(parser, "\x1b[32;;20320:22909u")
-    assert result is not None
-    assert result.character == "你好"
+    result = kitty_patch._patched_sequence_to_key_events(parser, "\x1b[32;;20320:22909u")
+    events = list(result)
+    assert len(events) == 1
+    assert events[0].character == "你好"
 
 
 def test_batched_single_codepoint():
-    """\\x1b[32;;20320u parses to 你 alone."""
     parser = XTermParser.__new__(XTermParser)
-    result = kitty_patch._patched_parse_extended_key(parser, "\x1b[32;;20320u")
-    assert result is not None
-    assert result.character == "你"
+    result = kitty_patch._patched_sequence_to_key_events(parser, "\x1b[32;;20320u")
+    events = list(result)
+    assert len(events) == 1
+    assert events[0].character == "你"
 
 
 def test_batched_three_codepoints():
-    """\\x1b[32;;20320:22909:19990u parses to 你好世."""
     parser = XTermParser.__new__(XTermParser)
-    result = kitty_patch._patched_parse_extended_key(parser, "\x1b[32;;20320:22909:19990u")
-    assert result is not None
-    assert result.character == "你好世"
+    result = kitty_patch._patched_sequence_to_key_events(parser, "\x1b[32;;20320:22909:19990u")
+    events = list(result)
+    assert len(events) == 1
+    assert events[0].character == "你好世"
 
 
 def test_batched_emoji():
-    """\\x1b[32;;128512u parses to 😀 (U+1F600)."""
     parser = XTermParser.__new__(XTermParser)
-    result = kitty_patch._patched_parse_extended_key(parser, "\x1b[32;;128512u")
-    assert result is not None
-    assert result.character == "😀"
+    result = kitty_patch._patched_sequence_to_key_events(parser, "\x1b[32;;128512u")
+    events = list(result)
+    assert len(events) == 1
+    assert events[0].character == "😀"
 
 
 def test_passthrough_single_codepoint():
-    """Non-batched sequences still go to the original parser."""
     parser = XTermParser.__new__(XTermParser)
-    result = kitty_patch._patched_parse_extended_key(parser, "\x1b[1;5u")
-    assert result is not None
-    assert "ctrl" in result.key
+    result = kitty_patch._patched_sequence_to_key_events(parser, "\x1b[1;5u")
+    events = list(result)
+    assert len(events) >= 1
+    assert any("ctrl" in e.key for e in events)
 
 
 def test_passthrough_unchanged():
-    """Regular escape sequence is parsed by the original parser."""
     parser = XTermParser.__new__(XTermParser)
-    result = kitty_patch._patched_parse_extended_key(parser, "\x1b[27u")
-    assert result is not None
-    assert result.key == "escape"
+    result = kitty_patch._patched_sequence_to_key_events(parser, "\x1b[27u")
+    events = list(result)
+    assert len(events) >= 1
+    assert any(e.key == "escape" for e in events)
 
 
-def test_invalid_codepoints_returns_none():
-    """Invalid codepoints return None, falling through to reissue."""
+def test_invalid_codepoints_no_event():
     parser = XTermParser.__new__(XTermParser)
-    result = kitty_patch._patched_parse_extended_key(parser, "\x1b[32;;abc:xyz u")
-    assert result is None
+    result = kitty_patch._patched_sequence_to_key_events(parser, "\x1b[32;;abc:xyz u")
+    events = list(result)
+    assert events == []
 
 
-def test_non_kitty_returns_none():
-    """Non-Kitty sequences return None."""
+def test_non_kitty_falls_through():
     parser = XTermParser.__new__(XTermParser)
-    result = kitty_patch._patched_parse_extended_key(parser, "a")
-    assert result is None
+    result = kitty_patch._patched_sequence_to_key_events(parser, "a")
+    events = list(result)
+    assert len(events) >= 1
+    assert events[0].character == "a"
+
+
+def test_negative_codepoint_no_event():
+    parser = XTermParser.__new__(XTermParser)
+    result = kitty_patch._patched_sequence_to_key_events(parser, "\x1b[32;;-1u")
+    events = list(result)
+    assert events == []
 
 
 def test_empty_codepoints_falls_through():
     parser = XTermParser.__new__(XTermParser)
-    result = kitty_patch._patched_parse_extended_key(parser, "\x1b[32;;u")
-    assert result is not None
-    assert result.key == "space"
+    result = kitty_patch._patched_sequence_to_key_events(parser, "\x1b[32;;u")
+    events = list(result)
+    assert len(events) >= 1
+    assert events[0].key == "space"
 
 
-def test_negative_codepoint_returns_none():
-    """Negative codepoint returns None (chr fails)."""
+def test_works_when_kitty_disabled(monkeypatch):
+    monkeypatch.setenv("TEXTUAL_DISABLE_KITTY_KEY", "1")
     parser = XTermParser.__new__(XTermParser)
-    result = kitty_patch._patched_parse_extended_key(parser, "\x1b[32;;-1u")
-    assert result is None
+    result = kitty_patch._patched_sequence_to_key_events(parser, "\x1b[32;;20320:22909u")
+    events = list(result)
+    assert len(events) == 1
+    assert events[0].character == "你好"
