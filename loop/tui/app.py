@@ -126,11 +126,15 @@ class AgentTUIApp(App):
 
     def on_tool_use_started(self, message: ToolUseStarted) -> None:
         chat_log = self.query_one(ChatLog)
-        chat_log.add_tool_card(message.tool_name, message.tool_input, message.tool_use_id)
+        chat_log.add_tool_call_inline(
+            message.tool_name, message.tool_input, message.tool_use_id
+        )
 
     def on_tool_use_completed(self, message: ToolUseCompleted) -> None:
         chat_log = self.query_one(ChatLog)
-        chat_log.complete_tool_card(message.tool_use_id, message.output, message.is_error)
+        chat_log.complete_tool_call_inline(
+            message.tool_use_id, message.output, message.is_error
+        )
 
     def on_compact_occurred(self, message: CompactOccurred) -> None:
         chat_log = self.query_one(ChatLog)

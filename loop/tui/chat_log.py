@@ -6,20 +6,15 @@ async operations are safe to schedule via ``asyncio.ensure_future``.
 """
 
 import asyncio
+import json
 from typing import Any
 
 from textual.containers import VerticalScroll
 from textual.widgets import Markdown
 
-from loop.tui.widgets import ToolCallCard
-
 
 class ChatLog(VerticalScroll):
     """Scrollable Markdown chat display."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._tool_cards: dict[str, ToolCallCard] = {}
 
     def compose(self) -> Any:
         yield Markdown(id="md")
@@ -40,17 +35,20 @@ class ChatLog(VerticalScroll):
         asyncio.create_task(self._stream.write(text))
         self.scroll_end()
 
-    def add_tool_card(self, name: str, inp: dict, tool_id: str) -> None:
-        card = ToolCallCard(name, inp, tool_id)
-        self._tool_cards[tool_id] = card
-        asyncio.ensure_future(self.mount(card))
+    def add_tool_call_inline(self, name: str, inp: dict, tool_id: str) -> None:
+        args_str = json.dumps(inp, ensure_ascii=False, indent=2) if inp else ""
+        if args_str:
+            block = f"\n\n```\n[tool] {name}\n{args_str}\n```\n"
+        else:
+            block = f"\n\n```\n[tool] {name}\n```\n"
+        asyncio.create_task(self._stream.write(block))
         self.scroll_end()
 
-    def complete_tool_card(self, tool_id: str, output: str, is_error: bool) -> None:
-        card = self._tool_cards.get(tool_id)
-        if card is not None:
-            card.complete(output, is_error)
-            self.scroll_end()
+    def complete_tool_call_inline(self, tool_id: str, output: str, is_error: bool) -> None:
+        tag = "[result:error]" if is_error else "[result]"
+        block = f"\n```\n{tag}\n{output}\n```\n"
+        asyncio.create_task(self._stream.write(block))
+        self.scroll_end()
 
     def append_system_note(self, text: str) -> None:
         md = self.query_one("#md", Markdown)
@@ -60,5 +58,4 @@ class ChatLog(VerticalScroll):
     async def clear_content(self) -> None:
         md = self.query_one("#md", Markdown)
         md.update("")
-        self._tool_cards.clear()
         self._stream = None
