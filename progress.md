@@ -2018,3 +2018,28 @@ Key insight from Textual source: `ScrollableContainer.BINDINGS` include `pageup`
 | `loop/tui/app.py` | +4 BINDINGS, +4 action methods, +focus CSS |
 | `loop/tui/status_bar.py` | Conditional scroll hint in `render()` |
 | `tests/test_tui_manual_scroll.py` | NEW — 7 tests (all 4 keys work with composer focused, bindings registered, focus CSS, status bar hint) |
+
+## 2026-06-19 — mouse wheel scroll session
+
+User said: "不要用快捷键，实现鼠标滚轮滚动" — reject the previous keyboard bindings, use mouse wheel only.
+
+### Changes
+- **Removed** all 4 global keyboard BINDINGS (`shift+pageup`, `shift+pagedown`, `ctrl+home`, `ctrl+end`) and their action methods
+- **Kept** the focus indicator CSS (still useful when user clicks chat log to see focus state)
+- **Increased scrollbar visibility**: `scrollbar-size-vertical: 2 → 3`, `scrollbar-color-hover: $text → $accent` (highlight color)
+- **Updated StatusBar hint** to "scroll with mouse wheel" (was the keyboard hint)
+- **Mouse wheel** uses Textual's built-in `Widget._on_mouse_scroll_up/down` — events have `bubble=True` so they bubble from child Markdown widgets to the parent ChatLog (VerticalScroll) for handling. Verified by pilot tests with `post_message(MouseScrollUp(UserMessage, ...))` — scroll_y changes correctly.
+
+### Tests
+- Replaced 7 keyboard tests with 8 mouse wheel tests in `tests/test_tui_manual_scroll.py`:
+  - `test_mouse_wheel_on_chatlog_scrolls_up` — wheel directly on ChatLog scrolls up
+  - `test_mouse_wheel_on_chatlog_scrolls_down` — wheel directly on ChatLog scrolls down
+  - `test_mouse_wheel_bubbles_from_child_markdown_to_chatlog` — wheel on UserMessage bubbles to ChatLog
+  - `test_mouse_wheel_repeatedly_reaches_top` — 300 wheel-ups reaches scroll_y=0
+  - `test_mouse_wheel_repeatedly_reaches_bottom` — 300 wheel-downs reaches scroll_y=max
+  - `test_scrollbar_size_is_visible` — CSS has `scrollbar-size-vertical: 3`
+  - `test_status_bar_hint_mentions_mouse_wheel` — status bar shows "mouse wheel"
+  - `test_no_keyboard_scroll_bindings` — no `shift+pageup` etc. in AgentTUIApp.BINDINGS
+
+### Verification
+348 pytest (+1 net), 138 eval, 0 ruff, 0 mypy, ./init.sh green.

@@ -387,6 +387,15 @@
       "status": "done",
       "verification": "uv run pytest -q && uv run python -m loop.cli eval --fail-under 100 && uv run ruff check . && uv run mypy loop/ && ./init.sh",
       "evidence": "uv run pytest -q → 347 passed (was 340, +7 manual scroll tests); uv run python -m loop.cli eval --fail-under 100 → 138 passed; uv run ruff check . → All checks passed!; uv run mypy loop/ → Success: no issues found in 66 source files; ./init.sh → 'Verification Complete (all green)'. The 7 new tests in tests/test_tui_manual_scroll.py verify the regression: composer is focused (precondition), pilot.press('shift+pageup') scrolls chat log up, 'shift+pagedown' scrolls down, 'ctrl+end' jumps to bottom + re-enables sticky, 'ctrl+home' jumps to top. Also: bindings are registered (smoke test), focus indicator CSS rule exists, status bar shows scroll hint when chat log overflows. Changes: loop/tui/app.py (4 BINDINGS + 4 action methods + CSS focus indicator), loop/tui/status_bar.py (conditional scroll hint in render()), tests/test_tui_manual_scroll.py (NEW, 7 tests)."
+    },
+    {
+      "id": "f-tui-mouse-wheel-scroll",
+      "name": "TUI mouse-wheel scroll (no keyboard shortcuts)",
+      "description": "用户拒绝之前的 keyboard scroll BINDINGS,要求纯鼠标滚轮。撤回所有 4 个全局 keyboard BINDINGS (shift+pageup/pagedown, ctrl+home/end) 和对应的 action methods。改用 Textual 内置的 Widget._on_mouse_scroll_up/down 机制:鼠标悬停在 chat log 或其子 widget (Markdown 类) 上滚轮,事件 bubble=True 自动冒泡到 VerticalScroll 的祖先处理。让 scrollbar 更可点击:scrollbar-size-vertical 从 2 升到 3,scrollbar-color-hover 从 $text 改成 $accent (高亮色)。StatusBar 提示从 'Shift+PgUp/PgDn, Ctrl+Home/End to scroll' 改成 'scroll with mouse wheel' (强调鼠标滚轮是唯一方式)。保留 focus CSS 指示器 (点击 chat log 后看到淡色背景),让用户知道当前 focus 在哪。",
+      "dependencies": ["f-tui-manual-scroll-global-bindings"],
+      "status": "done",
+      "verification": "uv run pytest -q && uv run python -m loop.cli eval --fail-under 100 && uv run ruff check . && uv run mypy loop/ && ./init.sh",
+      "evidence": "uv run pytest -q → 348 passed (was 347, +1 test, replaced 7 keyboard tests with 8 mouse wheel tests); uv run python -m loop.cli eval --fail-under 100 → 138/138 passed; uv run ruff check . → All checks passed!; uv run mypy loop/ → Success: no issues found in 66 source files; ./init.sh → 'Verification Complete (all green)'. The 8 new tests in tests/test_tui_manual_scroll.py verify mouse wheel works at all positions: directly on ChatLog (scroll up + down), bubbling from child Markdown (UserMessage), repeated wheels reach top + bottom boundaries, scrollbar size is 3, status bar mentions 'mouse wheel', and no keyboard scroll bindings remain. Changes: loop/tui/app.py (removed 4 BINDINGS + 4 action methods + _scroll_chat helper, kept focus indicator CSS, increased scrollbar size to 3 + hover color to $accent), loop/tui/status_bar.py (hint text changed to 'scroll with mouse wheel'), tests/test_tui_manual_scroll.py (NEW content: 8 mouse wheel tests replacing 7 keyboard tests)."
     }
   ]
 }

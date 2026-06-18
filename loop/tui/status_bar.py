@@ -16,7 +16,7 @@ class StatusBar(Static):
         try:
             chat_log = app.query_one(ChatLog)
             if chat_log.max_scroll_y > 0:
-                hint = " | Shift+PgUp/PgDn, Ctrl+Home/End to scroll"
+                hint = " | scroll with mouse wheel"
         except Exception:
             pass
 
