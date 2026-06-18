@@ -7,10 +7,14 @@ async operations are safe to schedule via ``asyncio.ensure_future``.
 
 import asyncio
 import json
+from collections.abc import Callable
 from typing import Any
 
-from textual.containers import VerticalScroll
-from textual.widgets import Markdown, Static
+from textual.app import ComposeResult
+from textual.containers import Vertical
+from textual.events import Click
+from textual.screen import ModalScreen
+from textual.widgets import Button, Markdown, Static
 
 MAX_TOOL_OUTPUT_LINES = 30
 _HEAD_LINES = 15
@@ -33,15 +37,99 @@ def _truncate(text: str) -> str:
     )
 
 
-class ChatLog(VerticalScroll):
-    """Scrollable Markdown chat display."""
+class ThinkingModal(ModalScreen):
+    BINDINGS = [("escape", "dismiss", "Close")]
 
+    DEFAULT_CSS = """
+    ThinkingModal {
+        align: center middle;
+    }
+    #thinking-modal-container {
+        width: 80%;
+        height: 80%;
+        background: $panel;
+        border: thick $primary;
+        padding: 1 2;
+    }
+    #thinking-modal-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    #thinking-modal-content {
+        height: 1fr;
+        overflow-y: auto;
+        border: solid $primary-darken-2;
+        padding: 1;
+    }
+    #thinking-modal-close {
+        margin-top: 1;
+        width: 100%;
+    }
+    """
+
+    def __init__(self, content: str) -> None:
+        super().__init__()
+        self._content = content
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="thinking-modal-container"):
+            yield Static("💭 Thinking", id="thinking-modal-title")
+            yield Markdown(self._content or "*(no content yet)*", id="thinking-modal-content")
+            yield Button("Close", id="thinking-modal-close", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss()
+
+    async def action_dismiss(self, result: Any = None) -> None:
+        self.dismiss(result)
+
+
+class ThinkingMarker(Static):
+    can_focus = True
+
+    DEFAULT_CSS = """
+    ThinkingMarker {
+        width: 3;
+        height: 1;
+        background: $boost;
+        color: $accent;
+        text-style: bold;
+    }
+    ThinkingMarker:hover {
+        background: $accent;
+        color: $background;
+    }
+    """
+
+    def __init__(self, content_provider: Callable[[], str], **kwargs: Any) -> None:
+        super().__init__("⠋", **kwargs)
+        self._content_provider = content_provider
+        self._complete = False
+
+    def on_click(self, event: Click) -> None:
+        self._open_modal()
+
+    def on_press(self) -> None:
+        self._open_modal()
+
+    def _open_modal(self) -> None:
+        content = self._content_provider()
+        self.app.push_screen(ThinkingModal(content))
+
+    def set_complete(self) -> None:
+        if not self._complete:
+            self._complete = True
+            self.update("*")
+
+
+class ChatLog(Vertical):
     def compose(self) -> Any:
         yield Markdown(id="md")
         self._stream: Any = None
-        self._thinking_widget: Static | None = None
+        self._thinking_widget: ThinkingMarker | None = None
         self._spinner_timer: Any = None
         self._spinner_idx: int = 0
+        self._thinking_buffer: list[str] = []
 
     async def append_user_message(self, text: str) -> None:
         md = self.query_one("#md", Markdown)
@@ -53,12 +141,16 @@ class ChatLog(VerticalScroll):
         if self._stream is None:
             self._stream = Markdown.get_stream(md)
         asyncio.create_task(self._stream.write("\n## 🤖 Assistant\n\n"))
+        self._thinking_buffer = []
         self._mount_thinking_widget()
 
     def _mount_thinking_widget(self) -> None:
         if self._thinking_widget is not None:
             return
-        widget = Static("⠋ thinking…", id="thinking-spinner", classes="thinking")
+        widget = ThinkingMarker(
+            content_provider=lambda: "\n\n".join(self._thinking_buffer) or "*(no content yet)*",
+            id="thinking-spinner",
+        )
         self._thinking_widget = widget
         self._spinner_idx = 0
         self._spinner_timer = self.set_interval(0.1, self._tick_spinner, name="spinner")
@@ -72,7 +164,7 @@ class ChatLog(VerticalScroll):
         if self._thinking_widget is None:
             return
         self._spinner_idx = (self._spinner_idx + 1) % len(_SPINNER_FRAMES)
-        self._thinking_widget.update(f"{_SPINNER_FRAMES[self._spinner_idx]} thinking…")
+        self._thinking_widget.update(_SPINNER_FRAMES[self._spinner_idx])
 
     def _dismiss_thinking_widget(self) -> None:
         if self._thinking_widget is None:
@@ -80,15 +172,11 @@ class ChatLog(VerticalScroll):
         if self._spinner_timer is not None:
             self._spinner_timer.stop()
             self._spinner_timer = None
-        widget = self._thinking_widget
-        self._thinking_widget = None
-        asyncio.create_task(self._remove_async(widget))
-
-    async def _remove_async(self, widget: Static) -> None:
-        await widget.remove()
+        self._thinking_widget.set_complete()
 
     def append_streaming_text(self, text: str) -> None:
         self._dismiss_thinking_widget()
+        self._thinking_buffer.append(text)
         asyncio.create_task(self._stream.write(text))
         self.scroll_end()
 
@@ -99,6 +187,7 @@ class ChatLog(VerticalScroll):
             block = f"\n**🔧 {name}**\n\n```json\n{args_str}\n```\n"
         else:
             block = f"\n**🔧 {name}**\n\n```\n(no arguments)\n```\n"
+        self._thinking_buffer.append(block)
         asyncio.create_task(self._stream.write(block))
         self.scroll_end()
 
@@ -108,6 +197,7 @@ class ChatLog(VerticalScroll):
         else:
             truncated = _truncate(output)
             block = f"\n**📄 Result**\n\n```text\n{truncated}\n```\n"
+        self._thinking_buffer.append(block)
         asyncio.create_task(self._stream.write(block))
         self.scroll_end()
 
@@ -121,3 +211,4 @@ class ChatLog(VerticalScroll):
         md = self.query_one("#md", Markdown)
         md.update("")
         self._stream = None
+        self._thinking_buffer = []
