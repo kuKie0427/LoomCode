@@ -56,6 +56,7 @@ Topic docs (load **on demand**, never pre-load):
 6. **No self-declared passing**: Agents may mark `not-started → in-progress → blocked`. Only `./init.sh` (or its sub-commands) marks `done`.
 7. **Review→Rule**: When a review or post-mortem surfaces a recurring failure pattern, promote it to a numbered Working Rule here AND, when cheap, encode it as an eval case under `loop/eval/cases/`. One-off fixes don't compound; rules do.
 8. **Eval cases are first-class tests**: New features that change observable behavior should ship with at least one eval case in `loop/eval/cases/`. The eval runner is the regression net for product behavior; pytest is for unit correctness.
+9. **Monkey-patches need explicit import wiring**: A `monkey-patch = X` assignment in a module body fires **only when that module is imported**. If a patch file (e.g. `loop/tui/kitty_patch.py`) patches a class but is never imported from the application entry point, the patch is dead code — unit tests pass (because they import the patch module directly) but production behavior is unchanged. Verify with a startup print or `pid` log written from the patch module itself. The fix is one `import` line, but the diagnosis can take hours.
 
 ## Definition of Done
 

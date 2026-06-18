@@ -1691,3 +1691,52 @@ F 路线全部完成。后续 roadmap (G/H/...) 由用户决定。
 | F2 | done | 5 (imports / attrs / messages / apply_config / pilot) | +831 (6 tui files + 1 case file) | feat + fix |
 | F3 | done | 5 (PermissionScreen / ToolCallCard / 3 态 / asker / 注入) | +318 (hooks + 3 tui + 1 case) | feat + fix |
 | **总计** | **3/3** | **+24** | **+1407** | **6 commits** |
+
+---
+
+## Session 2026-06-18: F2 hot-fix — CJK input via IME (Kitty protocol)
+
+**User-reported:** macOS + Ghosty terminal — typing Chinese via IME shows literal `[32;;20320:22909u` in composer input box. TUI "无法输入中文".
+
+**Symptom chain traced:**
+1. Ghosty sends IME-composed text as a single CSI sequence: `\x1b[<keycode>;;<codepoint>:<codepoint>:...u` (Kitty protocol batched form)
+2. Textual's `XTermParser._re_extended_key` regex only matches single-codepoint form, falls through to char-by-char reissue
+3. Each char of the bracketed sequence gets inserted as a printable Key event into the composer
+
+**Fix journey (4 commits):**
+
+```
+f38c787 fix(tui): patch XTermParser for Kitty protocol batched unicode form
+28a1aca fix(tui): patch _sequence_to_key_events to bypass DISABLE_KITTY_KEY check
+e68e033 fix(tui): suppress char-by-char fallback for partial CSI sequences
+352bad6 fix(tui): add missing kitty_patch import to app.py   ← the actual fix
+```
+
+The first 3 commits correctly wrote patch code but **the patch was never loaded** because `loop/tui/app.py` was missing `import loop.tui.kitty_patch`. Diagnosis: 3+ hours of progressive instrumentation (kitty_debug → composer_debug → app_debug → parse_debug) until the missing import was identified.
+
+**Diagnostic chain (the expensive lesson):**
+1. `kitty_debug.log` showed patch yields `Key('space', '你好')` correctly in isolation → patch code is correct
+2. `composer_debug.log` showed 17 char events being received → patch isn't preventing the char-by-char fallback
+3. `parse_debug.log` (at `_orig_parse` level) was empty → patch isn't even being called
+4. Module-load print `[kitty_patch] MODULE LOADED` fired (proving module is loaded) but `XTermParser.feed` showed original name → method-level monkey-patch was overridden
+5. Finally: import chain from `loop.cli` → `loop.tui.app` had no `import loop.tui.kitty_patch`
+
+**Actual root cause** (Working Rule #9): `loop/tui/kitty_patch.py` was never imported from the application entry point. The patch file's module-level monkey-patch was dead code in production.
+
+**Files changed (final 352bad6):**
+- `loop/tui/app.py`: +1 line `from loop.tui import kitty_patch  # noqa: F401`
+- `loop/tui/kitty_patch.py`: clean (no debug code)
+- `loop/tui/composer.py`: clean (no debug code)
+
+**Verification:**
+- 14/14 kitty_patch unit tests pass
+- 240/240 unit tests pass
+- 130/130 eval cases pass
+- 0 ruff, 0 mypy
+- Manual: `uv run python -m loop.cli tui` + type `你好` in Ghosty → composer shows `你好` (not bracketed text)
+
+**Postmortem:**
+- The first 3 commits should have included a "verify patch is loaded in production" check (a startup print or `pid` log written from the patch module)
+- Debug instrumentation should start at the lowest layer (driver/parser) and work up, not from the symptom (composer) and work down
+
+**Working Rule added to AGENTS.md:** #9 — Monkey-patches need explicit import wiring.
