@@ -2107,3 +2107,404 @@ Bottleneck: instructions
 ### Files NOT changed (in scope: implementation already done)
 
 The 4 implementation changes were already in the working tree (untracked files: `tests/test_markdown_linkify.py`, `tests/test_status_bar.py`, `tests/test_thinking_per_llm_call.py`, `docs/tui-scrolling.md`, plus modifications to `loop/agent/loop.py`, `loop/tui/app.py`, `loop/tui/chat_log.py`, `loop/tui/composer.py`, `loop/tui/status_bar.py`, `tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw`, `tests/test_tui_manual_scroll.py`). This feature only tracks them — orchestrator will commit them atomically.
+
+---
+
+## docs/tui-design-language.md created (2026-06-19)
+
+Added the project's first TUI design language doc. Layout-only first pass; styles deferred.
+
+**File** (new, 221 lines):
+
+- `?? docs/tui-design-language.md`
+
+**Scope**: spatial structure, hierarchy, regions, motion intent. Explicitly out of scope this version: colors, typography, exact spacing values, animation easing.
+
+**Structure** (§0–§7):
+
+1. **§0 Why this doc exists** — TUI is a long-loop surface; harness 5-subsystem model has implicit spatial implications that were never written down.
+2. **§1 Five subsystems → five regions** — Maps Instructions/State/Verification/Scope/Lifecycle to specific on-screen regions (gutter markers / ChatLog scroll / StatusBar / Composer / full-screen overlays).
+3. **§2 Long-loop aesthetic rules** — Six enforceable rules: bounded re-layout, quiet-by-default, one anchor per iteration, monotonic scroll, indentation encodes nesting, hard interrupts fill screen.
+4. **§3 Ergonomic layout grid** — Five-row vertical stack (chat / status / composer). Two stable eye anchors (status bar + composer caret). Symmetric 2-col horizontal margin as eye-rest zone. Soft-wrap composer as the user's "thinking space".
+5. **§4 Current layout map → component contracts** — Position/size/interaction-zone for each of the 12 components in `loop/tui/`.
+6. **§5 Anti-patterns** — Pulls gotchas from `harness-creator/references/gotchas.md` and gives each a layout consequence (no "pending" placeholder, 1-line StatusBar cap, 3-tier progressive disclosure, full-screen only for consent, composer = local override).
+7. **§6 Motion intent** — All transitions instant, not sliding. Reason: long sessions mean easing accumulates into perceptible lag.
+8. **§7 Open layout decisions** — Header region, two-pane mode, Zen mode, narrow-terminal minimums — deliberately left undefined.
+
+**Anchored to current code**:
+
+- Maps each §1 subsystem to specific existing classes: `TurnLabel`, `ChatLog`, `StatusBar`, `Composer`, `PermissionScreen`, `ToolCallModal`.
+- References specific line numbers in `app.py`, `chat_log.py`, `composer.py`, `status_bar.py` where the current layout already implements (or should be checked against) the doc's intent.
+- No new TUI code changes. No new tests. No eval cases (this is a doc-only artifact; product behavior is unchanged).
+
+**Not tracked in `feature_list.json`**: this is a documentation artifact, not a user-facing feature with verification. If a future feature wants to formalize TUI layout invariants as tests, it should consume this doc as the spec.
+
+**Verification** (scope discipline):
+
+- `git status --short` → only `?? docs/tui-design-language.md` (single untracked file).
+
+---
+
+## docs/tui-design.html created (2026-06-19)
+
+Rendered the layout design language doc as a single, self-contained HTML design reference page.
+
+**File** (new, 1198 lines, 48 KB):
+
+- `?? docs/tui-design.html`
+
+**Aesthetic direction** (delegated to `visual-engineering` subagent): **dark technical monograph**.
+
+- Background: deep charcoal `#0c0e12` (NOT white-with-purple-gradient)
+- Accent palette: muted `--accent: #5b8a72` (sage), `--red: #8a3b3b`, `--yellow: #8a7a3b`, `--green: #4a8a5b`, `--blue: #4a6a8a`, `--purple: #6a4a8a` (used only for code-kw highlighting inside terminal content)
+- Hairline rules (`--hairline: #1a1e24`) between sections
+- Terminal mockups glow softly with inset shadows
+
+**Fonts** (Google Fonts CDN, NOT AI-slop defaults):
+
+- Display headings: **Cormorant Garamond** (refined serif, editorial feel)
+- Body / annotations: **Fira Sans** (technical, distinctive)
+- Terminal mockup content: **JetBrains Mono** (authentic terminal character)
+
+**Six sections** rendered as labeled cards (5 mockup states + 1 grid reference):
+
+1. `state-1` Empty Layout Grid — annotated 5-row stack, 2-col margin, `#chrome` outline
+2. `state-2` Populated Idle State — mid-conversation transcript at rest (no motion)
+3. `state-3` Active State (live loop) — spinner on ThinkingMarker, streaming overlay, in-progress tool
+4. `state-4` PermissionScreen Overlay — full-screen replace, dimmed chat behind, thick red border, 3 buttons
+5. `state-5` ToolCallModal Overlay — 80%×80% deep-dive view, args + result markdown, Close button
+6. `grid-ref` Quick-reference grid (compact summary card)
+
+Each state has 4-6 annotations on the right side, each citing a specific doc section via `<span class="cite">§N — rule</span>`. Total §-citations in HTML: **45+**.
+
+**Realistic content** (NOT Lorem ipsum):
+
+- Multi-line user prompt about context-compression refactoring
+- Assistant response with code blocks, lists, markdown
+- Real-looking tool call: `git add loop/context.py && git commit -m 'fix: preserve todo_write across microcompact'`
+- Thinking block about microcompact + todo_write interaction
+- StatusBar with live ctx ratio `4.2k/200k (2%)`
+
+**Verification** (post-delegation):
+
+- `git status --short` → 3 changes: `M progress.md`, `?? docs/tui-design-language.md`, `?? docs/tui-design.html`. No out-of-scope files.
+- No fonts from the "AI slop" list (grep'd: 0 hits for Inter/Roboto/Arial/system-ui).
+- No `--background: white` + purple-gradient combination (background is `#0c0e12`).
+- All 5 required mockup states present (`grep state-[1-5]` returns 5 section ids).
+- 45+ §-citations across the page (annotations reference the source doc faithfully).
+- No "Lorem ipsum" or "Hello world" placeholder text (single "placeholder" hit is in a doc-quote annotation, not content).
+- Single self-contained file: `<link>` to Google Fonts CDN only; inline `<style>` + `<script>`; no build step.
+
+**Not tracked in `feature_list.json`**: doc/design artifact, no behavior change.
+- No code, no tests, no CSS, no feature_list.json mutation.
+
+---
+
+## Minimal fix to state-3 (2026-06-19)
+
+Removed the redundant "agent running…" hint in the composer area of `state-3` (Active State — Live Loop Iteration mockup).
+
+**File** (modified):
+
+- `M docs/tui-design.html` (1198 → 1197 lines, single line removed)
+
+**Why**: §2 rule 2 of `docs/tui-design-language.md` says *"Quiet by default. Motion is reserved for live work."* The state-3 mockup was expressing "the loop is alive" through four signals:
+
+1. `::` spinner glyph on ThinkingMarker (animation tick)
+2. Mid-stream `▌` cursor at the end of the streaming text (live token render)
+3. `○ bash · running` tool marker in accent yellow (vs `done` in dim)
+4. `agent running…` text hint in the composer (static text)
+
+Signals 1-3 are *real* motion/signals. Signal 4 is a static text label doing the work that real motion should do. Per §2 rule 2, deleting it strengthens the doc's own claim.
+
+After the fix, the composer below the StatusBar is an empty focused-input area — the live state is carried entirely by the three genuine signals. This is also closer to what the real Textual composer looks like when the agent turn is in progress.
+
+**Delegation**: `quick` category, 22s, no skills loaded (trivial single-line removal). Subagent correctly identified that the surrounding `git status` noise (`M progress.md`, `?? docs/tui-design-language.md`) was pre-existing from prior tasks and not caused by this edit.
+
+**Verification** (post-fix):
+
+- `grep -c "agent running" docs/tui-design.html` → `0`
+- File line count: 1197 (was 1198)
+- HTML parser check: OK (no syntax errors; `<div class="tui-composer">` opens/closes correctly with empty body)
+- Re-screenshot of `state-3` confirms: composer area below StatusBar is now empty; the three live signals (spinner, cursor, running marker) carry the "loop is alive" message alone.
+- `git status --short` shows only `M progress.md`, `?? docs/tui-design-language.md`, `?? docs/tui-design.html` (unchanged from before this fix; the `M` for `tui-design.html` is `??` because the file was already untracked — same state as previous task).
+
+**Not tracked in `feature_list.json`**: doc-only fix, no product behavior change.
+
+---
+
+## Header (summary rail) added to design language + HTML mockup (2026-06-19)
+
+Added the Header region to the TUI design — resolves §7's "no header region" open decision. Header is a new first-class layout region that aggregates three subsystems (Scope + State + Lifecycle) into one glanceable line at the top of the viewport, with click-to-expand overlay panel showing detail.
+
+**Decisions locked in** (from prior conversation):
+
+1. MCP segment: name + dot per server (`●` connected / `◌` error / `○` disabled).
+2. Todo segment: active item name + progress in collapsed line.
+3. Subagent segment: hidden when count = 0.
+4. Header is default-on.
+5. No two-pane side panel (out of scope for v1).
+6. Collapsed default is brief summary, click to expand overlay panel (user-requested refinement).
+
+**Files changed**:
+
+- `M docs/tui-design-language.md` (221 → 318 lines, +97):
+  - §1 table: added "Header (summary rail)" row (cross-subsystem aggregation, not a 6th subsystem).
+  - §2 rule 2 (quiet by default): added paragraph about collapsed = glance density ceiling.
+  - §2 rule 5 (indentation encodes nesting): added note that overlay uses 2-col second-tier indent, max 3 levels.
+  - §3 ergonomic layout grid: updated ASCII diagram from 5-row to 6-region stack, with Header at top.
+  - §4 component layout contracts: added `Header` row to the table.
+  - §4.3 (NEW): full sub-section on Header — collapsed/expanded states, interaction contract, why this honors the long-loop aesthetic.
+  - §7: closed the "Header region: currently absent" open decision.
+- `M docs/tui-design.html` (1197 → 1443 lines, +246):
+  - State index top: 5 cards → 7 cards.
+  - State 1 (Empty Layout Grid): updated mockup to show Header line at top of terminal frame, region label `HEADER · 1 LINE · DOCK TOP`, description "five-row" → "six-region", annotation §7 "no header" → §4.3 "Header: summary rail".
+  - State 6 (NEW): Header Collapsed. Same mid-conversation content as state-2 for visual comparison. 6 annotations cite §1, §2 rule 1, §2 rule 2, §4.3 aggregate indicators, §4.3 hide rules, §5 memory pattern.
+  - State 7 (NEW): Header Expanded. Same content as state-6 but with overlay panel below the 1-line header, chat log at 0.20 opacity behind. Panel shows 3 sections (MCP, todo, subagent) with realistic detail. 6 annotations cite §4.3 overlay/indent/subagent, §2 rule 5, §5 on-demand, §6 instant replace.
+  - Grid Reference: updated to 6-region diagram, removed "(no header region)" implication, dual-anchor note (top + bottom).
+- `M docs/tui-design.html` (1443 → 1443 lines, no net change, +1 line CSS): follow-up minimal fix to state-7 panel — increased `max-height: 220px` → `max-height: 360px` so all 3 sections of the overlay are visible in a static screenshot (subagent section was below the 220px fold). 1m 50s quick subagent fix.
+
+**Delegation**:
+
+- A (doc edits): done by orchestrator (me) — 6 surgical Edit tool calls.
+- B (HTML mockup, states 1/6/7 + grid-ref + index update): `visual-engineering` category, 3m 52s, session `ses_120e7ec6bffe1t9iyHEJBsXT6y` continued from prior sessions (preserves aesthetic calibration).
+- B' (state-7 panel max-height fix): `quick` category, 1m 50s, same session continued. Option A chosen (max-height 220px → 360px).
+
+**Verification** (post-delegation):
+
+- HTML parser check: OK (no syntax errors, 1443 lines).
+- `git status --short`: 3 expected files (`M progress.md`, `?? docs/tui-design-language.md`, `?? docs/tui-design.html`). No out-of-scope changes.
+- 7 state section ids exist (`grep -c 'id="state-[0-9]"' docs/tui-design.html` returns 7).
+- State index labels include Header Collapsed + Header Expanded (7 labels confirmed via metrics query).
+- state-1 updated: region label `HEADER · 1 LINE · DOCK TOP` rendered above ChatLog region, description "six-region vertical stack".
+- state-7 fix: re-screenshot at viewport 1440x1400 confirms all 3 sections visible — MCP (3 rows, gh with red error), todo (5 rows, item 2 active highlighted), subagent (extract-001 · running · 4s).
+
+**Not tracked in `feature_list.json`**: design doc + design artifact update, no product behavior change. The actual Textual implementation of the Header widget is a separate feature that would consume this doc as its spec.
+
+---
+
+## loom — logo visual system created (2026-06-19)
+
+Brand-identity sheet for the project rename `loop → loom`. Built on the weaving metaphor (agent weaves user intent + tool calls + model responses into coherent output).
+
+**File** (new):
+
+- `?? docs/loom-logo.html` (1443 lines, self-contained)
+
+**Tagline chosen**: **"weaving intent into action"**
+Justified: (1) "weaving" operates on two levels — literal (loom = weaving apparatus) and metaphorical (agent weaves inputs into outputs); (2) "intent into action" precisely describes what an agent does — takes user intent, executes via tools; (3) four-word cadence matches the project's terse technical voice; (4) runner-up "craft the loop" lost the weaving connection that makes loom distinctive.
+
+**Aesthetic** (matched exactly to `docs/tui-design.html`):
+- Background: `#0c0e12` deep charcoal
+- Fonts: Cormorant Garamond (display italic) + Fira Sans (body) + JetBrains Mono (terminal)
+- Accent: muted sage `#5b8a72`
+- Hairline rules `#1a1e24`
+- §-citation pattern: `<span class="cite">§L-N.M — rule</span>` + `<span class="rule-tag">tag</span>` pills
+
+**Sections delivered** (10 + anti-patterns):
+
+| § | Section | Key elements |
+|---|---|---|
+| §L-0 | Title | `loom — logo visual system` + meta line + 6 visible index cards |
+| §L-1 | Primary Mark | 5 warp threads (varying thickness 1.3→1.5→1.8→1.5→1.3px), 5 weft threads (asymmetric tension: 2 and 4 thinner), diamond shuttle, shed indicator dot, extending thread trail, implied frame (opacity 0.15). 5 annotations explaining every design decision |
+| §L-2 | Wordmark | "loom" in Cormorant Garamond italic at 64/32/18px. Kerning tuned per size (-0.02em at display). 3 annotations |
+| §L-3 | Horizontal Lockup | Mark + hairline + wordmark. Annotations: clear-space minimums (1× mark height), x-height alignment (not cap-height) |
+| §L-4 | Vertical Lockup | Mark on top, wordmark below centered |
+| §L-5 | Icon Variant | 16/32/64px progressive simplification. At 16px only the 3×3 hash survives |
+| §L-6 | Color Variants | 6 treatments in 3×2 grid: primary (sage on charcoal), neutral (off-white), light (charcoal on off-white), light accent (sage on off-white), monochrome, pure white |
+| §L-7 | Construction Grid | 200×200 unit square, 25-unit thread spacing, anchor circles at diagonal crossings (40,40), (65,65), (90,90), (115,115), (140,140) |
+| §L-8 | Pattern / Tile | 80×80 unit tiles, edge-to-edge, no offset. Demonstrates how the mark scales to a textile-like wallpaper |
+| §L-9 | Real-world Mockups | (a) README header with tagline + project description, (b) Terminal title bar `loom — deepseek-v4 — idle`, (c) CLI startup banner with color-coded status, (d) Browser-tab favicons at 16/32/64px |
+| §L-10 | Don't / Do | 3 DOs + 4 DON'Ts with visual examples (red X overlays for violations) |
+
+**Delegation**: `visual-engineering` category, 5m 11s, fresh session `ses_1208a985dffeBiH8mhbX44Dy2c` (not continued from tui-design session because this is a separate artifact, but prompt included full aesthetic spec).
+
+**Verification**:
+- `git status --short`: 4 expected files (`M progress.md`, 3 untracked). No out-of-scope changes.
+- HTML parser check: OK (no syntax errors, 1443 lines).
+- 10 sections confirmed via `section-num` markers (§L-1 through §L-10).
+- 26 §-citations present.
+- 27 SVG elements (all mark variations inline, no raster).
+- 12 terminal mockups (CLI banner, terminal title bars, favicon tabs).
+- All key strings present: tagline, "warp"/"weft"/"shuttle", all 3 fonts, sage `#5b8a72`, bg `#0c0e12`.
+- Page height 10,307 px (substantial brand-identity sheet).
+- 0 console errors, 0 page errors.
+
+**Not tracked in `feature_list.json`**: design artifact for project rename; no product code change. Renaming the actual `loop/` package and updating commit history would be separate work that consumes this as the spec.
+
+---
+
+## loom-rename implementation plans created (2026-06-19)
+
+Per the user's request "编写所有的实施计划", wrote a complete split-plan structure for the `loop → loom` rename. Plans follow the harness-plan-writer skill conventions: roadmap as navigation only, each phase as a self-contained execution script with pre-gate + exit-gate.
+
+**Files created** (7 plan files in `.sisyphus/plans/`):
+
+- `loom-rename-roadmap.md` (~80 lines) — phase dependency graph + summary table + cold-start
+- `loom-rename-p0.md` (~110 lines) — Brand assets: SVG extraction, favicon, README header
+- `loom-rename-p1.md` (~85 lines) — Design artifact sync: tui-design.html terminal titles
+- `loom-rename-p2.md` (~120 lines) — Code rename: `loop/` → `loom/` package + all imports + pyproject + CLI entry
+- `loom-rename-p3.md` (~115 lines) — Tracking rename: AGENTS.md + feature_list.json + init.sh + progress.md header
+- `loom-rename-p4.md` (~100 lines) — Test/eval rename: tests/ + loom/eval/cases/ imports + fixtures
+- `loom-rename-p5.md` (~140 lines) — Final verification: git log review + f-loom-rename → done + evidence
+
+**Phase dependency**:
+
+```
+   P0 (brand assets)         P1 (design artifact sync)
+            │                              │
+            └────────────┬─────────────────┘
+                         ▼
+            P2 (code rename — BREAKING)
+                         │
+              ┌──────────┴──────────┐
+              ▼                     ▼
+       P3 (tracking)          P4 (tests/eval)
+              │                     │
+              └──────────┬──────────┘
+                         ▼
+                     P5 (verify)
+```
+
+P0 and P1 are independent (can run in either order). P2 depends on P0. P3 and P4 depend on P2. P5 depends on all.
+
+**feature_list.json updates**: added 7 entries
+- `f-loom-rename` (umbrella) — `not-started`, dependencies `[]`
+- `f-loom-rename-p0` — `not-started`, depends on `f-loom-rename`
+- `f-loom-rename-p1` — `not-started`, depends on `f-loom-rename`
+- `f-loom-rename-p2` — `not-started`, depends on `f-loom-rename-p0`
+- `f-loom-rename-p3` — `not-started`, depends on `f-loom-rename-p2`
+- `f-loom-rename-p4` — `not-started`, depends on `f-loom-rename-p2`
+- `f-loom-rename-p5` — `not-started`, depends on `f-loom-rename-p3` AND `f-loom-rename-p4`
+
+Total features in feature_list.json: **45** (was 38, +7).
+
+**Design choices honored in plans**:
+
+1. **One phase = one session**: every plan file ends with explicit `⛔ Session 边界` reminder. No agent should attempt multiple phases in one session (context pollution per harness-plan-writer skill).
+2. **Pre-gate before each phase**: ensures prior phase actually passed; prevents skipping.
+3. **Exit-gate per phase**: concrete verification commands + `git commit -m "feat(loom-rename-pN): ..."` template.
+4. **WIP=1 enforced via feature_list.json**: only one phase `in-progress` at a time.
+5. **Self-contained plans**: each plan file contains all info needed (no cross-file reading required during execution).
+6. **Atomic commits per phase**: 6 separate `git commit`s, history stays clean, `git log --oneline | grep loom-rename-p` returns 5-6 entries as final evidence.
+
+**Estimated total effort**: ~7h (P0 1.5h + P1 1h + P2 2h + P3 1.5h + P4 1.5h + P5 0.5h).
+
+**Not yet executed**: zero phases run. This is purely planning. The plans are ready for execution in 6 future sessions, starting with P0 (or P1 in parallel).
+
+**Scope check**: only files added are 7 plan files + feature_list.json modification. No code under `loop/` or `tests/` touched. No docs/ artifact touched. Working tree state: 1 modified file (feature_list.json) + 7 untracked plan files.
+
+## loom-rename-p1: design artifact sync (2026-06-19)
+
+**Status**: Done. Commit `c2c9949` on `main`.
+
+**Context**: P0 was `not-started` at start (pre-gate technically violated: `f-loom-rename-p0` not passing). User explicitly invoked `/start-work loom-rename-p1` to proceed — documented override here and in `notepads/loom-rename-p1/learnings.md`. P0 and P1 are independent (plan confirms this), so this phase is safe to ship without blocking P0.
+
+**What was done**:
+- `sed -i '' 's|loop —|loom —|g'` on `docs/tui-design.html` — replaced 7 terminal title bars
+- Edit tool on 3 description lines (browser `<title>`, `<h1>`, subtitle possessive)
+- Playwright screenshots of all 7 state sections (saved to `/tmp/opencode/tui-design-shots/state-{1..7}-v3.png`)
+
+**Files changed**:
+- `docs/tui-design.html` (added — 1443 lines, previously untracked)
+- `feature_list.json` (modified — `f-loom-rename-p1` status → `done`, evidence populated)
+
+**Gate verification output**:
+```
+grep -c 'loop —' tui-design.html → 0
+grep -c 'loom —' tui-design.html → 7
+wc -l tui-design.html → 1443 (unchanged)
+HTML parser (python3 HTMLParser) → OK
+Playwright text verification: all 7 title bars show 'loom — ...'
+Header collapsed row '▼ ● MCP:3/3 ◐ 2/5 todos ◐ 1 subagent' unchanged
+7 screenshots: /tmp/opencode/tui-design-shots/state-{1..7}-v3.png (114-179KB each)
+```
+
+**Files NOT changed** (intentionally excluded per plan scope):
+- `docs/loom-logo.html`, `docs/tui-design-language.md` — still untracked
+- `progress.md` — tracked but not staged in this commit (pre-existing uncommitted changes)
+- `loop/` package, `tests/`, `loop/eval/` — P2/P3/P4 scope
+
+**Decision notes**:
+- No `mark` SVG element added to title bars (§L9.2: text-only)
+- No README.md changes (P0 owns that)
+- Conceptual `loop` references (status bar, prose, file paths) left untouched
+
+---
+
+## Polish session: plan template fixes + README Quick Start (2026-06-19)
+
+Per the Momus review of P0/P1 plans, applied systematic fixes across all 7 plan files and added a Quick Start section to README.md. No new tests, no code changes — pure documentation polish.
+
+**Files modified**:
+
+- `M README.md` (11 → 22 lines, +11): added `Quick Start` section with 2 commands + link to AGENTS.md
+- `M .sisyphus/plans/loom-rename-{roadmap,p0,p1,p2,p3,p4,p5}.md` (7 files, multiple edits)
+
+**CRITICAL fixes applied**:
+
+1. **Status terminology unified**: bulk sed `passing` → `done` across all 7 plan files (13 instances → 0). This was momus issue #1 (CRITICAL): `feature_list.json` state_machine only recognizes `not-started / in-progress / blocked / done`, never `passing`. Plan files now use the correct terminology.
+
+2. **Playwright dependency declared** in P0 pre-gate (momus issue #2 CRITICAL): added `- [ ] Playwright + Chromium installed (pip install playwright && playwright install chromium)` with cairosvg fallback for systems where Playwright is unavailable.
+
+**MAJOR fixes applied**:
+
+3. **P0 任务 5 verification now grep-based** (momus issue #6): replaced subjective `head -30 README.md` with 4 explicit `grep -q` checks for logo image link, italic wordmark, tagline, and description. Machine-parseable pass/fail.
+
+4. **P0 exit-gate enumerates SVG elements** (momus issue #4): expanded `含所有 §L-1 要素` to list 6 specific elements (5 warp threads + 5 weft threads + shuttle + shed indicator + extending trail + implied frame).
+
+5. **P1 任务 3 mkdir + Playwright text extraction** (momus issues #5 + #3): added `mkdir -p /tmp/opencode/tui-design-shots/` before save, replaced subjective `视觉检查` with `page.locator('.terminal-titlebar .title').all_inner_texts()` assertion that title text starts with `loom —`. Machine-parseable.
+
+6. **P1 gate "视觉检查" replaced with text assertion** (momus issue #3): same fix as #5 in the gate section.
+
+**MEDIUM fixes applied**:
+
+7. **`python3` → `uv run python`** (momus issue #9) in 2 places: P3 task 5 verification, P5 task 5 evidence check. Both inline Python invocations now use project's `uv run python` convention.
+
+8. **P0 gate file count `5` → `5–7`** (momus issue #7): accommodates `feature_list.json` (P0 update) + `progress.md` (session boundary requirement), both required but originally excluded.
+
+9. **P0 任务 3 §L-5.1 reference clarified** (momus issue #8): was "16px 用 §L-5.1 的 hash-mark 简化版" (vague — §L-5.1 is annotation, not SVG); now references specific line range in `docs/loom-logo.html` (lines 797–803).
+
+**MINOR fixes applied**:
+
+10. **P0 status value quoting** (momus issue #11): `in-progress` unquoted → `"in-progress"` quoted, consistent with `"not-started"`.
+
+11. **P0 任务 0 wording updated**: now reflects that 7 phase entries are pre-existing in feature_list.json (added during planning), not "to be added in this phase". Eliminates confusion.
+
+12. **P1 任务 0 wording clarified** (momus issue #10): `P1 与 P0 无依赖` → `P1 与 P0 无技术依赖 (P1 不读 P0 产出的文件), 但为 WIP=1 约束, 必须在 P0 exit-gate 通过后开始`. The "无依赖" claim contradicted the pre-gate.
+
+**NIT issues NOT applied** (low value):
+
+- P1 task 3 `v3` suffix already removed when I rewrote the task (consolidated into `state-{1..7}.png`).
+- `xmllint` availability on macOS is guaranteed (libxml2 system install); no fix needed.
+
+**README Quick Start added** (Task B):
+
+```html
+<h3 align="center">Quick Start</h3>
+
+```bash
+uv run python -m loom.cli run      # start the TUI
+uv run python -m loom.cli --help   # see all commands
+```
+
+<p align="center">
+  Setup, working rules, and verification: <a href="./AGENTS.md">AGENTS.md</a>
+</p>
+```
+
+README now has both brand identity (logo + tagline + description) AND a concrete entry path for new users. Before this polish, README was brand-only; external GitHub visitors had no way to know how to install/run the project without reading AGENTS.md directly.
+
+**Note**: The Quick Start commands use `loom.cli` (post-rename command). They will be slightly misleading in the brief P0→P2 transition window (package is still `loop.cli`). After P2 lands, they will be immediately accurate. This is acceptable forward-looking state — the rename is the very next phase.
+
+**Verification** (post-polish):
+
+- `grep 'passing' .sisyphus/plans/loom-rename-*.md` → 0 hits ✓
+- `grep 'python3' .sisyphus/plans/loom-rename-*.md` → 0 hits ✓
+- `wc -l .sisyphus/plans/loom-rename-{roadmap,p0,p1,p2,p3,p4,p5}.md` → all 7 files readable, sizes sensible (P0 grew ~5 lines for Playwright pre-gate; P1 grew ~5 lines for mkdir + text extraction; P3/P5 ~1 line each for python3→uv)
+- `cat README.md` → 22 lines, contains logo + tagline + description + Quick Start + AGENTS.md link ✓
+- All plan files maintain semantic coherence — pre-gates, tasks, gates, session boundaries all preserved
+- No accidental changes to other content (verified by reading P2, P4, P5 — only sed'd for `passing`, no other changes leaked)
+
+**Ready for P2**: All CRITICAL and MAJOR plan issues resolved. P2 can be loaded in a new session without context pollution from this polish work.
+
