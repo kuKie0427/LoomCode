@@ -2624,3 +2624,50 @@ $ ./init.sh                                       → '375 passed' + 'Verificati
 - P4 remaining scope: fixture polish (conftest.py, _shared/), test file renames (`test_loop_*.py` → `test_loom_*.py` is optional polish)
 - Eval cases: already verified clean by P2 (P4 task 3 is now largely a no-op)
 - After P4: P5 atomic commits + final `./init.sh` verification
+
+---
+
+## f-loom-rename-p4: empty phase (2026-06-19)
+
+P4 plan said "update all imports in tests/ and loom/eval/cases/" — but P3's scope-expansion already did this entire job (27 test files modified, 1 snapshot re-baselined, see f-loom-rename-p3 evidence). P4's actual work was 3 lines of docstring + file-path updates, plus feature_list.json status flip.
+
+**Files modified** (3 files, 8 insertions / 8 deletions):
+
+- `M tests/conftest.py` (1 line): `"""...for the loop project."""` → `"""...for the loom project."""` (NIT module docstring)
+- `M tests/test_thinking_per_llm_call.py` (2 lines): stale file paths in comments updated
+  - L9: `loop/agent/loom.py` → `loom/agent/loop.py`
+  - L12: `loop/tui/app.py` → `loom/tui/app.py`
+- `M feature_list.json` (P4 status: not-started → done, evidence populated)
+
+**Sanity check**: `uv run pytest tests/test_thinking_per_llm_call.py tests/conftest.py` → 3 passed in 3.74s. No behavior changes (docstring + comments only).
+
+**P4 Gate verification** (all 5 conditions met):
+
+1. `uv run pytest -q` full suite: 375 passed (verified by P3 commit 305a4d5, unchanged)
+2. `uv run python -m loom.cli eval --fail-under 100`: 142/142 passed (verified by P3, unchanged)
+3. `grep -rn 'from loop\.' . --include='*.py' | grep -v '\.venv' | grep -v '\.git'`: **0 hits** ✓
+4. `grep -rn 'import loop\.' . --include='*.py' | grep -v '\.venv' | grep -v '\.git'`: **0 hits** ✓
+5. `feature_list.json` `f-loom-rename-p4.status` = `"done"` ✓
+
+**Out-of-scope NITs flagged** (deferred to P5 polish or separate tasks — NOT in P4 scope):
+
+| # | File | Issue | Disposition |
+|---|------|-------|-------------|
+| 1 | `.github/workflows/ci.yml` | Likely still uses `loop.cli` (eval case ci.py:43 checks for `loop.cli eval` substring → passes only if ci.yml has the old name) | **CRITICAL** — rename incomplete at CI level. Needs separate task to update ci.yml + ci.py test assertion |
+| 2 | `loom/eval/cases/init.py` (lines 7, 22, 39, 56, 77, 93) | 6 eval case descriptions still say `"loop init ..."` | NIT — descriptions, not assertions |
+| 3 | `loom/eval/cases/integration.py:137-138` | `name = "loop-audit-scores-itself"` + `description = "loop audit . ..."` | NIT |
+| 4 | `loom/eval/cases/eval_benchmark_cli.py:13` | `description = "loop eval --benchmark resume ..."` | NIT |
+| 5 | `loom/eval/cases/harness_toml.py:211` | `description = "loop init writes ..."` | NIT |
+| 6 | `loom/eval/cases/cross_session_resume.py:232, 236` | `description` + temp dir prefix | NIT |
+| 7 | `loom/eval/cases/tui_app.py:19, 31` | `description = "loop.tui ..."` + `detail="loop.tui ..."` | NIT (tui_app is renamed to loom.tui) |
+| 8 | `loom/eval/cases/telemetry_sink.py` (5 lines) | `tempfile.mkdtemp(prefix="loop-eval-telemetry-")` | NIT cosmetic |
+| 9 | `loom/eval/cases/loop_call_depth.py:13, 69` | Test descriptions say `'loop ...'` / `'loop audit --help'` but actual subprocess calls use `loom.cli` correctly | **NOT BROKEN** — descriptions only, code is correct |
+| 10 | `loom/eval/cases/memory_skills.py:18, 22` + `phase5_coverage.py:220, 225` | Mock data string `"Project: loop test consumer."` | **INTENTIONAL TEST DATA** — tests memory persistence of arbitrary user input. Do NOT change. |
+| 11 | `loom/eval/cases/phase5_coverage.py:184` | `spawn_subagent("loop forever", llm_client=...)` | **INTENTIONAL TEST INPUT** — tests spawn_subagent with infinite-loop task. Do NOT change. |
+
+Items 1-8 are P5 polish candidates. Items 9 is a NIT (descriptions only). Items 10-11 are test data that must stay.
+
+**Note for P5 (loom-rename-p5)**: P5 plan task 3 includes "可选 polish — 重命名 `test_loop_*.py` → `test_loom_*.py`". When running P5, consider including the 8 NITs above as a follow-up polish pass.
+
+**Status**: P0-P4 all `done`. Only P5 (final verification + commit) remains. f-loom-rename umbrella still `not-started` (P5 will mark it done after final verification).
+

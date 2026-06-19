@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for the loop project."""
+"""Shared pytest fixtures for the loom project."""
 
 from pathlib import Path
 from unittest.mock import MagicMock

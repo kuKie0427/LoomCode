@@ -6,10 +6,10 @@ appended its thinking text to the stale, hidden ``ThinkingDisplay`` from
 the first call, so the user never saw it.
 
 The fix is in two parts:
-1. ``loop/agent/loom.py`` fires a new ``on_assistant_message_start`` callback
+1. ``loom/agent/loop.py`` fires a new ``on_assistant_message_start`` callback
    before **each** LLM call within the while loop. The existing
    ``on_message_start`` keeps its once-per-session semantic.
-2. ``loop/tui/app.py`` wires ``on_assistant_message_start`` to the same
+2. ``loom/tui/app.py`` wires ``on_assistant_message_start`` to the same
    ``AssistantTurnStart`` message that triggers ``show_thinking_spinner``
    on the chat log, so the spinner (and a fresh ``ThinkingDisplay``) is
    set up for every round of reasoning.
