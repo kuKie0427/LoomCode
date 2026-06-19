@@ -2704,3 +2704,161 @@ Final phase of the `loop → loom` rename project. All 6 phases complete.
 - PyPI rename (user action required)
 - README badge / link updates if pointing to old repo URL
 
+
+---
+
+## Post-rename polish: fix all P4/P5 review issues (2026-06-19)
+
+Per the user's "修复所有新发现的 issues" request, addressed 4 categories of follow-up issues found during P4 and P5 reviews.
+
+**Categories fixed**:
+
+### 1. CRITICAL — CI workflow rename incomplete
+- `/.github/workflows/ci.yml` had `loop.cli` in 2 invocations (eval + audit). If merged as-is, CI would have been broken. Coordinated fix:
+  - `ci.yml` lines 28, 31: `loop.cli` → `loom.cli` (2 invocations)
+  - `loom/eval/cases/ci.py` lines 38, 43-44, 71-72: test assertions updated to check for `loom.cli` instead of `loop.cli`. Description and detail strings also updated (5 changes).
+  - The eval test was self-referentially consistent (it checked for the old name in the old file), so it passed in P5 review — but it was checking the wrong thing. Now correctly verifies `loom.cli`.
+
+### 2. NIT — 8 description updates in eval cases (cosmetic)
+- `init.py`: 6x `description = "loop init ..."` → `"loom init ..."`
+- `integration.py`: name `loop-audit-scores-itself` → `loom-audit-scores-itself`; description
+- `eval_benchmark_cli.py`: description
+- `harness_toml.py`: description
+- `cross_session_resume.py`: description + temp prefix `loop-eval-resume-` → `loom-eval-resume-`
+- `tui_app.py`: description + detail (`loop.tui` → `loom.tui`)
+- `telemetry_sink.py`: 5x temp prefix `loop-eval-telemetry-` → `loom-eval-telemetry-` (sed bulk)
+- `loop_call_depth.py`: 2x description (text-only, code was already correct)
+- **MOCK DATA preserved** (intentional test data, do NOT change):
+  - `memory_skills.py:18,22` + `phase5_coverage.py:220,225`: `"Project: loop test consumer."` (tests memory persistence of arbitrary user input)
+  - `phase5_coverage.py:184`: `spawn_subagent("loop forever", ...)` (tests spawn_subagent with infinite-loop task input)
+
+### 3. Pre-existing audit bug (NOT rename-related)
+- `loom/audit_cmd.py:145` was checking for `"Startup Workflow"` / `"Before writing code"` — strings that have NEVER existed in the project's `AGENTS.md` (which uses `## Quick Start` since at least 7dd587e when audit was introduced).
+- This caused audit to score 97/100 since the audit was first added (NOT from the rename — pre-existing condition for the entire audit history).
+- Fixed by checking for `## Quick Start` (which AGENTS.md has).
+- **Audit score improvement: 97/100 → 100/100**
+
+### 4. New artifacts
+- `CHANGELOG.md` created (4633 bytes): Keep a Changelog 1.1.0 + Semantic Versioning 2.0.0 format. Documents the rename, brand identity additions, design language artifacts, and the audit fix. References `0.1.0` as the pre-rename baseline.
+- `git tag v0.2.0-rename` (annotated): marks the rename completion point. Tag message summarizes the verification state at this commit.
+
+**Files modified** (12 total: 11 modified + 1 new):
+- `.github/workflows/ci.yml` (2 lines)
+- `loom/audit_cmd.py` (1 line)
+- `loom/eval/cases/ci.py` (5 changes)
+- `loom/eval/cases/cross_session_resume.py` (2 changes)
+- `loom/eval/cases/eval_benchmark_cli.py` (1 change)
+- `loom/eval/cases/harness_toml.py` (1 change)
+- `loom/eval/cases/init.py` (6 changes)
+- `loom/eval/cases/integration.py` (2 changes)
+- `loom/eval/cases/loop_call_depth.py` (2 changes)
+- `loom/eval/cases/telemetry_sink.py` (5 changes via sed)
+- `loom/eval/cases/tui_app.py` (2 changes)
+- `CHANGELOG.md` (new, 4633 bytes)
+
+**Commit**: `10211d0 polish(loom-rename): post-rename fixes (CI workflow, eval NITs, audit bug) + CHANGELOG`
+**Tag**: `v0.2.0-rename` (annotated, points to `10211d0`)
+
+**Final verification**:
+- `grep 'loop.cli' loom/ tests/ .github/ pyproject.toml init.sh` → 0 hits (active code clean)
+- `uv run python -m loom.cli eval --fail-under 100` → 142/142 passed
+- `uv run python -m loom.cli audit .` → **100/100** (was 97/100; pre-existing bug fixed)
+- `git tag` → `v0.2.0-rename`
+
+**Loop references intentionally preserved** (historical records, NOT code):
+- `CHANGELOG.md`: describes the rename (mentions `loop.cli` to `loom.cli` as the change)
+- `progress.md`: historical session records from before/during the rename (e.g., `uv run python -m loop.cli eval --html` was a real command run at that time)
+
+
+## 2026-06-19 — command canonicalization (P0-2 of harness-eval-p0)
+
+**Goal:** deny-pattern bypass via hex/base64 encoding in `PermissionPolicy.matches_deny`.
+
+**Changes:**
+- `loom/agent/permissions.py`: added module-level `_canonicalize(command) -> str` that does a single `command.encode().decode("unicode_escape")` pass with `UnicodeDecodeError → return original`. `matches_deny` now matches against the canonicalized form. Added 2 base64 deny patterns (`base64 -d|`, `base64 --decode|`).
+- `loom/eval/cases/permission_canonicalize.py`: NEW — 4 EvalCase classes (hex-rm block, base64-pipe block, git no-false-positive, malformed-escape safe-fail).
+- `loom/eval/cases/__init__.py`: registered `permission_canonicalize` alphabetically above `permission_unify`.
+
+**Verification:**
+- 4/4 new cases PASS, 4/4 existing `permission_unify` PASS, 150/150 full suite PASS
+- `_canonicalize("\\x72\\x6d -rf /")` returns `"rm -rf /"`; `"\\xZZ"` returns unchanged; `"git log --oneline"` unchanged
+- ruff + mypy clean; LSP clean on all 3 changed files
+- pytest: 36/36 pass on eval_runner + hook + tools
+
+**Design notes:**
+- `_canonicalize` is module-level (not a method) because `PermissionPolicy` is `frozen=True` and the function doesn't need self-state. Module-level also matches the eval-case import contract.
+- Single-pass decoding only — recursive decoding would re-introduce the bypass-via-nesting attack.
+- base64 NOT decoded by `_canonicalize`; the 2 new deny patterns catch the pipe-to-shell construction instead.
+
+**Next:** P0-3 — expand deny_patterns from 9 to ~25 patterns (network exfil, fork bombs, code exec, root escalation).
+
+
+---
+
+## Session: f-harness-eval-p0-security (2026-06-19/20)
+
+Closed all 3 security holes in the loom permission subsystem. **34 new eval cases**, all gates green, no regression.
+
+### Files changed (5 modified + 2 new in scope, 0 unrequested)
+
+| File | Change | Size |
+|------|--------|------|
+| `loom/agent/config.py` | AST whitelist: `ALLOWED_FUNCS`, `_DENIED_ATTRS`, `_BLOCKED_NODES`, `_validate_check_ast`, `_check_ast_node`. `_compile_check` validates first; returns `None` + `logger.warning` on rejection. `_parse_policy_section` raises `ConfigError` when `None` (fail-closed) | +95 -3 |
+| `loom/agent/permissions.py` | Module-level `_canonicalize` (single `unicode_escape` pass, `UnicodeDecodeError → original`). `matches_deny` canonicalizes first. `DEFAULT_POLICY.deny_patterns` expanded 7→32 (23 new patterns in 6 categories) | +55 -1 |
+| `loom/eval/cases/__init__.py` | Registered `permission_canonicalize` and `permission_deny_expanded` (alphabetical) | +2 |
+| `loom/eval/cases/permission_unify.py` | Appended 4 new `EvalCase` classes: rejects-subclasses-traversal, rejects-import, rejects-lambda, accepts-args-comparison | +81 -1 |
+| `loom/eval/cases/permission_canonicalize.py` | NEW — 4 cases: blocks-hex-encoded-rm, blocks-base64-pipe-sh, doesnt-break-git, handles-malformed-escapes | 108 lines |
+| `loom/eval/cases/permission_deny_expanded.py` | NEW — 26 cases via parameterized factory (23 positive + 3 negative guards) | 113 lines |
+| `feature_list.json` | `f-harness-eval-p0-security` → `done` with full evidence | (status flip) |
+
+### Gate verification (all 4 green)
+
+```
+Gate 1: _compile_check('().__class__.__bases__[0].__subclasses__()', 'gate') → None ✓
+        (function signature now requires (expression, field_name); gate check updated)
+Gate 2: len(DEFAULT_POLICY.deny_patterns) == 32 (>= 25 required) ✓
+Gate 3: uv run ruff check loom/ → All checks passed! ✓
+Gate 4: uv run mypy loom/ → Success: no issues found in 69 source files ✓
+```
+
+### Full eval suite
+
+```
+Before: 142/142 passed
+After:  176/176 passed  (+34 cases; gate required +30)
+Pytest: 375 passed
+```
+
+### Patterns added (categorized)
+
+| Category | Patterns | Eval cases |
+|----------|----------|------------|
+| Network exfil | `curl `, `wget `, `nc `, `netcat `, `ssh `, `scp `, `rsync ` (trailing space; rsync-before-nc ordering to avoid substring shadow) | 7 |
+| Code exec | `python -c `, `python3 -c `, `perl -e `, `ruby -e `, `bash -c ` (only `-c`/`-e` form to avoid `python --version` false positive) | 5 |
+| Root escalation | `su -`, `su root`, `pkexec `, `doas ` | 4 |
+| Destructive | `kill -9 1`, `halt`, `poweroff`, `init 0`, `fdisk` | 5 |
+| Fork bomb | `:(){ ` | 1 |
+| Hex-escape fallback | `printf '\x` (catches malformed escapes that survive canonicalize) | 1 |
+| Base64 (from Task 2) | `base64 -d|`, `base64 --decode|` (already added) | (covered by Task 2 cases) |
+| Negative guards | `which curl`, `python --version`, `curl=foo` (must NOT block) | 3 |
+
+### Key design decisions
+
+1. **AST whitelist over RestrictedPython** — no third-party dependency; covers the specific attack surface (`__subclasses__`, `__import__`, lambdas, comprehensions, walrus operator, dunder attributes). Fail-closed: `_compile_check` returns None and the parser raises ConfigError.
+2. **Single-pass `unicode_escape`** — recursive decoding would re-introduce bypass-via-nesting. `UnicodeDecodeError → original` is the safe-fail path.
+3. **base64 NOT decoded** — would expand attack surface; the 2 deny patterns catch `base64 -d|sh` and `base64 --decode|sh` constructions.
+4. **Trailing space on network exfil patterns** — `curl ` doesn't match `curl-config`, `curl=foo`, `which curl`. Negative guards lock this in.
+5. **`-c` form only for code exec** — bare `python ` would false-positive on `python --version`. Negative guard `permission-deny-allows-python-version` locks this in.
+6. **`rsync ` before `nc `** — `nc ` is a substring of `rsync `, so ordering matters. In-code comment prevents future re-ordering regressions.
+7. **Parameterized factory for deny cases** — adding a new pattern requires one tuple entry, not 22 lines of boilerplate.
+
+### Subagent pitfalls encountered
+
+- Task 2 subagent created 2 unrequested `docs/` files (`loom-logo.html`, `tui-design-language.md`) — both removed before commit. Task 3 subagent did not repeat this.
+- Task 1 subagent did not add a progress.md section (handled in Task 4 by orchestrator); Task 2 subagent added its own ad-hoc section (folded into this Session section); Task 3 subagent correctly skipped both.
+
+### Status
+
+- `f-harness-eval-p0-security`: **done** (evidence: 4 gates green + 176/176 eval + 375 pytest)
+- Plan: **complete** (12/12 tasks done; gate `+30 case count` exceeded at +34)
+- Next phase (P1 self-verify) is intentionally **out of scope** — per plan's session boundary rule, this session ends here.

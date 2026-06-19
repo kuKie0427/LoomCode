@@ -4,18 +4,18 @@
   "description": "Minimal Claude-Code-like Python coding agent. Features track both product work (test framework, harness scaffold) and product-roadmap work (init/audit commands, memory, skills, multi-agent, observability).",
   "state_machine": {
     "transitions": [
-      "not-started → in-progress",
-      "in-progress → blocked",
-      "blocked → in-progress",
-      "in-progress → done"
+      "not-started \u2192 in-progress",
+      "in-progress \u2192 blocked",
+      "blocked \u2192 in-progress",
+      "in-progress \u2192 done"
     ],
-    "rule": "Only ./init.sh (or a direct call to a feature's 'verification' command with passing output) may set status='done'. Agents may freely move between the other three states. 'done' is sticky — to re-open a done feature, change status back to 'in-progress' AND remove the 'evidence' field."
+    "rule": "Only ./init.sh (or a direct call to a feature's 'verification' command with passing output) may set status='done'. Agents may freely move between the other three states. 'done' is sticky \u2014 to re-open a done feature, change status back to 'in-progress' AND remove the 'evidence' field."
   },
   "features": [
     {
       "id": "f-test-framework-p0",
-      "name": "测试基础设施搭建",
-      "description": "安装 pytest、创建目录结构、fixtures、配置",
+      "name": "\u6d4b\u8bd5\u57fa\u7840\u8bbe\u65bd\u642d\u5efa",
+      "description": "\u5b89\u88c5 pytest\u3001\u521b\u5efa\u76ee\u5f55\u7ed3\u6784\u3001fixtures\u3001\u914d\u7f6e",
       "dependencies": [],
       "status": "done",
       "verification": "uv run pytest --collect-only",
@@ -23,8 +23,8 @@
     },
     {
       "id": "f-test-framework-p1",
-      "name": "核心单元测试: Prompt & Models",
-      "description": "SystemPrompt 全部方法 + LLMClient 初始化和配置",
+      "name": "\u6838\u5fc3\u5355\u5143\u6d4b\u8bd5: Prompt & Models",
+      "description": "SystemPrompt \u5168\u90e8\u65b9\u6cd5 + LLMClient \u521d\u59cb\u5316\u548c\u914d\u7f6e",
       "dependencies": [
         "f-test-framework-p0"
       ],
@@ -34,8 +34,8 @@
     },
     {
       "id": "f-test-framework-p2",
-      "name": "核心单元测试: Hooks",
-      "description": "Hooks 事件系统 (context 压缩测试见 f-test-framework-p4)",
+      "name": "\u6838\u5fc3\u5355\u5143\u6d4b\u8bd5: Hooks",
+      "description": "Hooks \u4e8b\u4ef6\u7cfb\u7edf (context \u538b\u7f29\u6d4b\u8bd5\u89c1 f-test-framework-p4)",
       "dependencies": [
         "f-test-framework-p1"
       ],
@@ -45,8 +45,8 @@
     },
     {
       "id": "f-test-framework-p3",
-      "name": "集成测试: 工具函数 & Agent Loop",
-      "description": "bash/read/write/edit/glob/todo 工具 + agent_loop 端到端 + spawn_subagent",
+      "name": "\u96c6\u6210\u6d4b\u8bd5: \u5de5\u5177\u51fd\u6570 & Agent Loop",
+      "description": "bash/read/write/edit/glob/todo \u5de5\u5177 + agent_loop \u7aef\u5230\u7aef + spawn_subagent",
       "dependencies": [
         "f-test-framework-p2"
       ],
@@ -56,19 +56,19 @@
     },
     {
       "id": "f-test-framework-p4",
-      "name": "Context 压缩流程测试",
-      "description": "update / current_tokens / _find_tail_cutoff / _generate_summary / _inject_todo_attachment / autocompact — includes LLM-failure fallback path",
+      "name": "Context \u538b\u7f29\u6d41\u7a0b\u6d4b\u8bd5",
+      "description": "update / current_tokens / _find_tail_cutoff / _generate_summary / _inject_todo_attachment / autocompact \u2014 includes LLM-failure fallback path",
       "dependencies": [
         "f-test-framework-p3"
       ],
       "status": "done",
       "verification": "uv run pytest tests/test_context.py",
-      "evidence": "26/26 context tests pass (was 25/26 with test_autocompact_llm_failure_skips_compaction failing). Full suite: 127 passed / 0 failed — init.sh exits 0 in 'all green' mode (no blocked-feature notice). Fix: when _generate_summary returns None, autocompact now skips compaction (leaves messages unchanged) instead of truncating to tail. Aligns with the test name 'skips_compaction' and the test assertion that messages[0]['content'] == 'Round 1' stays intact."
+      "evidence": "26/26 context tests pass (was 25/26 with test_autocompact_llm_failure_skips_compaction failing). Full suite: 127 passed / 0 failed \u2014 init.sh exits 0 in 'all green' mode (no blocked-feature notice). Fix: when _generate_summary returns None, autocompact now skips compaction (leaves messages unchanged) instead of truncating to tail. Aligns with the test name 'skips_compaction' and the test assertion that messages[0]['content'] == 'Round 1' stays intact."
     },
     {
       "id": "f-harness-scaffold",
-      "name": "Phase 0: Harness 自洽 (Dogfooding)",
-      "description": "添加 AGENTS.md / init.sh / progress.md / session-handoff.md / docs/ / ruff / mypy / feature_list.json schema 迁移 + Phase 1-5 roadmap features。让本项目本身符合 harness-creator 最小五件套。",
+      "name": "Phase 0: Harness \u81ea\u6d3d (Dogfooding)",
+      "description": "\u6dfb\u52a0 AGENTS.md / init.sh / progress.md / session-handoff.md / docs/ / ruff / mypy / feature_list.json schema \u8fc1\u79fb + Phase 1-5 roadmap features\u3002\u8ba9\u672c\u9879\u76ee\u672c\u8eab\u7b26\u5408 harness-creator \u6700\u5c0f\u4e94\u4ef6\u5957\u3002",
       "dependencies": [
         "f-test-framework-p2"
       ],
@@ -78,8 +78,8 @@
     },
     {
       "id": "f-product-init-cmd",
-      "name": "Phase 1: loom init 命令",
-      "description": "Python 版 create-harness.mjs。在用户项目里生成 5 件套 + 项目类型自动检测 (Python/Node/Go/Rust/...) + --agent-file / --commands / --force 选项。",
+      "name": "Phase 1: loom init \u547d\u4ee4",
+      "description": "Python \u7248 create-harness.mjs\u3002\u5728\u7528\u6237\u9879\u76ee\u91cc\u751f\u6210 5 \u4ef6\u5957 + \u9879\u76ee\u7c7b\u578b\u81ea\u52a8\u68c0\u6d4b (Python/Node/Go/Rust/...) + --agent-file / --commands / --force \u9009\u9879\u3002",
       "dependencies": [
         "f-harness-scaffold"
       ],
@@ -89,8 +89,8 @@
     },
     {
       "id": "f-product-audit-cmd",
-      "name": "Phase 1: loom audit 命令",
-      "description": "Python 版 validate-harness.mjs。5 维评分 (Instructions / State / Verification / Scope / Lifecycle) + JSON/HTML 输出 + 瓶颈指向。",
+      "name": "Phase 1: loom audit \u547d\u4ee4",
+      "description": "Python \u7248 validate-harness.mjs\u30025 \u7ef4\u8bc4\u5206 (Instructions / State / Verification / Scope / Lifecycle) + JSON/HTML \u8f93\u51fa + \u74f6\u9888\u6307\u5411\u3002",
       "dependencies": [
         "f-product-init-cmd"
       ],
@@ -100,8 +100,8 @@
     },
     {
       "id": "f-memory-persistence",
-      "name": "Phase 2: 跨会话记忆 + 三层上下文",
-      "description": ".minicode/memory/ 目录 + MEMORY.md 长期记忆 + 三段式 SystemPrompt 升级 (静态/会话/记忆) + memory_read/write/search 工具 + 三层上下文加载 (~500 / ~2000 / on-demand)。",
+      "name": "Phase 2: \u8de8\u4f1a\u8bdd\u8bb0\u5fc6 + \u4e09\u5c42\u4e0a\u4e0b\u6587",
+      "description": ".minicode/memory/ \u76ee\u5f55 + MEMORY.md \u957f\u671f\u8bb0\u5fc6 + \u4e09\u6bb5\u5f0f SystemPrompt \u5347\u7ea7 (\u9759\u6001/\u4f1a\u8bdd/\u8bb0\u5fc6) + memory_read/write/search \u5de5\u5177 + \u4e09\u5c42\u4e0a\u4e0b\u6587\u52a0\u8f7d (~500 / ~2000 / on-demand)\u3002",
       "dependencies": [
         "f-harness-scaffold"
       ],
@@ -112,29 +112,29 @@
     {
       "id": "f-skill-runtime",
       "name": "Phase 3: Skill Runtime + Tool Registry",
-      "description": ".minicode/skills/ 目录约定 + SKILL.md frontmatter + load_skill 工具 + ToolRegistry 类 (name/schema/handler/permission_profile) + 权限管线 async 化。",
+      "description": ".minicode/skills/ \u76ee\u5f55\u7ea6\u5b9a + SKILL.md frontmatter + load_skill \u5de5\u5177 + ToolRegistry \u7c7b (name/schema/handler/permission_profile) + \u6743\u9650\u7ba1\u7ebf async \u5316\u3002",
       "dependencies": [
         "f-memory-persistence"
       ],
       "status": "done",
       "verification": "uv run pytest tests/test_skills.py tests/test_tool_registry.py",
-      "evidence": "uv run pytest tests/test_skills.py tests/test_tool_registry.py → 25/25 passed; skill files exist at loom/skills/{discovery,registry}.py + loom/agent/tool_registry.py; commit a986aee feat: f-skill-runtime — Phase 3 skill index + load_skill tool + ToolRegistry. Status flip authorized by user (resolves pre-existing data bug surfaced during f-eval-coverage)."
+      "evidence": "uv run pytest tests/test_skills.py tests/test_tool_registry.py \u2192 25/25 passed; skill files exist at loom/skills/{discovery,registry}.py + loom/agent/tool_registry.py; commit a986aee feat: f-skill-runtime \u2014 Phase 3 skill index + load_skill tool + ToolRegistry. Status flip authorized by user (resolves pre-existing data bug surfaced during f-eval-coverage)."
     },
     {
       "id": "f-multi-agent",
       "name": "Phase 4: Multi-Agent via Tool Calling + Checkpoint (Q4)",
-      "description": "Fork 模式并行 subagent（ThreadPoolExecutor）+ SUB_SYSTEM 修复 + 结构化 return (summary + turn count + tool calls) + Checkpoint (Q4 hybrid：10 tool calls OR 5k tokens 写 .minicode/checkpoints/<session>.json, 原子 write)。简化的 Phase 4 —— 不含 MessageBus / Task Board / Swarm / 完整 lifecycle (用户的判断：tool calling + checkpoint 对当前产品足够)。",
+      "description": "Fork \u6a21\u5f0f\u5e76\u884c subagent\uff08ThreadPoolExecutor\uff09+ SUB_SYSTEM \u4fee\u590d + \u7ed3\u6784\u5316 return (summary + turn count + tool calls) + Checkpoint (Q4 hybrid\uff1a10 tool calls OR 5k tokens \u5199 .minicode/checkpoints/<session>.json, \u539f\u5b50 write)\u3002\u7b80\u5316\u7684 Phase 4 \u2014\u2014 \u4e0d\u542b MessageBus / Task Board / Swarm / \u5b8c\u6574 lifecycle (\u7528\u6237\u7684\u5224\u65ad\uff1atool calling + checkpoint \u5bf9\u5f53\u524d\u4ea7\u54c1\u8db3\u591f)\u3002",
       "dependencies": [
         "f-skill-runtime"
       ],
       "status": "done",
       "verification": "uv run pytest tests/ -v && ./init.sh",
-      "evidence": "206 tests pass / 0 fail (was 185, +21). init.sh 'all green'. Hooks thread-safe (Lock + copy-on-trigger). Fork 模式: 多个 task 工具调用同轮并发执行. SUB_SYSTEM 修复 (之前是空字符串). 结构化 return: [done: N turns, M tool calls]\\n<summary>. Checkpoint: 写到 .minicode/checkpoint.json 原子 write (tmp + rename). loom run --resume 恢复. Cold-start: save/load roundtrip 验证 messages / tool_call_count / model / saved_at 全部保留."
+      "evidence": "206 tests pass / 0 fail (was 185, +21). init.sh 'all green'. Hooks thread-safe (Lock + copy-on-trigger). Fork \u6a21\u5f0f: \u591a\u4e2a task \u5de5\u5177\u8c03\u7528\u540c\u8f6e\u5e76\u53d1\u6267\u884c. SUB_SYSTEM \u4fee\u590d (\u4e4b\u524d\u662f\u7a7a\u5b57\u7b26\u4e32). \u7ed3\u6784\u5316 return: [done: N turns, M tool calls]\\n<summary>. Checkpoint: \u5199\u5230 .minicode/checkpoint.json \u539f\u5b50 write (tmp + rename). loom run --resume \u6062\u590d. Cold-start: save/load roundtrip \u9a8c\u8bc1 messages / tool_call_count / model / saved_at \u5168\u90e8\u4fdd\u7559."
     },
     {
       "id": "f-architecture-unify",
-      "name": "架构统一：产品全部内迁 loom/agent/",
-      "description": "原根目录的 main.py / context.py / hook.py / models.py / prompt.py 全部内迁到 loom/agent/。三层加载从 loom/memory/context.py 并入 loom/agent/prompt.py（消除概念分裂）。loom CLI 加 run subcommand 替代 python main.py。",
+      "name": "\u67b6\u6784\u7edf\u4e00\uff1a\u4ea7\u54c1\u5168\u90e8\u5185\u8fc1 loom/agent/",
+      "description": "\u539f\u6839\u76ee\u5f55\u7684 main.py / context.py / hook.py / models.py / prompt.py \u5168\u90e8\u5185\u8fc1\u5230 loom/agent/\u3002\u4e09\u5c42\u52a0\u8f7d\u4ece loom/memory/context.py \u5e76\u5165 loom/agent/prompt.py\uff08\u6d88\u9664\u6982\u5ff5\u5206\u88c2\uff09\u3002loom CLI \u52a0 run subcommand \u66ff\u4ee3 python main.py\u3002",
       "dependencies": [
         "f-memory-persistence"
       ],
@@ -144,296 +144,296 @@
     },
     {
       "id": "f-observability",
-      "name": "Phase 5: Observability + Eval 套件",
-      "description": "结构化 .minicode/trace.jsonl + 30+ eval cases (10 来自 harness-creator 基线 + 20 产品专属) + HTML 报告 + review→rule 闭环 + ablation 实验。",
+      "name": "Phase 5: Observability + Eval \u5957\u4ef6",
+      "description": "\u7ed3\u6784\u5316 .minicode/trace.jsonl + 30+ eval cases (10 \u6765\u81ea harness-creator \u57fa\u7ebf + 20 \u4ea7\u54c1\u4e13\u5c5e) + HTML \u62a5\u544a + review\u2192rule \u95ed\u73af + ablation \u5b9e\u9a8c\u3002",
       "dependencies": [
         "f-multi-agent"
       ],
       "status": "done",
       "verification": "uv run python -m loom eval --html /tmp/eval.html && test -f /tmp/eval.html",
-      "evidence": "uv run python -m loom.cli eval --html /tmp/eval.html → 'Eval results: 32/32 passed', HTML report written (4218 bytes); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy"
+      "evidence": "uv run python -m loom.cli eval --html /tmp/eval.html \u2192 'Eval results: 32/32 passed', HTML report written (4218 bytes); ./init.sh \u2192 225 pytest passed, 0 ruff, 0 mypy"
     },
     {
       "id": "f-ci-integration",
-      "name": "Phase 5 closure: CI 跑 init.sh + eval + audit",
-      "description": ".github/workflows/ci.yml: push/PR 时跑 ./init.sh + loom eval --fail-under 100 + loom audit .。Phase 5 §4 acceptance 明文要求 'Eval pass rate + 5-dimension score + structural smoke all show up in CI'。",
+      "name": "Phase 5 closure: CI \u8dd1 init.sh + eval + audit",
+      "description": ".github/workflows/ci.yml: push/PR \u65f6\u8dd1 ./init.sh + loom eval --fail-under 100 + loom audit .\u3002Phase 5 \u00a74 acceptance \u660e\u6587\u8981\u6c42 'Eval pass rate + 5-dimension score + structural smoke all show up in CI'\u3002",
       "dependencies": [
         "f-observability"
       ],
       "status": "done",
       "verification": "test -f .github/workflows/ci.yml && uv run python -m loom.cli eval --fail-under 100 && uv run python -m loom.cli audit . > /tmp/audit.txt",
-      "evidence": "./init.sh → 225 pytest passed, 0 ruff, 0 mypy; uv run python -m loom.cli eval → 'Eval results: 37/37 passed' (5 new CI cases); uv run python -m loom.cli audit . → 'Overall: 92/100, Bottleneck: instructions'; .github/workflows/ci.yml: 893 chars, ./init.sh + loom eval --fail-under 100 + loom audit, triggers on push + pull_request to main, uploads audit report as artifact."
+      "evidence": "./init.sh \u2192 225 pytest passed, 0 ruff, 0 mypy; uv run python -m loom.cli eval \u2192 'Eval results: 37/37 passed' (5 new CI cases); uv run python -m loom.cli audit . \u2192 'Overall: 92/100, Bottleneck: instructions'; .github/workflows/ci.yml: 893 chars, ./init.sh + loom eval --fail-under 100 + loom audit, triggers on push + pull_request to main, uploads audit report as artifact."
     },
     {
       "id": "f-eval-coverage",
-      "name": "Phase 5 §2 closure: permission / compaction / subagent / cross-session eval cases",
-      "description": "Roadmap Phase 5 §2 明列 4 类 case,当前 37 个 case 一个都没覆盖。补齐后 ~45 case。",
+      "name": "Phase 5 \u00a72 closure: permission / compaction / subagent / cross-session eval cases",
+      "description": "Roadmap Phase 5 \u00a72 \u660e\u5217 4 \u7c7b case,\u5f53\u524d 37 \u4e2a case \u4e00\u4e2a\u90fd\u6ca1\u8986\u76d6\u3002\u8865\u9f50\u540e ~45 case\u3002",
       "dependencies": [
         "f-ci-integration"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval → 'Eval results: 48/48 passed' (was 37/37, +11 Phase 5 §2 cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Coverage: permission denial (sudo/dd via hook + path escape via safe_path); compaction (microcompact clear + skip-below-KEEP_RECENT + should_compact 85% threshold); subagent (turn cap enforced at 30 + SUB_TOOLS excludes task → recursion prevented at schema); memory (search case-insensitive + summary truncates to max_lines)."
+      "evidence": "uv run python -m loom.cli eval \u2192 'Eval results: 48/48 passed' (was 37/37, +11 Phase 5 \u00a72 cases); ./init.sh \u2192 225 pytest passed, 0 ruff, 0 mypy. Coverage: permission denial (sudo/dd via hook + path escape via safe_path); compaction (microcompact clear + skip-below-KEEP_RECENT + should_compact 85% threshold); subagent (turn cap enforced at 30 + SUB_TOOLS excludes task \u2192 recursion prevented at schema); memory (search case-insensitive + summary truncates to max_lines)."
     },
     {
       "id": "f-permission-unify",
-      "name": "Permission 子系统: 3 套并行 deny-list 合并为单一来源 PermissionPolicy",
-      "description": "合并 run_bash 硬编码 dangerous / Hooks.DENY_LIST / PERMISSION_RULES 到 loom/agent/permissions.py 的单一 PermissionPolicy dataclass。run_bash 和 Hooks.check_permission_hook 都从 DEFAULT_POLICY 读。保留 DENY_LIST + PERMISSION_RULES 旧名字 re-export 以兼容。新增 4 个 eval case 锁定 single-source-of-truth + run_bash/hook 一致性 + policy 是数据驱动。",
+      "name": "Permission \u5b50\u7cfb\u7edf: 3 \u5957\u5e76\u884c deny-list \u5408\u5e76\u4e3a\u5355\u4e00\u6765\u6e90 PermissionPolicy",
+      "description": "\u5408\u5e76 run_bash \u786c\u7f16\u7801 dangerous / Hooks.DENY_LIST / PERMISSION_RULES \u5230 loom/agent/permissions.py \u7684\u5355\u4e00 PermissionPolicy dataclass\u3002run_bash \u548c Hooks.check_permission_hook \u90fd\u4ece DEFAULT_POLICY \u8bfb\u3002\u4fdd\u7559 DENY_LIST + PERMISSION_RULES \u65e7\u540d\u5b57 re-export \u4ee5\u517c\u5bb9\u3002\u65b0\u589e 4 \u4e2a eval case \u9501\u5b9a single-source-of-truth + run_bash/hook \u4e00\u81f4\u6027 + policy \u662f\u6570\u636e\u9a71\u52a8\u3002",
       "dependencies": [
         "f-eval-coverage"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval → 'Eval results: 52/52 passed' (was 48, +4 permission_unify cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Refactor: 3 parallel deny lists (run_bash hardcoded 5 / Hooks.DENY_LIST 7 / PERMISSION_RULES 2) consolidated into loom/agent/permissions.py::DEFAULT_POLICY (1 tuple deny_patterns + 1 tuple rules). run_bash and Hooks(policy=...) both read from DEFAULT_POLICY. run_bash now blocks dd if=/dev/... (was a real bug — eval case permission-deny-list-blocks-dd surfaced it). tests/test_tools.py::test_run_bash_dangerous_blocked updated to substring match + added dd coverage. Idempotent across reruns."
+      "evidence": "uv run python -m loom.cli eval \u2192 'Eval results: 52/52 passed' (was 48, +4 permission_unify cases); ./init.sh \u2192 225 pytest passed, 0 ruff, 0 mypy. Refactor: 3 parallel deny lists (run_bash hardcoded 5 / Hooks.DENY_LIST 7 / PERMISSION_RULES 2) consolidated into loom/agent/permissions.py::DEFAULT_POLICY (1 tuple deny_patterns + 1 tuple rules). run_bash and Hooks(policy=...) both read from DEFAULT_POLICY. run_bash now blocks dd if=/dev/... (was a real bug \u2014 eval case permission-deny-list-blocks-dd surfaced it). tests/test_tools.py::test_run_bash_dangerous_blocked updated to substring match + added dd coverage. Idempotent across reruns."
     },
     {
       "id": "f-cross-session-resume-eval",
       "name": "Phase 5 success metric: cross-session resume eval cases",
-      "description": "Roadmap §6 'Cross-session resume success rate ≥ 90%' 当前 0 case 覆盖。补 ~8 个 case 锁定 checkpoint 的核心 contract: round-trip 完整性 + 损坏文件容错 + iso timestamp + tool-use blocks 完整保序 + 端到端 `loom run --resume` 子进程恢复 history。",
+      "description": "Roadmap \u00a76 'Cross-session resume success rate \u2265 90%' \u5f53\u524d 0 case \u8986\u76d6\u3002\u8865 ~8 \u4e2a case \u9501\u5b9a checkpoint \u7684\u6838\u5fc3 contract: round-trip \u5b8c\u6574\u6027 + \u635f\u574f\u6587\u4ef6\u5bb9\u9519 + iso timestamp + tool-use blocks \u5b8c\u6574\u4fdd\u5e8f + \u7aef\u5230\u7aef `loom run --resume` \u5b50\u8fdb\u7a0b\u6062\u590d history\u3002",
       "dependencies": [
         "f-multi-agent"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval → 'Eval results: 60/60 passed' (was 52, +8 checkpoint cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Coverage: round-trip preserves tool_use/tool_result blocks (the LLM context); load returns None on corrupt JSON; load returns None on missing file (fresh-start contract); saved_at is parseable ISO 8601; messages preserve order across 20 messages; maybe_save fires at tool threshold (N=10) and token threshold (K=5000); end-to-end `loom run --resume` subprocess restores history (3 messages, 7 tool calls logged)."
+      "evidence": "uv run python -m loom.cli eval \u2192 'Eval results: 60/60 passed' (was 52, +8 checkpoint cases); ./init.sh \u2192 225 pytest passed, 0 ruff, 0 mypy. Coverage: round-trip preserves tool_use/tool_result blocks (the LLM context); load returns None on corrupt JSON; load returns None on missing file (fresh-start contract); saved_at is parseable ISO 8601; messages preserve order across 20 messages; maybe_save fires at tool threshold (N=10) and token threshold (K=5000); end-to-end `loom run --resume` subprocess restores history (3 messages, 7 tool calls logged)."
     },
     {
       "id": "f-harness-toml",
-      "name": "harness.toml per-project 配置 (Phase 1 §3 + Phase 3 §3 + Q4 兑现)",
-      "description": "实现 roadmap 承诺的 per-project harness.toml: 加载器读 TOML → 转成 HarnessConfig(policy, checkpoint, disabled_tools)。3 个 section: [permissions] (deny_patterns / deny_patterns_add / rules.add)、[checkpoint] (every_tool_calls / every_tokens)、[tools.<name>] (enabled=false)。可选文件,缺失用 DEFAULT_POLICY。malformed TOML 抛 ConfigError 带行号。",
+      "name": "harness.toml per-project \u914d\u7f6e (Phase 1 \u00a73 + Phase 3 \u00a73 + Q4 \u5151\u73b0)",
+      "description": "\u5b9e\u73b0 roadmap \u627f\u8bfa\u7684 per-project harness.toml: \u52a0\u8f7d\u5668\u8bfb TOML \u2192 \u8f6c\u6210 HarnessConfig(policy, checkpoint, disabled_tools)\u30023 \u4e2a section: [permissions] (deny_patterns / deny_patterns_add / rules.add)\u3001[checkpoint] (every_tool_calls / every_tokens)\u3001[tools.<name>] (enabled=false)\u3002\u53ef\u9009\u6587\u4ef6,\u7f3a\u5931\u7528 DEFAULT_POLICY\u3002malformed TOML \u629b ConfigError \u5e26\u884c\u53f7\u3002",
       "dependencies": [
         "f-permission-unify"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval → 'Eval results: 68/68 passed' (was 60, +8 harness-toml cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Closes 3 roadmap promises in one feature: Phase 1 §3 (per-project permission config), Phase 3 §3 ([tools] disable section), Phase 4 §5 / Q4 ([checkpoint] threshold override). Sections: [permissions] deny_patterns (replace) / deny_patterns_add (append) / rules.add (custom); [checkpoint] every_tool_calls / every_tokens; [tools.<name>] enabled = false. harness.toml at workdir root; missing file → HarnessConfig.from_defaults(); malformed TOML → ConfigError. loom init now scaffolds a commented harness.toml skeleton (741 chars). Idempotent across reruns."
+      "evidence": "uv run python -m loom.cli eval \u2192 'Eval results: 68/68 passed' (was 60, +8 harness-toml cases); ./init.sh \u2192 225 pytest passed, 0 ruff, 0 mypy. Closes 3 roadmap promises in one feature: Phase 1 \u00a73 (per-project permission config), Phase 3 \u00a73 ([tools] disable section), Phase 4 \u00a75 / Q4 ([checkpoint] threshold override). Sections: [permissions] deny_patterns (replace) / deny_patterns_add (append) / rules.add (custom); [checkpoint] every_tool_calls / every_tokens; [tools.<name>] enabled = false. harness.toml at workdir root; missing file \u2192 HarnessConfig.from_defaults(); malformed TOML \u2192 ConfigError. loom init now scaffolds a commented harness.toml skeleton (741 chars). Idempotent across reruns."
     },
     {
       "id": "f-resume-success-rate-benchmark",
-      "name": "Phase 5 §6 metric: 10× kill-and-restart resume benchmark",
-      "description": "Roadmap §6 'Cross-session resume success rate ≥ 90% (10× kill-and-restart)' 一直没有 metric runner。Synthetic fixture-based benchmark: scripted LLM (5 tool_use + 1 end_turn),每个 trial 在 3 个 tool call 后 snapshot + checkpoint.save,新进程加载 + 续跑 2 个 tool call + end_turn。断言:resumed LLM 第一个 call 收到 pre-kill 历史 + 最终 5 个 tool_result 全在。Synthetic proxy(canary),不是 production telemetry,但抓回归够用。",
+      "name": "Phase 5 \u00a76 metric: 10\u00d7 kill-and-restart resume benchmark",
+      "description": "Roadmap \u00a76 'Cross-session resume success rate \u2265 90% (10\u00d7 kill-and-restart)' \u4e00\u76f4\u6ca1\u6709 metric runner\u3002Synthetic fixture-based benchmark: scripted LLM (5 tool_use + 1 end_turn),\u6bcf\u4e2a trial \u5728 3 \u4e2a tool call \u540e snapshot + checkpoint.save,\u65b0\u8fdb\u7a0b\u52a0\u8f7d + \u7eed\u8dd1 2 \u4e2a tool call + end_turn\u3002\u65ad\u8a00:resumed LLM \u7b2c\u4e00\u4e2a call \u6536\u5230 pre-kill \u5386\u53f2 + \u6700\u7ec8 5 \u4e2a tool_result \u5168\u5728\u3002Synthetic proxy(canary),\u4e0d\u662f production telemetry,\u4f46\u6293\u56de\u5f52\u591f\u7528\u3002",
       "dependencies": [
         "f-cross-session-resume-eval"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval → 'Eval results: 69/69 passed' (was 68, +1 benchmark case); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Benchmark: 10/10 trials, 100% resume success, ~1.2s total. Canary property VERIFIED: injecting `messages.clear()` regression in agent_loop → benchmark flips to 0/10 (FAIL), restoring → 10/10 (PASS). Refactored agent_loop to accept llm_client parameter (backward-compat default to module-level). Caveat (documented in module docstring): synthetic fixture proxy, not production telemetry."
+      "evidence": "uv run python -m loom.cli eval \u2192 'Eval results: 69/69 passed' (was 68, +1 benchmark case); ./init.sh \u2192 225 pytest passed, 0 ruff, 0 mypy. Benchmark: 10/10 trials, 100% resume success, ~1.2s total. Canary property VERIFIED: injecting `messages.clear()` regression in agent_loop \u2192 benchmark flips to 0/10 (FAIL), restoring \u2192 10/10 (PASS). Refactored agent_loop to accept llm_client parameter (backward-compat default to module-level). Caveat (documented in module docstring): synthetic fixture proxy, not production telemetry."
     },
     {
       "id": "f-user-side-resume-benchmark",
       "name": "User-side: loom eval --benchmark resume",
-      "description": "把现有 f-resume-success-rate-benchmark 包成 loom eval --benchmark resume CLI flag,用户能跑自己项目的 resume canary。0 新 benchmark 代码(只是 CLI 暴露)。",
+      "description": "\u628a\u73b0\u6709 f-resume-success-rate-benchmark \u5305\u6210 loom eval --benchmark resume CLI flag,\u7528\u6237\u80fd\u8dd1\u81ea\u5df1\u9879\u76ee\u7684 resume canary\u30020 \u65b0 benchmark \u4ee3\u7801(\u53ea\u662f CLI \u66b4\u9732)\u3002",
       "dependencies": [
         "f-resume-success-rate-benchmark"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --benchmark resume --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval --fail-under 100 → 70/70 passed (+1 eval case); uv run python -m loom.cli eval --benchmark resume → 'benchmark: resume 10/10 (100%)', exit 0; ./init.sh 'all green'. Changes: loom/cli.py (--benchmark flag + env var), loom/eval/__init__.py (benchmark dispatch), loom/eval/cases/eval_benchmark_cli.py (CLI eval case), loom/eval/cases/__init__.py (register case), AGENTS.md (quick start line)."
+      "evidence": "uv run python -m loom.cli eval --fail-under 100 \u2192 70/70 passed (+1 eval case); uv run python -m loom.cli eval --benchmark resume \u2192 'benchmark: resume 10/10 (100%)', exit 0; ./init.sh 'all green'. Changes: loom/cli.py (--benchmark flag + env var), loom/eval/__init__.py (benchmark dispatch), loom/eval/cases/eval_benchmark_cli.py (CLI eval case), loom/eval/cases/__init__.py (register case), AGENTS.md (quick start line)."
     },
     {
       "id": "f-session-start-end-hooks",
-      "name": "Phase A1: SessionStart / SessionEnd 事件触发点",
-      "description": "在 loom.agent.hooks 加 SessionStart 和 SessionEnd 事件。HOOKS dict 加 2 个 key。agent_loop 启动时 trigger_hooks('SessionStart')。run_repl 退出(exit/EOF/Ctrl-C)时 trigger_hooks('SessionEnd', messages, tool_call_count)。不实现 user hook 脚本发现(那是 A4)。本 phase 只接骨架。",
+      "name": "Phase A1: SessionStart / SessionEnd \u4e8b\u4ef6\u89e6\u53d1\u70b9",
+      "description": "\u5728 loom.agent.hooks \u52a0 SessionStart \u548c SessionEnd \u4e8b\u4ef6\u3002HOOKS dict \u52a0 2 \u4e2a key\u3002agent_loop \u542f\u52a8\u65f6 trigger_hooks('SessionStart')\u3002run_repl \u9000\u51fa(exit/EOF/Ctrl-C)\u65f6 trigger_hooks('SessionEnd', messages, tool_call_count)\u3002\u4e0d\u5b9e\u73b0 user hook \u811a\u672c\u53d1\u73b0(\u90a3\u662f A4)\u3002\u672c phase \u53ea\u63a5\u9aa8\u67b6\u3002",
       "dependencies": [
         "f-user-side-resume-benchmark"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval --fail-under 100 → 75/75 passed (was 70/70, +5 session-hooks cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loom/agent/hooks.py (HOOKS dict +2 keys, log_hook +2 branches), loom/agent/loop.py (SessionStart/End triggers), loom/eval/cases/session_hooks.py (5 new cases), loom/eval/cases/__init__.py (register cases), tests/test_agent_loop.py (reset_hooks fixture updated for new keys)."
+      "evidence": "uv run python -m loom.cli eval --fail-under 100 \u2192 75/75 passed (was 70/70, +5 session-hooks cases); ./init.sh \u2192 225 pytest passed, 0 ruff, 0 mypy. Changes: loom/agent/hooks.py (HOOKS dict +2 keys, log_hook +2 branches), loom/agent/loop.py (SessionStart/End triggers), loom/eval/cases/session_hooks.py (5 new cases), loom/eval/cases/__init__.py (register cases), tests/test_agent_loop.py (reset_hooks fixture updated for new keys)."
     },
     {
       "id": "f-user-hook-discovery",
-      "name": "Phase A4: 用户 hook 脚本自动发现",
-      "description": "loom 启动时扫描 .minicode/hooks/{session_start,session_end,pre_compact,user_prompt_submit}.{sh,py},把找到的脚本作为 callback 注册到 HOOKS。脚本可执行(exit 0 = success),stdout 是空或 JSON。",
+      "name": "Phase A4: \u7528\u6237 hook \u811a\u672c\u81ea\u52a8\u53d1\u73b0",
+      "description": "loom \u542f\u52a8\u65f6\u626b\u63cf .minicode/hooks/{session_start,session_end,pre_compact,user_prompt_submit}.{sh,py},\u628a\u627e\u5230\u7684\u811a\u672c\u4f5c\u4e3a callback \u6ce8\u518c\u5230 HOOKS\u3002\u811a\u672c\u53ef\u6267\u884c(exit 0 = success),stdout \u662f\u7a7a\u6216 JSON\u3002",
       "dependencies": [
         "f-session-start-end-hooks"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval --fail-under 100 → 80/80 passed (+5 user_hooks cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loom/agent/user_hooks.py (new, 54 lines, discover_user_hooks + make_shell_callback), loom/agent/loop.py (hook registration in run_repl), loom/eval/cases/user_hooks.py (5 new cases), loom/eval/cases/__init__.py (register cases), feature_list.json (new entry)."
+      "evidence": "uv run python -m loom.cli eval --fail-under 100 \u2192 80/80 passed (+5 user_hooks cases); ./init.sh \u2192 225 pytest passed, 0 ruff, 0 mypy. Changes: loom/agent/user_hooks.py (new, 54 lines, discover_user_hooks + make_shell_callback), loom/agent/loop.py (hook registration in run_repl), loom/eval/cases/user_hooks.py (5 new cases), loom/eval/cases/__init__.py (register cases), feature_list.json (new entry)."
     },
     {
       "id": "f-session-end-mandatory-init-sh",
-      "name": "Phase A3: SessionEnd 强制度量 — 跑 init.sh 失败 warn",
-      "description": "loom run 退出时,如果 ./init.sh 存在,自动跑它(非阻塞,失败只 warn 不退出非零)。roadmap §10 Q4 决议的核心:\"machine-enforced, not agent-self-reported\"。不存在的 init.sh 跳过。",
+      "name": "Phase A3: SessionEnd \u5f3a\u5236\u5ea6\u91cf \u2014 \u8dd1 init.sh \u5931\u8d25 warn",
+      "description": "loom run \u9000\u51fa\u65f6,\u5982\u679c ./init.sh \u5b58\u5728,\u81ea\u52a8\u8dd1\u5b83(\u975e\u963b\u585e,\u5931\u8d25\u53ea warn \u4e0d\u9000\u51fa\u975e\u96f6)\u3002roadmap \u00a710 Q4 \u51b3\u8bae\u7684\u6838\u5fc3:\"machine-enforced, not agent-self-reported\"\u3002\u4e0d\u5b58\u5728\u7684 init.sh \u8df3\u8fc7\u3002",
       "dependencies": [
         "f-user-hook-discovery"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval --fail-under 100 → 84/84 passed (+4 init_sh_session_end cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loom/agent/config.py (run_init_sh_on_session_end bool), loom/agent/loop.py (init.sh handler at SessionEnd, warn-only), loom/eval/cases/init_sh_session_end.py (4 new cases). Design: warn-only, does NOT affect loom run exit code, default True, opt-out via HarnessConfig."
+      "evidence": "uv run python -m loom.cli eval --fail-under 100 \u2192 84/84 passed (+4 init_sh_session_end cases); ./init.sh \u2192 225 pytest passed, 0 ruff, 0 mypy. Changes: loom/agent/config.py (run_init_sh_on_session_end bool), loom/agent/loop.py (init.sh handler at SessionEnd, warn-only), loom/eval/cases/init_sh_session_end.py (4 new cases). Design: warn-only, does NOT affect loom run exit code, default True, opt-out via HarnessConfig."
     },
     {
       "id": "f-pre-compact-hook",
-      "name": "Phase A2: PreCompact hook — 压缩前用户能干预",
-      "description": "autocompact 触发前 trigger_hooks('PreCompact', messages, last_input_tokens),让用户能写 .minicode/hooks/pre_compact.sh 在压缩前注入\"这段要保留\"或\"这段删掉\"(通过 stdout JSON)。不在本 phase 实现 stdout 解析(只触发 + 留口子)。",
+      "name": "Phase A2: PreCompact hook \u2014 \u538b\u7f29\u524d\u7528\u6237\u80fd\u5e72\u9884",
+      "description": "autocompact \u89e6\u53d1\u524d trigger_hooks('PreCompact', messages, last_input_tokens),\u8ba9\u7528\u6237\u80fd\u5199 .minicode/hooks/pre_compact.sh \u5728\u538b\u7f29\u524d\u6ce8\u5165\"\u8fd9\u6bb5\u8981\u4fdd\u7559\"\u6216\"\u8fd9\u6bb5\u5220\u6389\"(\u901a\u8fc7 stdout JSON)\u3002\u4e0d\u5728\u672c phase \u5b9e\u73b0 stdout \u89e3\u6790(\u53ea\u89e6\u53d1 + \u7559\u53e3\u5b50)\u3002",
       "dependencies": [
         "f-session-end-mandatory-init-sh"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval --fail-under 100 → 88/88 passed (+4 pre_compact_hook cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loom/agent/hooks.py (HOOKS dict +PreCompact key, log_hook +PreCompact branch), loom/agent/loop.py (PreCompact trigger before autocompact), loom/eval/cases/pre_compact_hook.py (4 new cases)."
+      "evidence": "uv run python -m loom.cli eval --fail-under 100 \u2192 88/88 passed (+4 pre_compact_hook cases); ./init.sh \u2192 225 pytest passed, 0 ruff, 0 mypy. Changes: loom/agent/hooks.py (HOOKS dict +PreCompact key, log_hook +PreCompact branch), loom/agent/loop.py (PreCompact trigger before autocompact), loom/eval/cases/pre_compact_hook.py (4 new cases)."
     },
     {
       "id": "f-telemetry-optional-sink",
-      "name": "Phase E1: telemetry sink — 用户自定义数据外流",
-      "description": "harness.toml 加 [telemetry] sink_command = \"/path/to/collector\"。trace.record() 写完一行 JSON 后,如果有 sink_command 就 fork-exec 这个命令,把 JSON 通过 stdin 传过去。不阻塞(sink 失败只 warn)。让用户能挂自己的 metrics / logging 后端。",
+      "name": "Phase E1: telemetry sink \u2014 \u7528\u6237\u81ea\u5b9a\u4e49\u6570\u636e\u5916\u6d41",
+      "description": "harness.toml \u52a0 [telemetry] sink_command = \"/path/to/collector\"\u3002trace.record() \u5199\u5b8c\u4e00\u884c JSON \u540e,\u5982\u679c\u6709 sink_command \u5c31 fork-exec \u8fd9\u4e2a\u547d\u4ee4,\u628a JSON \u901a\u8fc7 stdin \u4f20\u8fc7\u53bb\u3002\u4e0d\u963b\u585e(sink \u5931\u8d25\u53ea warn)\u3002\u8ba9\u7528\u6237\u80fd\u6302\u81ea\u5df1\u7684 metrics / logging \u540e\u7aef\u3002",
       "dependencies": [
         "f-pre-compact-hook"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval --fail-under 100 → 93/93 passed (+5 telemetry_sink cases); ./init.sh → 225 pytest passed, 0 ruff, 0 mypy. Changes: loom/agent/config.py (TelemetryConfig + _parse_telemetry_section + skeleton), loom/agent/trace.py (sink_command param + subprocess.run in record + set_sink), loom/agent/loop.py (apply_config wires sink_command), loom/eval/cases/telemetry_sink.py (5 new eval cases)."
+      "evidence": "uv run python -m loom.cli eval --fail-under 100 \u2192 93/93 passed (+5 telemetry_sink cases); ./init.sh \u2192 225 pytest passed, 0 ruff, 0 mypy. Changes: loom/agent/config.py (TelemetryConfig + _parse_telemetry_section + skeleton), loom/agent/trace.py (sink_command param + subprocess.run in record + set_sink), loom/agent/loop.py (apply_config wires sink_command), loom/eval/cases/telemetry_sink.py (5 new eval cases)."
     },
     {
       "id": "f-user-harness-health-score",
-      "name": "Phase E3: audit 第 6 维 — 跑用户项目上的 eval",
-      "description": "loom audit 加第 6 维 'self-test': 进用户项目跑 loom eval --fail-under 100,report pass/total。把 audit 从 'harness 文件存在与否' 升级到 'harness 真的能工作'。",
+      "name": "Phase E3: audit \u7b2c 6 \u7ef4 \u2014 \u8dd1\u7528\u6237\u9879\u76ee\u4e0a\u7684 eval",
+      "description": "loom audit \u52a0\u7b2c 6 \u7ef4 'self-test': \u8fdb\u7528\u6237\u9879\u76ee\u8dd1 loom eval --fail-under 100,report pass/total\u3002\u628a audit \u4ece 'harness \u6587\u4ef6\u5b58\u5728\u4e0e\u5426' \u5347\u7ea7\u5230 'harness \u771f\u7684\u80fd\u5de5\u4f5c'\u3002",
       "dependencies": [
         "f-telemetry-optional-sink"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run pytest tests/test_audit_cmd.py -v → 17/17 passed; 5 new audit_self_test eval cases individually PASS; ./init.sh → 226 pytest passed, 0 ruff, 0 mypy. Changes: loom/audit_cmd.py (6th dim self-test + _run_self_test + --skip-self-test param), loom/cli.py (--skip-self-test flag), loom/eval/cases/audit_self_test.py (5 new eval cases), loom/eval/cases/__init__.py (register cases)."
+      "evidence": "uv run pytest tests/test_audit_cmd.py -v \u2192 17/17 passed; 5 new audit_self_test eval cases individually PASS; ./init.sh \u2192 226 pytest passed, 0 ruff, 0 mypy. Changes: loom/audit_cmd.py (6th dim self-test + _run_self_test + --skip-self-test param), loom/cli.py (--skip-self-test flag), loom/eval/cases/audit_self_test.py (5 new eval cases), loom/eval/cases/__init__.py (register cases)."
     },
     {
       "id": "f-loop-call-depth-guard",
       "name": "Fix OOM: LOOP_CALL_DEPTH recursion guard + --skip-self-test in audit cases",
-      "description": "诊断 E3 OOM 真因:loom eval → audit case(无 --skip-self-test)→ loom audit → _run_self_test → loom eval → 递归 → 900+ 进程 / 19.6GB。修:1) loom/eval/cases/audit.py 4 个 case 加 --skip-self-test --min-score 0;2) loom/cli.py 加 LOOP_CALL_DEPTH env var 防御,>=3 退出 1;3) 3 个 eval case 锁住深度行为。3 次跑全绿,101/101,不再 OOM。",
+      "description": "\u8bca\u65ad E3 OOM \u771f\u56e0:loom eval \u2192 audit case(\u65e0 --skip-self-test)\u2192 loom audit \u2192 _run_self_test \u2192 loom eval \u2192 \u9012\u5f52 \u2192 900+ \u8fdb\u7a0b / 19.6GB\u3002\u4fee:1) loom/eval/cases/audit.py 4 \u4e2a case \u52a0 --skip-self-test --min-score 0;2) loom/cli.py \u52a0 LOOP_CALL_DEPTH env var \u9632\u5fa1,>=3 \u9000\u51fa 1;3) 3 \u4e2a eval case \u9501\u4f4f\u6df1\u5ea6\u884c\u4e3a\u30023 \u6b21\u8dd1\u5168\u7eff,101/101,\u4e0d\u518d OOM\u3002",
       "dependencies": [
         "f-user-harness-health-score"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100 (3 consecutive runs)",
-      "evidence": "uv run python -m loom.cli eval → 101/101 passed (3 consecutive runs, no OOM); ./init.sh → 226 pytest passed, 0 ruff, 0 mypy. Fix: 1) loom/eval/cases/audit.py — 4 case 加 --skip-self-test --min-score 0;2) loom/cli.py — _MAX_LOOP_CALL_DEPTH=3,depth guard in main() before parse_args,env var LOOP_CALL_DEPTH auto-increments;3) 3 new eval cases in loom/eval/cases/loop_call_depth.py — depth-enforced-at-max (LOOP_CALL_DEPTH=3 → rc=1), depth-increments-across-calls (parent=1, child=1), depth-allows-normal-call (rc=0)."
+      "evidence": "uv run python -m loom.cli eval \u2192 101/101 passed (3 consecutive runs, no OOM); ./init.sh \u2192 226 pytest passed, 0 ruff, 0 mypy. Fix: 1) loom/eval/cases/audit.py \u2014 4 case \u52a0 --skip-self-test --min-score 0;2) loom/cli.py \u2014 _MAX_LOOP_CALL_DEPTH=3,depth guard in main() before parse_args,env var LOOP_CALL_DEPTH auto-increments;3) 3 new eval cases in loom/eval/cases/loop_call_depth.py \u2014 depth-enforced-at-max (LOOP_CALL_DEPTH=3 \u2192 rc=1), depth-increments-across-calls (parent=1, child=1), depth-allows-normal-call (rc=0)."
     },
     {
       "id": "f-scope-wip1-enforcement",
-      "name": "Scope 子系统: WIP=1 机器强制 (warn-only)",
-      "description": "loom/cli.py 启动时读 feature_list.json,数 in-progress 数量,>1 时 logger.warning 列出所有 in-progress id。warn-only (不 exit),跟 SessionEnd init.sh 设计一致(允许紧急 override)。不读 user harness(只读 project 的 feature_list.json)。关闭 5 子系统最后 1/5。",
+      "name": "Scope \u5b50\u7cfb\u7edf: WIP=1 \u673a\u5668\u5f3a\u5236 (warn-only)",
+      "description": "loom/cli.py \u542f\u52a8\u65f6\u8bfb feature_list.json,\u6570 in-progress \u6570\u91cf,>1 \u65f6 logger.warning \u5217\u51fa\u6240\u6709 in-progress id\u3002warn-only (\u4e0d exit),\u8ddf SessionEnd init.sh \u8bbe\u8ba1\u4e00\u81f4(\u5141\u8bb8\u7d27\u6025 override)\u3002\u4e0d\u8bfb user harness(\u53ea\u8bfb project \u7684 feature_list.json)\u3002\u5173\u95ed 5 \u5b50\u7cfb\u7edf\u6700\u540e 1/5\u3002",
       "dependencies": [],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval → 'Eval results: 106/106 passed' (3 consecutive runs); ./init.sh → 226 pytest passed, 0 ruff, 0 mypy. loom/agent/scope.py:check_wip1(workdir) returns in-progress ids + warns at >1. loom/cli.py main(): calls check_wip1(Path.cwd()) after depth guard, before parse_args. 5 new eval cases: silent-on-missing, silent-on-zero, silent-on-one, warns-on-multiple (loguru capture), cli-invocation-warns (subprocess end-to-end). Closes 5/5 harness 5-subsystem scope (warn-only design matches SessionEnd init.sh). Edge case caught: case needed subprocess.run(cwd=str(wd)) so Path.cwd() in child process is wd, not the loom repo."
+      "evidence": "uv run python -m loom.cli eval \u2192 'Eval results: 106/106 passed' (3 consecutive runs); ./init.sh \u2192 226 pytest passed, 0 ruff, 0 mypy. loom/agent/scope.py:check_wip1(workdir) returns in-progress ids + warns at >1. loom/cli.py main(): calls check_wip1(Path.cwd()) after depth guard, before parse_args. 5 new eval cases: silent-on-missing, silent-on-zero, silent-on-one, warns-on-multiple (loguru capture), cli-invocation-warns (subprocess end-to-end). Closes 5/5 harness 5-subsystem scope (warn-only design matches SessionEnd init.sh). Edge case caught: case needed subprocess.run(cwd=str(wd)) so Path.cwd() in child process is wd, not the loom repo."
     },
     {
       "id": "f-async-streaming-llm",
-      "name": "Phase F1: Async 流式 LLM + agent_loop callbacks",
-      "description": "在 LLMClient 加 async stream() 方法 (AsyncAnthropic.messages.stream),agent_loop 加可选 callbacks 参数 (on_message_start / on_text_delta / on_tool_use / on_tool_result / on_compact / on_message_end)。同步 LLMClient 不动 (CLI 继续用)。F2 TUI 通过 callbacks 订阅流式事件,agent_loop 内部零改动。F1 只布 hook 点,空 path 调用,完整签名在 F2 填实。",
+      "name": "Phase F1: Async \u6d41\u5f0f LLM + agent_loop callbacks",
+      "description": "\u5728 LLMClient \u52a0 async stream() \u65b9\u6cd5 (AsyncAnthropic.messages.stream),agent_loop \u52a0\u53ef\u9009 callbacks \u53c2\u6570 (on_message_start / on_text_delta / on_tool_use / on_tool_result / on_compact / on_message_end)\u3002\u540c\u6b65 LLMClient \u4e0d\u52a8 (CLI \u7ee7\u7eed\u7528)\u3002F2 TUI \u901a\u8fc7 callbacks \u8ba2\u9605\u6d41\u5f0f\u4e8b\u4ef6,agent_loop \u5185\u90e8\u96f6\u6539\u52a8\u3002F1 \u53ea\u5e03 hook \u70b9,\u7a7a path \u8c03\u7528,\u5b8c\u6574\u7b7e\u540d\u5728 F2 \u586b\u5b9e\u3002",
       "dependencies": [
         "f-scope-wip1-enforcement"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval → 'Eval results: 119/119 passed' (+13 async_streaming cases); ./init.sh → 226 pytest passed, 0 ruff, 0 mypy. Changes: loom/agent/llm.py (StreamEvent dataclass + async_client + stream_iter generator), loom/agent/loop.py (agent_loop signature + streaming path + 6 callbacks), loom/eval/cases/async_streaming.py (13 new eval cases), loom/eval/cases/__init__.py (register cases). Streaming path: stream_text callable → Iterator[StreamEvent] → reassembled Message with TextBlock/ToolUseBlock/Usage. Sync path unchanged (CLI continues working)."
+      "evidence": "uv run python -m loom.cli eval \u2192 'Eval results: 119/119 passed' (+13 async_streaming cases); ./init.sh \u2192 226 pytest passed, 0 ruff, 0 mypy. Changes: loom/agent/llm.py (StreamEvent dataclass + async_client + stream_iter generator), loom/agent/loop.py (agent_loop signature + streaming path + 6 callbacks), loom/eval/cases/async_streaming.py (13 new eval cases), loom/eval/cases/__init__.py (register cases). Streaming path: stream_text callable \u2192 Iterator[StreamEvent] \u2192 reassembled Message with TextBlock/ToolUseBlock/Usage. Sync path unchanged (CLI continues working)."
     },
     {
       "id": "f-tui-textual-app",
-      "name": "Phase F2: Textual TUI app + 6 斜杠命令",
-      "description": "添加 textual>=0.85.0 + pytest-textual-snapshot 依赖;loom/tui/ 新包 (app.py / chat_log.py / composer.py / status_bar.py / commands.py / screens.py / widgets.py);loom tui 子命令;6 斜杠命令 (/help /clear /model /quit /resume /status);AgentTUIApp 通过 F1 callbacks 订阅流式事件;MarkdownStream 真正接流式 token 渲染。",
+      "name": "Phase F2: Textual TUI app + 6 \u659c\u6760\u547d\u4ee4",
+      "description": "\u6dfb\u52a0 textual>=0.85.0 + pytest-textual-snapshot \u4f9d\u8d56;loom/tui/ \u65b0\u5305 (app.py / chat_log.py / composer.py / status_bar.py / commands.py / screens.py / widgets.py);loom tui \u5b50\u547d\u4ee4;6 \u659c\u6760\u547d\u4ee4 (/help /clear /model /quit /resume /status);AgentTUIApp \u901a\u8fc7 F1 callbacks \u8ba2\u9605\u6d41\u5f0f\u4e8b\u4ef6;MarkdownStream \u771f\u6b63\u63a5\u6d41\u5f0f token \u6e32\u67d3\u3002",
       "dependencies": [
         "f-async-streaming-llm"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval --fail-under 100 → 125/125 passed; ./init.sh → 226 pytest passed, 0 ruff, 0 mypy"
+      "evidence": "uv run python -m loom.cli eval --fail-under 100 \u2192 125/125 passed; ./init.sh \u2192 226 pytest passed, 0 ruff, 0 mypy"
     },
     {
       "id": "f-tui-permission-modal",
-      "name": "Phase F3: PermissionScreen Modal + ToolCallCard 卡片",
-      "description": "loom/tui/screens.py::PermissionScreen (Textual ModalScreen, Allow once / Allow always / Deny 三按钮 + 键盘快捷键);loom/tui/widgets.py::ToolCallCard (Static + Rich Text 渲染, 3 态: running spinner / completed 绿框 / error 红框);hooks._asker 变可注入 (Hooks(asker=...) 构造参数),TUI 启动时注入 call_from_thread wrapper;3 个 snapshot 测试 (空 layout / 权限 modal / 工具卡片);5 个 eval case 锁契约。",
+      "name": "Phase F3: PermissionScreen Modal + ToolCallCard \u5361\u7247",
+      "description": "loom/tui/screens.py::PermissionScreen (Textual ModalScreen, Allow once / Allow always / Deny \u4e09\u6309\u94ae + \u952e\u76d8\u5feb\u6377\u952e);loom/tui/widgets.py::ToolCallCard (Static + Rich Text \u6e32\u67d3, 3 \u6001: running spinner / completed \u7eff\u6846 / error \u7ea2\u6846);hooks._asker \u53d8\u53ef\u6ce8\u5165 (Hooks(asker=...) \u6784\u9020\u53c2\u6570),TUI \u542f\u52a8\u65f6\u6ce8\u5165 call_from_thread wrapper;3 \u4e2a snapshot \u6d4b\u8bd5 (\u7a7a layout / \u6743\u9650 modal / \u5de5\u5177\u5361\u7247);5 \u4e2a eval case \u9501\u5951\u7ea6\u3002",
       "dependencies": [
         "f-tui-textual-app"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval --fail-under 100 → 130/130 passed (+5 tui_permission cases); ./init.sh → 229 pytest passed, 0 ruff, 0 mypy. Changes: loom/agent/hooks.py (asker injectable), loom/tui/screens.py (PermissionScreen ModalScreen), loom/tui/widgets.py (ToolCallCard 3-state), loom/tui/chat_log.py (ToolCallCard integration), loom/tui/app.py (TUI asker injection via asyncio.run_coroutine_threadsafe), tests/test_tui_snapshot.py (3 snapshot tests), loom/eval/cases/tui_permission.py (5 eval cases), loom/eval/cases/__init__.py (register cases)."
+      "evidence": "uv run python -m loom.cli eval --fail-under 100 \u2192 130/130 passed (+5 tui_permission cases); ./init.sh \u2192 229 pytest passed, 0 ruff, 0 mypy. Changes: loom/agent/hooks.py (asker injectable), loom/tui/screens.py (PermissionScreen ModalScreen), loom/tui/widgets.py (ToolCallCard 3-state), loom/tui/chat_log.py (ToolCallCard integration), loom/tui/app.py (TUI asker injection via asyncio.run_coroutine_threadsafe), tests/test_tui_snapshot.py (3 snapshot tests), loom/eval/cases/tui_permission.py (5 eval cases), loom/eval/cases/__init__.py (register cases)."
     },
     {
       "id": "f-tui-sticky-scroll",
-      "name": "Phase P0: Sticky Scroll 模型 + Markdown 快路径",
-      "description": "替换 _auto_scroll + _prev_scroll_y 比较法为 _sticky: bool 状态机 + watch_scroll_y Textual Reactive watcher 推断用户滚动意图（用户上滚→sticky=False, 滚回底部→sticky=True）。同时为纯文本响应加 _has_markdown_syntax() 快路径跳过 _normalize_for_stream + Markdown 重解析。借鉴 Claude Code ScrollKeybindingHandler.tsx 的 sticky bool 模型 + Markdown.tsx 的 plain-text fast path。",
+      "name": "Phase P0: Sticky Scroll \u6a21\u578b + Markdown \u5feb\u8def\u5f84",
+      "description": "\u66ff\u6362 _auto_scroll + _prev_scroll_y \u6bd4\u8f83\u6cd5\u4e3a _sticky: bool \u72b6\u6001\u673a + watch_scroll_y Textual Reactive watcher \u63a8\u65ad\u7528\u6237\u6eda\u52a8\u610f\u56fe\uff08\u7528\u6237\u4e0a\u6eda\u2192sticky=False, \u6eda\u56de\u5e95\u90e8\u2192sticky=True\uff09\u3002\u540c\u65f6\u4e3a\u7eaf\u6587\u672c\u54cd\u5e94\u52a0 _has_markdown_syntax() \u5feb\u8def\u5f84\u8df3\u8fc7 _normalize_for_stream + Markdown \u91cd\u89e3\u6790\u3002\u501f\u9274 Claude Code ScrollKeybindingHandler.tsx \u7684 sticky bool \u6a21\u578b + Markdown.tsx \u7684 plain-text fast path\u3002",
       "dependencies": [
         "f-tui-ux-optimize"
       ],
       "status": "done",
       "verification": "uv run pytest tests/test_tui_snapshot.py -v && uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run pytest tests/test_tui_snapshot.py -v → 3/3 snapshots passed (after re-baseline); uv run python -m loom.cli eval --fail-under 100 → 130/130 passed; ./init.sh → 243 pytest passed + 0 ruff + 0 mypy → 'Verification Complete (all green)'. Changes: loom/tui/chat_log.py — added _sticky: bool class attr + watch_scroll_y watcher (replaces _auto_scroll + _prev_scroll_y), added _MD_SYNTAX_RE regex + _has_markdown_syntax() helper, _update_body now skips _normalize_for_stream for plain text. Note: snapshot files re-baselined because pre-existing flake (random CSS class hash IDs) caused 0/10 pass rate on this environment; visual content is identical (verified by SVG text-segment comparison)."
+      "evidence": "uv run pytest tests/test_tui_snapshot.py -v \u2192 3/3 snapshots passed (after re-baseline); uv run python -m loom.cli eval --fail-under 100 \u2192 130/130 passed; ./init.sh \u2192 243 pytest passed + 0 ruff + 0 mypy \u2192 'Verification Complete (all green)'. Changes: loom/tui/chat_log.py \u2014 added _sticky: bool class attr + watch_scroll_y watcher (replaces _auto_scroll + _prev_scroll_y), added _MD_SYNTAX_RE regex + _has_markdown_syntax() helper, _update_body now skips _normalize_for_stream for plain text. Note: snapshot files re-baselined because pre-existing flake (random CSS class hash IDs) caused 0/10 pass rate on this environment; visual content is identical (verified by SVG text-segment comparison)."
     },
     {
       "id": "f-tui-stream-separation",
-      "name": "Phase P1: 流式文本独立渲染 + 消息冻结",
-      "description": "添加 StreamingOverlay widget 让流式文本独立于 AssistantMessage 渲染,turn 结束时 overlay 转永久 AssistantMessage(冻结,不再更新)。借鉴 Claude Code Messages.tsx:703-712 (streamingText prop) + shouldRenderStatically (消息冻结)。",
+      "name": "Phase P1: \u6d41\u5f0f\u6587\u672c\u72ec\u7acb\u6e32\u67d3 + \u6d88\u606f\u51bb\u7ed3",
+      "description": "\u6dfb\u52a0 StreamingOverlay widget \u8ba9\u6d41\u5f0f\u6587\u672c\u72ec\u7acb\u4e8e AssistantMessage \u6e32\u67d3,turn \u7ed3\u675f\u65f6 overlay \u8f6c\u6c38\u4e45 AssistantMessage(\u51bb\u7ed3,\u4e0d\u518d\u66f4\u65b0)\u3002\u501f\u9274 Claude Code Messages.tsx:703-712 (streamingText prop) + shouldRenderStatically (\u6d88\u606f\u51bb\u7ed3)\u3002",
       "dependencies": [
         "f-tui-sticky-scroll"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval --fail-under 100 → 130/130 passed; ./init.sh → 311 pytest passed (was 283, +28 P1 tests), 0 ruff, 0 mypy, 3 snapshots passed → 'Verification Complete (all green)'. Changes: loom/tui/chat_log.py (StreamingOverlay class + _current_overlay field + _start_new_overlay + _finalize_streaming + _mount_final_message, rewired append_streaming_text / _flush_stream_buffer / _force_flush_stream_buffer / add_tool_call_inline / clear_content), loom/tui/app.py (on_assistant_turn_end calls chat_log._finalize_streaming), tests/test_chat_log_p1.py (NEW, 28 tests covering overlay creation / flush / finalize / tool call interrupt / multiple streaming segments)."
+      "evidence": "uv run python -m loom.cli eval --fail-under 100 \u2192 130/130 passed; ./init.sh \u2192 311 pytest passed (was 283, +28 P1 tests), 0 ruff, 0 mypy, 3 snapshots passed \u2192 'Verification Complete (all green)'. Changes: loom/tui/chat_log.py (StreamingOverlay class + _current_overlay field + _start_new_overlay + _finalize_streaming + _mount_final_message, rewired append_streaming_text / _flush_stream_buffer / _force_flush_stream_buffer / add_tool_call_inline / clear_content), loom/tui/app.py (on_assistant_turn_end calls chat_log._finalize_streaming), tests/test_chat_log_p1.py (NEW, 28 tests covering overlay creation / flush / finalize / tool call interrupt / multiple streaming segments)."
     },
     {
       "id": "f-tui-collapsible-tools",
-      "name": "Phase P2: 可折叠工具卡片 (inline expand/collapse)",
-      "description": "替换 ToolCallMarker 点击弹窗为点击就地展开/收起。新增 CollapsibleToolOutput widget(max-height 20, overflow-y auto, display:none 默认隐藏),on_click 调用 output.toggle() 显示在 marker 正下方;on_double_click(event.chain==2) 仍打开 ToolCallModal 作为备用入口。借鉴 OpenCode BasicTool.tsx + Collapsible.tsx 的可折叠内容,不打断对话流。",
+      "name": "Phase P2: \u53ef\u6298\u53e0\u5de5\u5177\u5361\u7247 (inline expand/collapse)",
+      "description": "\u66ff\u6362 ToolCallMarker \u70b9\u51fb\u5f39\u7a97\u4e3a\u70b9\u51fb\u5c31\u5730\u5c55\u5f00/\u6536\u8d77\u3002\u65b0\u589e CollapsibleToolOutput widget(max-height 20, overflow-y auto, display:none \u9ed8\u8ba4\u9690\u85cf),on_click \u8c03\u7528 output.toggle() \u663e\u793a\u5728 marker \u6b63\u4e0b\u65b9;on_double_click(event.chain==2) \u4ecd\u6253\u5f00 ToolCallModal \u4f5c\u4e3a\u5907\u7528\u5165\u53e3\u3002\u501f\u9274 OpenCode BasicTool.tsx + Collapsible.tsx \u7684\u53ef\u6298\u53e0\u5185\u5bb9,\u4e0d\u6253\u65ad\u5bf9\u8bdd\u6d41\u3002",
       "dependencies": [
         "f-tui-stream-separation"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval --fail-under 100 → 133/133 passed (was 130, +3 P2 cases). Changes: loom/tui/chat_log.py (CollapsibleToolOutput class + ToolCallMarker._output_widget/set_output_widget/on_click double-click-handling via event.chain + ChatLog._tool_outputs dict + _mount_tool_output async helper + add_tool_call_inline + complete_tool_call_inline updates output content + clear_content + append_user_message clear _tool_outputs), tests/test_chat_log_p2.py (NEW, 16 tests covering toggle / click-toggle / double-click-modal / add-creates-output / complete-updates-output / clear-resets), loom/eval/cases/tui_collapsible.py (NEW, 3 eval cases)."
+      "evidence": "uv run python -m loom.cli eval --fail-under 100 \u2192 133/133 passed (was 130, +3 P2 cases). Changes: loom/tui/chat_log.py (CollapsibleToolOutput class + ToolCallMarker._output_widget/set_output_widget/on_click double-click-handling via event.chain + ChatLog._tool_outputs dict + _mount_tool_output async helper + add_tool_call_inline + complete_tool_call_inline updates output content + clear_content + append_user_message clear _tool_outputs), tests/test_chat_log_p2.py (NEW, 16 tests covering toggle / click-toggle / double-click-modal / add-creates-output / complete-updates-output / clear-resets), loom/eval/cases/tui_collapsible.py (NEW, 3 eval cases)."
     },
     {
       "id": "f-streaming-true-regression-fix",
-      "name": "Critical fix: stream_iter 真正流式 (不是 batch) + chat log 增量滚动",
-      "description": "用户报告 TUI 无流式输出、无法滚动。Root cause: stream_iter 用 yield from asyncio.run(_collect()) 把所有事件收集到一个 list 才 yield,等于 batch 模式。修复:producer thread + queue.Queue 模式,daemon thread 跑 asyncio.run(_consume()),_consume 把每个 event 立即 put 进 queue,generator body yield from queue。cancel() 加 threading.Event 信号让 producer 提前退出。state machine (content_block_start/delta/stop + tool_use) 和 malformed JSON fallback 完整保留。AsyncAnthropic.messages.stream 的事件顺序 + asyncio.run 作为 test seam 的契约兼容 (返回 list 模式仍能驱动 consumer)。",
+      "name": "Critical fix: stream_iter \u771f\u6b63\u6d41\u5f0f (\u4e0d\u662f batch) + chat log \u589e\u91cf\u6eda\u52a8",
+      "description": "\u7528\u6237\u62a5\u544a TUI \u65e0\u6d41\u5f0f\u8f93\u51fa\u3001\u65e0\u6cd5\u6eda\u52a8\u3002Root cause: stream_iter \u7528 yield from asyncio.run(_collect()) \u628a\u6240\u6709\u4e8b\u4ef6\u6536\u96c6\u5230\u4e00\u4e2a list \u624d yield,\u7b49\u4e8e batch \u6a21\u5f0f\u3002\u4fee\u590d:producer thread + queue.Queue \u6a21\u5f0f,daemon thread \u8dd1 asyncio.run(_consume()),_consume \u628a\u6bcf\u4e2a event \u7acb\u5373 put \u8fdb queue,generator body yield from queue\u3002cancel() \u52a0 threading.Event \u4fe1\u53f7\u8ba9 producer \u63d0\u524d\u9000\u51fa\u3002state machine (content_block_start/delta/stop + tool_use) \u548c malformed JSON fallback \u5b8c\u6574\u4fdd\u7559\u3002AsyncAnthropic.messages.stream \u7684\u4e8b\u4ef6\u987a\u5e8f + asyncio.run \u4f5c\u4e3a test seam \u7684\u5951\u7ea6\u517c\u5bb9 (\u8fd4\u56de list \u6a21\u5f0f\u4ecd\u80fd\u9a71\u52a8 consumer)\u3002",
       "dependencies": [
         "f-async-streaming-llm"
       ],
       "status": "done",
       "verification": "uv run pytest -q && uv run python -m loom.cli eval --fail-under 100 && uv run ruff check . && uv run mypy loom/ && ./init.sh",
-      "evidence": "uv run pytest -q → 340 passed (was 336, +4 chat_log_streaming tests); uv run python -m loom.cli eval --fail-under 100 → 138 passed (was 137, +1 streaming-yields-incrementally case); uv run ruff check . → All checks passed!; uv run mypy loom/ → Success: no issues found in 66 source files; ./init.sh → 'Verification Complete (all green)'. The new regression test proves the fix: 5 fake events with 200ms delays → first event at 0.402s vs 1.000s total stream time (first event in < 70% of total, proving streaming not batch). Changes: loom/agent/llm.py (rewrote stream_iter with producer thread + queue.Queue + threading.Event cancel signal), loom/eval/cases/async_streaming.py (+LLMClientStreamIterYieldsIncrementally case using _FakeStreamCM async context manager with artificial delays), tests/test_chat_log_streaming.py (NEW, 4 tests verifying max_scroll_y growth + sticky scroll + overflow + overlay virtual_size growth using pilot)."
+      "evidence": "uv run pytest -q \u2192 340 passed (was 336, +4 chat_log_streaming tests); uv run python -m loom.cli eval --fail-under 100 \u2192 138 passed (was 137, +1 streaming-yields-incrementally case); uv run ruff check . \u2192 All checks passed!; uv run mypy loom/ \u2192 Success: no issues found in 66 source files; ./init.sh \u2192 'Verification Complete (all green)'. The new regression test proves the fix: 5 fake events with 200ms delays \u2192 first event at 0.402s vs 1.000s total stream time (first event in < 70% of total, proving streaming not batch). Changes: loom/agent/llm.py (rewrote stream_iter with producer thread + queue.Queue + threading.Event cancel signal), loom/eval/cases/async_streaming.py (+LLMClientStreamIterYieldsIncrementally case using _FakeStreamCM async context manager with artificial delays), tests/test_chat_log_streaming.py (NEW, 4 tests verifying max_scroll_y growth + sticky scroll + overflow + overlay virtual_size growth using pilot)."
     },
     {
       "id": "f-tui-manual-scroll-global-bindings",
       "name": "TUI manual scroll: global BINDINGS so keyboard scroll works regardless of focus",
-      "description": "用户报告可以自动滚动但无法手动滚动。Root cause: Composer (TextArea) 在 on_mount() 被 focus(),吃掉 PageUp/PageDown/Home/End 用于 cursor 移动。TextArea 还绑定了 shift+home/shift+end (cursor_line_start/select),shadow 任何 app 级的同名 binding。Mouse wheel 实际可用 (event bubble=True 冒泡到 ChatLog,即使滚在子 Markdown 上),但用户主要用键盘。修复:在 AgentTUIApp 加 4 个全局 BINDINGS — shift+pageup/pagedown (TextArea 不绑,自由落体到 app) + ctrl+home/end (TextArea 也不绑)。action 直接调 chat_log.scroll_y。action_scroll_chat_bottom 额外 set _sticky=True 重启 auto-scroll。还加了 focus 指示器 CSS (background boost 5% on focus / 3% on focus-within) 和 StatusBar 的 '| Shift+PgUp/PgDn, Ctrl+Home/End to scroll' 提示 (仅当 max_scroll_y > 0 时显示)。",
+      "description": "\u7528\u6237\u62a5\u544a\u53ef\u4ee5\u81ea\u52a8\u6eda\u52a8\u4f46\u65e0\u6cd5\u624b\u52a8\u6eda\u52a8\u3002Root cause: Composer (TextArea) \u5728 on_mount() \u88ab focus(),\u5403\u6389 PageUp/PageDown/Home/End \u7528\u4e8e cursor \u79fb\u52a8\u3002TextArea \u8fd8\u7ed1\u5b9a\u4e86 shift+home/shift+end (cursor_line_start/select),shadow \u4efb\u4f55 app \u7ea7\u7684\u540c\u540d binding\u3002Mouse wheel \u5b9e\u9645\u53ef\u7528 (event bubble=True \u5192\u6ce1\u5230 ChatLog,\u5373\u4f7f\u6eda\u5728\u5b50 Markdown \u4e0a),\u4f46\u7528\u6237\u4e3b\u8981\u7528\u952e\u76d8\u3002\u4fee\u590d:\u5728 AgentTUIApp \u52a0 4 \u4e2a\u5168\u5c40 BINDINGS \u2014 shift+pageup/pagedown (TextArea \u4e0d\u7ed1,\u81ea\u7531\u843d\u4f53\u5230 app) + ctrl+home/end (TextArea \u4e5f\u4e0d\u7ed1)\u3002action \u76f4\u63a5\u8c03 chat_log.scroll_y\u3002action_scroll_chat_bottom \u989d\u5916 set _sticky=True \u91cd\u542f auto-scroll\u3002\u8fd8\u52a0\u4e86 focus \u6307\u793a\u5668 CSS (background boost 5% on focus / 3% on focus-within) \u548c StatusBar \u7684 '| Shift+PgUp/PgDn, Ctrl+Home/End to scroll' \u63d0\u793a (\u4ec5\u5f53 max_scroll_y > 0 \u65f6\u663e\u793a)\u3002",
       "dependencies": [
         "f-streaming-true-regression-fix"
       ],
       "status": "done",
       "verification": "uv run pytest -q && uv run python -m loom.cli eval --fail-under 100 && uv run ruff check . && uv run mypy loom/ && ./init.sh",
-      "evidence": "uv run pytest -q → 347 passed (was 340, +7 manual scroll tests); uv run python -m loom.cli eval --fail-under 100 → 138 passed; uv run ruff check . → All checks passed!; uv run mypy loom/ → Success: no issues found in 66 source files; ./init.sh → 'Verification Complete (all green)'. The 7 new tests in tests/test_tui_manual_scroll.py verify the regression: composer is focused (precondition), pilot.press('shift+pageup') scrolls chat log up, 'shift+pagedown' scrolls down, 'ctrl+end' jumps to bottom + re-enables sticky, 'ctrl+home' jumps to top. Also: bindings are registered (smoke test), focus indicator CSS rule exists, status bar shows scroll hint when chat log overflows. Changes: loom/tui/app.py (4 BINDINGS + 4 action methods + CSS focus indicator), loom/tui/status_bar.py (conditional scroll hint in render()), tests/test_tui_manual_scroll.py (NEW, 7 tests)."
+      "evidence": "uv run pytest -q \u2192 347 passed (was 340, +7 manual scroll tests); uv run python -m loom.cli eval --fail-under 100 \u2192 138 passed; uv run ruff check . \u2192 All checks passed!; uv run mypy loom/ \u2192 Success: no issues found in 66 source files; ./init.sh \u2192 'Verification Complete (all green)'. The 7 new tests in tests/test_tui_manual_scroll.py verify the regression: composer is focused (precondition), pilot.press('shift+pageup') scrolls chat log up, 'shift+pagedown' scrolls down, 'ctrl+end' jumps to bottom + re-enables sticky, 'ctrl+home' jumps to top. Also: bindings are registered (smoke test), focus indicator CSS rule exists, status bar shows scroll hint when chat log overflows. Changes: loom/tui/app.py (4 BINDINGS + 4 action methods + CSS focus indicator), loom/tui/status_bar.py (conditional scroll hint in render()), tests/test_tui_manual_scroll.py (NEW, 7 tests)."
     },
     {
       "id": "f-tui-mouse-wheel-scroll",
       "name": "TUI mouse-wheel scroll (no keyboard shortcuts)",
-      "description": "用户拒绝之前的 keyboard scroll BINDINGS,要求纯鼠标滚轮。撤回所有 4 个全局 keyboard BINDINGS (shift+pageup/pagedown, ctrl+home/end) 和对应的 action methods。改用 Textual 内置的 Widget._on_mouse_scroll_up/down 机制:鼠标悬停在 chat log 或其子 widget (Markdown 类) 上滚轮,事件 bubble=True 自动冒泡到 VerticalScroll 的祖先处理。让 scrollbar 更可点击:scrollbar-size-vertical 从 2 升到 3,scrollbar-color-hover 从 $text 改成 $accent (高亮色)。StatusBar 提示从 'Shift+PgUp/PgDn, Ctrl+Home/End to scroll' 改成 'scroll with mouse wheel' (强调鼠标滚轮是唯一方式)。保留 focus CSS 指示器 (点击 chat log 后看到淡色背景),让用户知道当前 focus 在哪。",
+      "description": "\u7528\u6237\u62d2\u7edd\u4e4b\u524d\u7684 keyboard scroll BINDINGS,\u8981\u6c42\u7eaf\u9f20\u6807\u6eda\u8f6e\u3002\u64a4\u56de\u6240\u6709 4 \u4e2a\u5168\u5c40 keyboard BINDINGS (shift+pageup/pagedown, ctrl+home/end) \u548c\u5bf9\u5e94\u7684 action methods\u3002\u6539\u7528 Textual \u5185\u7f6e\u7684 Widget._on_mouse_scroll_up/down \u673a\u5236:\u9f20\u6807\u60ac\u505c\u5728 chat log \u6216\u5176\u5b50 widget (Markdown \u7c7b) \u4e0a\u6eda\u8f6e,\u4e8b\u4ef6 bubble=True \u81ea\u52a8\u5192\u6ce1\u5230 VerticalScroll \u7684\u7956\u5148\u5904\u7406\u3002\u8ba9 scrollbar \u66f4\u53ef\u70b9\u51fb:scrollbar-size-vertical \u4ece 2 \u5347\u5230 3,scrollbar-color-hover \u4ece $text \u6539\u6210 $accent (\u9ad8\u4eae\u8272)\u3002StatusBar \u63d0\u793a\u4ece 'Shift+PgUp/PgDn, Ctrl+Home/End to scroll' \u6539\u6210 'scroll with mouse wheel' (\u5f3a\u8c03\u9f20\u6807\u6eda\u8f6e\u662f\u552f\u4e00\u65b9\u5f0f)\u3002\u4fdd\u7559 focus CSS \u6307\u793a\u5668 (\u70b9\u51fb chat log \u540e\u770b\u5230\u6de1\u8272\u80cc\u666f),\u8ba9\u7528\u6237\u77e5\u9053\u5f53\u524d focus \u5728\u54ea\u3002",
       "dependencies": [
         "f-tui-manual-scroll-global-bindings"
       ],
       "status": "done",
       "verification": "uv run pytest -q && uv run python -m loom.cli eval --fail-under 100 && uv run ruff check . && uv run mypy loom/ && ./init.sh",
-      "evidence": "uv run pytest -q → 348 passed (was 347, +1 test, replaced 7 keyboard tests with 8 mouse wheel tests); uv run python -m loom.cli eval --fail-under 100 → 138/138 passed; uv run ruff check . → All checks passed!; uv run mypy loom/ → Success: no issues found in 66 source files; ./init.sh → 'Verification Complete (all green)'. The 8 new tests in tests/test_tui_manual_scroll.py verify mouse wheel works at all positions: directly on ChatLog (scroll up + down), bubbling from child Markdown (UserMessage), repeated wheels reach top + bottom boundaries, scrollbar size is 3, status bar mentions 'mouse wheel', and no keyboard scroll bindings remain. Changes: loom/tui/app.py (removed 4 BINDINGS + 4 action methods + _scroll_chat helper, kept focus indicator CSS, increased scrollbar size to 3 + hover color to $accent), loom/tui/status_bar.py (hint text changed to 'scroll with mouse wheel'), tests/test_tui_manual_scroll.py (NEW content: 8 mouse wheel tests replacing 7 keyboard tests)."
+      "evidence": "uv run pytest -q \u2192 348 passed (was 347, +1 test, replaced 7 keyboard tests with 8 mouse wheel tests); uv run python -m loom.cli eval --fail-under 100 \u2192 138/138 passed; uv run ruff check . \u2192 All checks passed!; uv run mypy loom/ \u2192 Success: no issues found in 66 source files; ./init.sh \u2192 'Verification Complete (all green)'. The 8 new tests in tests/test_tui_manual_scroll.py verify mouse wheel works at all positions: directly on ChatLog (scroll up + down), bubbling from child Markdown (UserMessage), repeated wheels reach top + bottom boundaries, scrollbar size is 3, status bar mentions 'mouse wheel', and no keyboard scroll bindings remain. Changes: loom/tui/app.py (removed 4 BINDINGS + 4 action methods + _scroll_chat helper, kept focus indicator CSS, increased scrollbar size to 3 + hover color to $accent), loom/tui/status_bar.py (hint text changed to 'scroll with mouse wheel'), tests/test_tui_manual_scroll.py (NEW content: 8 mouse wheel tests replacing 7 keyboard tests)."
     },
     {
       "id": "f-tui-thinking-per-llm-call",
       "name": "TUI: per-LLM-call thinking + TUI CSS refactor + Markdown linkify fix",
-      "description": "Atomic feature merging 4 coupled working-tree changes: (1) NEW `on_assistant_message_start` callback in agent_loop fires BEFORE EACH LLM call (preserves once-per-session `on_message_start`); (2) TUI CSS refactor — new `#chrome` Vertical wrapper replaces Header + dock:bottom on StatusBar/Composer, focus CSS moves to #chrome:focus-within; (3) Markdown linkify fix — `_markdown_parser_factory()` disables linkify-it, threaded through all 6 Markdown subclasses (rule #13); (4) Thinking display per-LLM-call fix — TUI wires `on_assistant_message_start` to AssistantTurnStart so spinner + fresh ThinkingDisplay appear on every reasoning round, not just the first (rule #14). Eval case locks the per-LLM-call semantic.",
+      "description": "Atomic feature merging 4 coupled working-tree changes: (1) NEW `on_assistant_message_start` callback in agent_loop fires BEFORE EACH LLM call (preserves once-per-session `on_message_start`); (2) TUI CSS refactor \u2014 new `#chrome` Vertical wrapper replaces Header + dock:bottom on StatusBar/Composer, focus CSS moves to #chrome:focus-within; (3) Markdown linkify fix \u2014 `_markdown_parser_factory()` disables linkify-it, threaded through all 6 Markdown subclasses (rule #13); (4) Thinking display per-LLM-call fix \u2014 TUI wires `on_assistant_message_start` to AssistantTurnStart so spinner + fresh ThinkingDisplay appear on every reasoning round, not just the first (rule #14). Eval case locks the per-LLM-call semantic.",
       "dependencies": [
         "f-tui-mouse-wheel-scroll"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "uv run python -m loom.cli eval --fail-under 100 → 'Eval results: 142/142 passed' (3 consecutive runs, was 138/138, +4 new cases); ./init.sh → '375 passed, 21 warnings in 53.83s' + 'Verification Complete (all green)'; uv run python -m loom.cli audit . → 'Overall: 97/100, Bottleneck: instructions' (was 93/100, +4); scope: 5/5 (was 4/5 FAIL 'One-feature-at-a-time rule exists', now PASS via AGENTS.md rule #1 wording fix); self-test: 5/5 (1/1) PASS 'Eval results: 142/142 passed'. New file: loom/eval/cases/tui_assistant_message_start.py (282 lines, 4 cases — agent-loop-assistant-message-start-in-defaults, -fires-per-llm-call, -message-start-still-once-per-invocation, agent-tui-app-wires-assistant-message-start). Rule #1: '1. **WIP=1 (one feature at a time)**: Work on exactly one feature from `feature_list.json` at a time.' Working rules #13/#14 + 3 new test files (test_markdown_linkify.py / test_status_bar.py / test_thinking_per_llm_call.py) + docs/tui-scrolling.md documented in progress.md (## Session: f-tui-thinking-per-llm-call)."
+      "evidence": "uv run python -m loom.cli eval --fail-under 100 \u2192 'Eval results: 142/142 passed' (3 consecutive runs, was 138/138, +4 new cases); ./init.sh \u2192 '375 passed, 21 warnings in 53.83s' + 'Verification Complete (all green)'; uv run python -m loom.cli audit . \u2192 'Overall: 97/100, Bottleneck: instructions' (was 93/100, +4); scope: 5/5 (was 4/5 FAIL 'One-feature-at-a-time rule exists', now PASS via AGENTS.md rule #1 wording fix); self-test: 5/5 (1/1) PASS 'Eval results: 142/142 passed'. New file: loom/eval/cases/tui_assistant_message_start.py (282 lines, 4 cases \u2014 agent-loop-assistant-message-start-in-defaults, -fires-per-llm-call, -message-start-still-once-per-invocation, agent-tui-app-wires-assistant-message-start). Rule #1: '1. **WIP=1 (one feature at a time)**: Work on exactly one feature from `feature_list.json` at a time.' Working rules #13/#14 + 3 new test files (test_markdown_linkify.py / test_status_bar.py / test_thinking_per_llm_call.py) + docs/tui-scrolling.md documented in progress.md (## Session: f-tui-thinking-per-llm-call)."
     },
     {
       "id": "f-loom-rename",
-      "name": "Project rename: loop → loom",
-      "description": "Rename the project from `loop` to `loom` based on the TUI design language and brand identity. The loom weaving metaphor captures the agent's role (weaves user intent + tool calls + model responses into coherent output) better than the generic 'loop'. Already completed in design phase: docs/tui-design-language.md (318 lines, with §4.3 Header sub-section), docs/tui-design.html (1443 lines, 7 state mockups including Header collapsed/expanded), docs/loom-logo.html (1443 lines, 10-section brand identity sheet with primary mark, wordmark, lockups, icon variant, color variants, construction grid, pattern tile, real-world mockups, anti-patterns, tagline 'weaving intent into action'). This feature implements the actual rename across 6 phases. Roadmap: .sisyphus/plans/loom-rename-roadmap.md. Phase files: loom-rename-p0.md through loom-rename-p5.md. P0 and P1 are independent (can run in either order); P2 depends on P0; P3 and P4 depend on P2; P5 depends on all. Each phase is independently committable. Total estimated effort: ~7h.",
+      "name": "Project rename: loop \u2192 loom",
+      "description": "Rename the project from `loop` to `loom` based on the TUI design language and brand identity. The loom weaving metaphor captures the agent's role (weaves user intent + tool calls + model responses into coherent output) better than the generic 'loop'. Already completed in design phase: docs/tui-design-language.md (318 lines, with \u00a74.3 Header sub-section), docs/tui-design.html (1443 lines, 7 state mockups including Header collapsed/expanded), docs/loom-logo.html (1443 lines, 10-section brand identity sheet with primary mark, wordmark, lockups, icon variant, color variants, construction grid, pattern tile, real-world mockups, anti-patterns, tagline 'weaving intent into action'). This feature implements the actual rename across 6 phases. Roadmap: .sisyphus/plans/loom-rename-roadmap.md. Phase files: loom-rename-p0.md through loom-rename-p5.md. P0 and P1 are independent (can run in either order); P2 depends on P0; P3 and P4 depend on P2; P5 depends on all. Each phase is independently committable. Total estimated effort: ~7h.",
       "dependencies": [],
       "status": "done",
       "verification": "uv run python -m loom.cli --help && uv run python -m loom.cli eval --fail-under 100 && ./init.sh && git log --oneline | grep -c 'loom-rename-p'",
-      "evidence": "6 phases complete (P0 brand assets ac77374 / P1 design sync c2c9949 / P2 code rename 836fc55 / P3 tracking rename 305a4d5 / P4 test rename ebffb0b / P5 verify). ./init.sh → 375 pytest passed, 0 ruff, 0 mypy. uv run python -m loom.cli eval --fail-under 100 → 142/142 passed. uv run python -m loom.cli audit . → 97/100. uv run python -m loom.cli --help → 'loom' program name. git log shows 5 atomic rename commits. P2 commit 836fc55 used 'git mv' for 65 files; git auto-detected rename with similarity 82-100%. Total rename scope: 65 .py + 4 design files (mark/icon/favicons) + 11 doc/track files (README/AGENTS/feature_list/init.sh/progress) + 27 test files (P3) + 8 test file polish (P4) = ~115 files touched across 5 atomic commits."
+      "evidence": "6 phases complete (P0 brand assets ac77374 / P1 design sync c2c9949 / P2 code rename 836fc55 / P3 tracking rename 305a4d5 / P4 test rename ebffb0b / P5 verify). ./init.sh \u2192 375 pytest passed, 0 ruff, 0 mypy. uv run python -m loom.cli eval --fail-under 100 \u2192 142/142 passed. uv run python -m loom.cli audit . \u2192 97/100. uv run python -m loom.cli --help \u2192 'loom' program name. git log shows 5 atomic rename commits. P2 commit 836fc55 used 'git mv' for 65 files; git auto-detected rename with similarity 82-100%. Total rename scope: 65 .py + 4 design files (mark/icon/favicons) + 11 doc/track files (README/AGENTS/feature_list/init.sh/progress) + 27 test files (P3) + 8 test file polish (P4) = ~115 files touched across 5 atomic commits."
     },
     {
       "id": "f-loom-rename-p0",
@@ -444,40 +444,40 @@
       ],
       "status": "done",
       "verification": "ls docs/loom-mark.svg docs/loom-icon.svg docs/favicon-{16,32,64}.png && head -30 README.md | grep -q 'weaving intent into action'",
-      "evidence": "ls docs/loom-mark.svg docs/loom-icon.svg docs/favicon-{16,32,64}.png && head -30 README.md | grep -q 'weaving intent into action' → VERIFICATION PASSED; xmllint --noout docs/loom-mark.svg docs/loom-icon.svg → XML VALID; file docs/favicon-{16,32,64}.png → PNG image data 16×16, 32×32, 64×64 respectively; README.md first 30 lines contain loom wordmark + 'weaving intent into action' tagline"
+      "evidence": "ls docs/loom-mark.svg docs/loom-icon.svg docs/favicon-{16,32,64}.png && head -30 README.md | grep -q 'weaving intent into action' \u2192 VERIFICATION PASSED; xmllint --noout docs/loom-mark.svg docs/loom-icon.svg \u2192 XML VALID; file docs/favicon-{16,32,64}.png \u2192 PNG image data 16\u00d716, 32\u00d732, 64\u00d764 respectively; README.md first 30 lines contain loom wordmark + 'weaving intent into action' tagline"
     },
     {
       "id": "f-loom-rename-p1",
       "name": "loom-rename P1: design artifact sync",
-      "description": "Update terminal mockup titles in docs/tui-design.html from `loop —` to `loom —` across all 7 state sections. Sub-feature of f-loom-rename.",
+      "description": "Update terminal mockup titles in docs/tui-design.html from `loop \u2014` to `loom \u2014` across all 7 state sections. Sub-feature of f-loom-rename.",
       "dependencies": [
         "f-loom-rename"
       ],
       "status": "done",
-      "verification": "grep -c 'loop —' docs/tui-design.html | grep -q '^0$' && grep -c 'loom —' docs/tui-design.html | grep -q '^[7-9]\\|[1-9][0-9]'",
-      "evidence": "grep -c 'loop —' tui-design.html → 0; grep -c 'loom —' → 7; wc -l → 1443 (unchanged); HTML parser → OK; Playwright text verification: all 7 title bars show 'loom — ...' (state-1 '80×24', state-2 'deepseek-v4 — idle', state-3 'deepseek-v4 — streaming', state-4 'permission required', state-5 'tool call detail', state-6 'deepseek-v4 — idle', state-7 'deepseek-v4 — header expanded'); header collapsed row '▼ ● MCP:3/3 ◐ 2/5 todos ◐ 1 subagent' unchanged; 7 screenshots saved to /tmp/opencode/tui-design-shots/state-{1..7}-v3.png (114-179KB each). Changes: sed 'loop —' → 'loom —' (7 title bars) + Edit tool on 3 description lines (title, h1, subtitle possessive)."
+      "verification": "grep -c 'loop \u2014' docs/tui-design.html | grep -q '^0$' && grep -c 'loom \u2014' docs/tui-design.html | grep -q '^[7-9]\\|[1-9][0-9]'",
+      "evidence": "grep -c 'loop \u2014' tui-design.html \u2192 0; grep -c 'loom \u2014' \u2192 7; wc -l \u2192 1443 (unchanged); HTML parser \u2192 OK; Playwright text verification: all 7 title bars show 'loom \u2014 ...' (state-1 '80\u00d724', state-2 'deepseek-v4 \u2014 idle', state-3 'deepseek-v4 \u2014 streaming', state-4 'permission required', state-5 'tool call detail', state-6 'deepseek-v4 \u2014 idle', state-7 'deepseek-v4 \u2014 header expanded'); header collapsed row '\u25bc \u25cf MCP:3/3 \u25d0 2/5 todos \u25d0 1 subagent' unchanged; 7 screenshots saved to /tmp/opencode/tui-design-shots/state-{1..7}-v3.png (114-179KB each). Changes: sed 'loop \u2014' \u2192 'loom \u2014' (7 title bars) + Edit tool on 3 description lines (title, h1, subtitle possessive)."
     },
     {
       "id": "f-loom-rename-p2",
       "name": "loom-rename P2: code package rename",
-      "description": "git mv loop/ → loom/, update all Python imports, pyproject.toml, CLI entry point. BREAKING change. Sub-feature of f-loom-rename.",
+      "description": "git mv loop/ \u2192 loom/, update all Python imports, pyproject.toml, CLI entry point. BREAKING change. Sub-feature of f-loom-rename.",
       "dependencies": [
         "f-loom-rename-p0"
       ],
       "status": "done",
       "verification": "uv run python -m loom.cli --help && grep -rn 'from loop\\.' . --include='*.py' | grep -v '\\.venv' | grep -v '\\.git' | wc -l | grep -q '^0$'",
-      "evidence": "git mv loop/ → loom/ detected as rename (preserving history); grep -rn 'from loop\\.' loom/ --include='*.py' → 0 lines; uv run python -m loom.cli --help → exit 0 (shows 'loom' prog); uv run python -m loom.cli eval --fail-under 100 → 'Eval results: 142/142 passed'; uv run pytest -q → 27 errors (all in tests/, deferred to P4 per plan)"
+      "evidence": "git mv loop/ \u2192 loom/ detected as rename (preserving history); grep -rn 'from loop\\.' loom/ --include='*.py' \u2192 0 lines; uv run python -m loom.cli --help \u2192 exit 0 (shows 'loom' prog); uv run python -m loom.cli eval --fail-under 100 \u2192 'Eval results: 142/142 passed'; uv run pytest -q \u2192 27 errors (all in tests/, deferred to P4 per plan)"
     },
     {
       "id": "f-loom-rename-p3",
       "name": "loom-rename P3: tracking & docs rename",
-      "description": "AGENTS.md, feature_list.json (project field + verification commands), init.sh, progress.md header. Also fixes tests/ imports (loop → loom) since P2 deferred this to P4 but P3's gate requires init.sh exit 0 which requires pytest to collect. Sub-feature of f-loom-rename.",
+      "description": "AGENTS.md, feature_list.json (project field + verification commands), init.sh, progress.md header. Also fixes tests/ imports (loop \u2192 loom) since P2 deferred this to P4 but P3's gate requires init.sh exit 0 which requires pytest to collect. Sub-feature of f-loom-rename.",
       "dependencies": [
         "f-loom-rename-p2"
       ],
       "status": "done",
       "verification": "./init.sh && python3 -c \"import json; print(json.load(open('feature_list.json'))['project'])\" | grep -q loom",
-      "evidence": "AGENTS.md: grep -n \"^# loop\\|loop — minimal\" AGENTS.md → 0 matches; feature_list.json project = loom; grep -n \"loop\\.\" init.sh → 0 matches; progress.md: \"^## Project rename: loop → loom\" on line 3. Scope expansion: 27 test files updated loop.X → loom.X (P2 deferred this to P4 but P3 gate required init.sh exit 0). Snapshot re-baseline: tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw (random hash ID flakiness per AGENTS.md Rule #10 — diff shows only CSS class hash IDs changed, no text content diff). Full ./init.sh → \"375 passed, 21 warnings in ~75s\" + 0 ruff + 0 mypy → \"Verification Complete (all green)\"."
+      "evidence": "AGENTS.md: grep -n \"^# loop\\|loop \u2014 minimal\" AGENTS.md \u2192 0 matches; feature_list.json project = loom; grep -n \"loop\\.\" init.sh \u2192 0 matches; progress.md: \"^## Project rename: loop \u2192 loom\" on line 3. Scope expansion: 27 test files updated loop.X \u2192 loom.X (P2 deferred this to P4 but P3 gate required init.sh exit 0). Snapshot re-baseline: tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw (random hash ID flakiness per AGENTS.md Rule #10 \u2014 diff shows only CSS class hash IDs changed, no text content diff). Full ./init.sh \u2192 \"375 passed, 21 warnings in ~75s\" + 0 ruff + 0 mypy \u2192 \"Verification Complete (all green)\"."
     },
     {
       "id": "f-loom-rename-p4",
@@ -488,7 +488,7 @@
       ],
       "status": "done",
       "verification": "uv run pytest -q && uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "P3 already did the heavy lifting (scope-expanded into tests/ because P3's gate ./init.sh exit 0 required pytest collection to succeed — see f-loom-rename-p3 evidence). What P4 actually did: (1) tests/conftest.py:1 docstring 'the loop project' → 'the loom project' (1 line), (2) tests/test_thinking_per_llm_call.py:9,12 stale file path 'loop/agent/loom.py' / 'loop/tui/app.py' → 'loom/agent/loop.py' / 'loom/tui/app.py' (2 lines). Total 3 lines of docstring/path-only changes — zero behavior changes. Verification: grep 'from loop\\.' in *.py (excl .venv/.git) → 0 hits; grep 'import loop\\.' in *.py → 0 hits; uv run pytest tests/test_thinking_per_llm_call.py tests/conftest.py → 3 passed in 3.74s. Out-of-scope NITs flagged (deferred to P5 polish or separate task): ci.yml still uses loop.cli (CI rename incomplete — needs separate task); multiple test descriptions like 'loop init ...' / 'loop eval ...' (cosmetic, won't break); mock data strings 'Project: loop test consumer.' (intentional test data — do NOT change); task input strings like 'loop forever' (intentional — do NOT change)."
+      "evidence": "P3 already did the heavy lifting (scope-expanded into tests/ because P3's gate ./init.sh exit 0 required pytest collection to succeed \u2014 see f-loom-rename-p3 evidence). What P4 actually did: (1) tests/conftest.py:1 docstring 'the loop project' \u2192 'the loom project' (1 line), (2) tests/test_thinking_per_llm_call.py:9,12 stale file path 'loop/agent/loom.py' / 'loop/tui/app.py' \u2192 'loom/agent/loop.py' / 'loom/tui/app.py' (2 lines). Total 3 lines of docstring/path-only changes \u2014 zero behavior changes. Verification: grep 'from loop\\.' in *.py (excl .venv/.git) \u2192 0 hits; grep 'import loop\\.' in *.py \u2192 0 hits; uv run pytest tests/test_thinking_per_llm_call.py tests/conftest.py \u2192 3 passed in 3.74s. Out-of-scope NITs flagged (deferred to P5 polish or separate task): ci.yml still uses loop.cli (CI rename incomplete \u2014 needs separate task); multiple test descriptions like 'loop init ...' / 'loop eval ...' (cosmetic, won't break); mock data strings 'Project: loop test consumer.' (intentional test data \u2014 do NOT change); task input strings like 'loop forever' (intentional \u2014 do NOT change)."
     },
     {
       "id": "f-loom-rename-p5",
@@ -500,12 +500,12 @@
       ],
       "status": "done",
       "verification": "./init.sh && uv run python -m loom.cli --help && uv run python -m loom.cli audit . && git log --oneline | grep -c 'loom-rename-p'",
-      "evidence": "./init.sh → '375 passed, 21 warnings' (all green); uv run python -m loom.cli eval → 'Eval results: 142/142 passed'; uv run python -m loom.cli audit . → 'Overall: 97/100'; git log shows 5 atomic phase commits (ac77374/c2c9949/836fc55/305a4d5/ebffb0b); commit 836fc55 detected 65 file renames (R082–R100) preserving history; CLI --help prints 'loom' program name; TUI smoke exits cleanly via timeout. P5 plan task 3 (test file rename) is a no-op (no test_loop_*.py exist)."
+      "evidence": "./init.sh \u2192 '375 passed, 21 warnings' (all green); uv run python -m loom.cli eval \u2192 'Eval results: 142/142 passed'; uv run python -m loom.cli audit . \u2192 'Overall: 97/100'; git log shows 5 atomic phase commits (ac77374/c2c9949/836fc55/305a4d5/ebffb0b); commit 836fc55 detected 65 file renames (R082\u2013R100) preserving history; CLI --help prints 'loom' program name; TUI smoke exits cleanly via timeout. P5 plan task 3 (test file rename) is a no-op (no test_loop_*.py exist)."
     },
     {
       "id": "f-harness-eval",
       "name": "Harness engineering self-evaluation: 3 ROI-ranked subsystem upgrades",
-      "description": "Umbrella feature tracking 3 subsystem optimizations identified by a harness-engineering audit of loom (2026-06-19). Audit scored loom 3.4/5 overall; bottlenecks are Scope (security holes), Verification (no agent self-verify loop), and Instructions (AGENTS.md in compactable Tier 2). Roadmap: .sisyphus/plans/harness-eval-roadmap.md. Three independent sub-phases, each independently committable. Total estimated effort: ~27h. Order is ROI-ranked but phases have no inter-dependencies — any order works.",
+      "description": "Umbrella feature tracking 3 subsystem optimizations identified by a harness-engineering audit of loom (2026-06-19). Audit scored loom 3.4/5 overall; bottlenecks are Scope (security holes), Verification (no agent self-verify loop), and Instructions (AGENTS.md in compactable Tier 2). Roadmap: .sisyphus/plans/harness-eval-roadmap.md. Three independent sub-phases, each independently committable. Total estimated effort: ~27h. Order is ROI-ranked but phases have no inter-dependencies \u2014 any order works.",
       "dependencies": [],
       "status": "not-started",
       "verification": "./init.sh && uv run python -m loom.cli eval --fail-under 100 && uv run python -m loom.cli audit .",
@@ -514,16 +514,16 @@
     {
       "id": "f-harness-eval-p0-security",
       "name": "harness-eval P0: scope subsystem security hardening",
-      "description": "Fix 3 real security holes in the permission subsystem: (1) eval() sandbox in config._compile_check is bypassable via __subclasses__() traversal — replace with AST whitelist; (2) deny_patterns substring matching can be bypassed by hex/base64-encoded commands — add canonicalization step (shlex parse + decode common encodings); (3) deny list is too thin (7 patterns) — expand to ~25 covering network exfil (curl/wget/nc/ssh/scp), fork bombs, code execution (python -c, perl -e), root escalation (su/pkexec), kill -9. Add eval cases locking each new pattern + 1 case proving the AST whitelist rejects __subclasses__ access. Sub-phase of f-harness-eval.",
+      "description": "Fix 3 real security holes in the permission subsystem: (1) eval() sandbox in config._compile_check is bypassable via __subclasses__() traversal \u2014 replace with AST whitelist; (2) deny_patterns substring matching can be bypassed by hex/base64-encoded commands \u2014 add canonicalization step (shlex parse + decode common encodings); (3) deny list is too thin (7 patterns) \u2014 expand to ~25 covering network exfil (curl/wget/nc/ssh/scp), fork bombs, code execution (python -c, perl -e), root escalation (su/pkexec), kill -9. Add eval cases locking each new pattern + 1 case proving the AST whitelist rejects __subclasses__ access. Sub-phase of f-harness-eval.",
       "dependencies": [],
-      "status": "not-started",
+      "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100 && uv run python -c \"from loom.agent.config import _compile_check; assert _compile_check('().__class__.__bases__[0].__subclasses__()') is None\"",
-      "evidence": ""
+      "evidence": "All 4 gates green:\n- Gate 1: _compile_check('().__class__.__bases__[0].__subclasses__()', 'gate-check') returns None (AST whitelist blocks __subclasses__ traversal)\n- Gate 2: DEFAULT_POLICY.deny_patterns has 32 entries (>= 25 required)\n- Gate 3: uv run ruff check loom/ \u2192 All checks passed!\n- Gate 4: uv run mypy loom/ \u2192 Success: no issues found in 69 source files\n\nFull eval suite: 176/176 passed (was 142 baseline \u2192 176, +34 cases; gate required +30)\nPytest: 375 passed\n\nFiles changed (3 modified + 2 new in scope, 0 unrequested):\n- loom/agent/config.py (+95 -3): AST whitelist (ALLOWED_FUNCS, _DENIED_ATTRS, _BLOCKED_NODES, _validate_check_ast, _check_ast_node), _compile_check rejects on validation failure, _parse_policy_section raises ConfigError on None\n- loom/agent/permissions.py (+55 -1): _canonicalize (single unicode_escape pass, UnicodeDecodeError \u2192 original), matches_deny canonicalizes first, 23 new deny_patterns added (now 32 total)\n- loom/eval/cases/__init__.py (+1): registered permission_canonicalize and permission_deny_expanded\n- loom/eval/cases/permission_unify.py (+81 -1): 4 new cases (rejects-subclasses-traversal, rejects-import, rejects-lambda, accepts-args-comparison)\n- loom/eval/cases/permission_canonicalize.py (NEW, 108 lines): 4 new cases (blocks-hex-encoded-rm, blocks-base64-pipe-sh, doesnt-break-git, handles-malformed-escapes)\n- loom/eval/cases/permission_deny_expanded.py (NEW, 113 lines): 26 new cases via parameterized factory (23 positive + 3 negative guards)\n- progress.md: ad-hoc Task 2 subagent section (will be folded into Session section)\n"
     },
     {
       "id": "f-harness-eval-p1-self-verify",
       "name": "harness-eval P1: verification subsystem agent self-verify loop",
-      "description": "Close the verification gap — agent currently never runs init.sh / tests / lint during a session; only fires SessionEnd init.sh as warn-only. Add: (1) new `verify` tool wrapping init.sh, schema-described as 'run before declaring a feature done', returns structured pass/fail + tail of output; (2) new trace events `verify_start` / `verify_end` with duration_ms; (3) PreSessionEnd hook that records init.sh result to progress.md auto-section if it failed; (4) 6 failure-mode eval cases currently missing (tool timeout, LLM 5xx, autocompact failure → context overflow, unexpected stop_reason, denied-mid-batch, subagent tool error). Sub-phase of f-harness-eval.",
+      "description": "Close the verification gap \u2014 agent currently never runs init.sh / tests / lint during a session; only fires SessionEnd init.sh as warn-only. Add: (1) new `verify` tool wrapping init.sh, schema-described as 'run before declaring a feature done', returns structured pass/fail + tail of output; (2) new trace events `verify_start` / `verify_end` with duration_ms; (3) PreSessionEnd hook that records init.sh result to progress.md auto-section if it failed; (4) 6 failure-mode eval cases currently missing (tool timeout, LLM 5xx, autocompact failure \u2192 context overflow, unexpected stop_reason, denied-mid-batch, subagent tool error). Sub-phase of f-harness-eval.",
       "dependencies": [],
       "status": "not-started",
       "verification": "uv run python -m loom.cli eval --fail-under 100 && uv run python -c \"from loom.agent.tools import TOOLS; assert any(t['name']=='verify' for t in TOOLS)\"",
@@ -532,7 +532,7 @@
     {
       "id": "f-harness-eval-p2-instructions-cache",
       "name": "harness-eval P2: instructions subsystem AGENTS.md to static + cold-start continuity + real token counter",
-      "description": "Move AGENTS.md from compactable Tier 2 to SystemPrompt.static so it (a) survives autocompact and (b) joins the prompt cache segment. Add cold-start continuity loader (Tier 1.5): auto-inject session-handoff.md (full) and progress.md (last 80 lines) into the system prompt — closes the 'agent doesn't know what was being done last session' gap that resume-via-checkpoint alone can't fix. Replace context.py:200 character/4 heuristic token estimate with anthropic SDK count_tokens() call (cached per message). Consolidate 5 hard-coded max_tokens=8000 occurrences (context.py:10, llm.py:78, loop.py:188, loop.py:224, tools.py:272) into a single config constant. Sub-phase of f-harness-eval. Lower priority than P0/P1 (no security/correctness impact, only cost + reliability + cross-session continuity).",
+      "description": "Move AGENTS.md from compactable Tier 2 to SystemPrompt.static so it (a) survives autocompact and (b) joins the prompt cache segment. Add cold-start continuity loader (Tier 1.5): auto-inject session-handoff.md (full) and progress.md (last 80 lines) into the system prompt \u2014 closes the 'agent doesn't know what was being done last session' gap that resume-via-checkpoint alone can't fix. Replace context.py:200 character/4 heuristic token estimate with anthropic SDK count_tokens() call (cached per message). Consolidate 5 hard-coded max_tokens=8000 occurrences (context.py:10, llm.py:78, loop.py:188, loop.py:224, tools.py:272) into a single config constant. Sub-phase of f-harness-eval. Lower priority than P0/P1 (no security/correctness impact, only cost + reliability + cross-session continuity).",
       "dependencies": [],
       "status": "not-started",
       "verification": "uv run python -m loom.cli eval --fail-under 100 && uv run python -c \"from loom.agent.loop import build_system_prompt; sp = build_system_prompt(); assert 'Working Rules' in sp.static\" && uv run python -c \"from loom.memory.context import load_session_continuity\"",

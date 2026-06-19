@@ -127,3 +127,83 @@ class PermissionPolicyIsDataDriven(EvalCase):
                 detail=f"matched={matched!r} unmatched={unmatched!r} default_still={default_still_blocks}",
             )
         return EvalResult(name=self.name, passed=True, detail="custom policy isolated, default unchanged")
+
+
+class PermissionRuleRejectsSubclassesTraversal(EvalCase):
+    name = "permission-rule-rejects-subclasses-traversal"
+    description = "_compile_check rejects AST-based sandbox escape via __subclasses__"
+
+    def run(self) -> EvalResult:
+        from loom.agent.config import _compile_check
+
+        expr = '().__class__.__bases__[0].__subclasses__()'
+        result = _compile_check(expr, "test.field")
+        if result is not None:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=f"expected None, got callable {getattr(result, '__name__', result)!r}",
+            )
+        return EvalResult(name=self.name, passed=True, detail="rejected __subclasses__ traversal")
+
+
+class PermissionRuleRejectsImport(EvalCase):
+    name = "permission-rule-rejects-import"
+    description = "_compile_check rejects __import__() in rule expressions"
+
+    def run(self) -> EvalResult:
+        from loom.agent.config import _compile_check
+
+        expr = '__import__("os").system("id")'
+        result = _compile_check(expr, "test.field")
+        if result is not None:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=f"expected None, got callable {getattr(result, '__name__', result)!r}",
+            )
+        return EvalResult(name=self.name, passed=True, detail="rejected __import__ call")
+
+
+class PermissionRuleRejectsLambda(EvalCase):
+    name = "permission-rule-rejects-lambda"
+    description = "_compile_check rejects lambda expressions in rule expressions"
+
+    def run(self) -> EvalResult:
+        from loom.agent.config import _compile_check
+
+        expr = '(lambda: 1)()'
+        result = _compile_check(expr, "test.field")
+        if result is not None:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=f"expected None, got callable {getattr(result, '__name__', result)!r}",
+            )
+        return EvalResult(name=self.name, passed=True, detail="rejected lambda")
+
+
+class PermissionRuleAcceptsArgsComparison(EvalCase):
+    name = "permission-rule-accepts-args-comparison"
+    description = "_compile_check accepts safe comparison expressions and returns a working callable"
+
+    def run(self) -> EvalResult:
+        from loom.agent.config import _compile_check
+
+        check = _compile_check('"git" in args["command"]', "test.field")
+        if check is None:
+            return EvalResult(name=self.name, passed=False, detail="expected callable, got None")
+        try:
+            matched = check({"command": "git status"})
+            unmatched = check({"command": "rm -rf /"})
+        except Exception as exc:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=f"callable raised {type(exc).__name__}: {exc}"[:120],
+            )
+        if matched is not True or unmatched is not False:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=f"matched={matched!r} unmatched={unmatched!r}",
+            )
+        return EvalResult(
+            name=self.name, passed=True,
+            detail="callable works for matching and non-matching args",
+        )

@@ -35,14 +35,31 @@ class PermissionRule:
     message: str
 
 
+def _canonicalize(command: str) -> str:
+    """Decode a single layer of Python ``unicode_escape`` sequences.
+
+    Used to neutralize trivial obfuscation in deny-pattern matching, e.g.
+    ``printf '\\x72\\x6d\\x20-rf\\x20/'`` which ``unicode_escape`` turns
+    into ``rm -rf /``. Single-pass only — recursive decoding would
+    re-introduce the bypass-via-nesting attack. On malformed escapes
+    (e.g. ``\\xZZ``), return the original string unchanged so the
+    permission check stays safe-fail rather than raising.
+    """
+    try:
+        return command.encode().decode("unicode_escape")
+    except UnicodeDecodeError:
+        return command
+
+
 @dataclass(frozen=True)
 class PermissionPolicy:
     deny_patterns: tuple[str, ...]
     rules: tuple[PermissionRule, ...] = field(default_factory=tuple)
 
     def matches_deny(self, command: str) -> str | None:
+        canonical = _canonicalize(command)
         for pattern in self.deny_patterns:
-            if pattern in command:
+            if pattern in canonical:
                 return pattern
         return None
 
@@ -70,6 +87,7 @@ def _destructive_bash(args: dict) -> bool:
 
 DEFAULT_POLICY = PermissionPolicy(
     deny_patterns=(
+        # Original 9 (Task 2 baseline)
         "rm -rf /",
         "sudo",
         "shutdown",
@@ -77,6 +95,42 @@ DEFAULT_POLICY = PermissionPolicy(
         "mkfs",
         "dd if=",
         "> /dev/sda",
+        "base64 -d|",
+        "base64 --decode|",
+        # Task 3 — network exfiltration (trailing space avoids curl-config etc.)
+        # Ordering matters: rsync/scp/netcat listed before nc because
+        # ``rsync `` contains ``nc `` as a substring and would otherwise
+        # match first.
+        "curl ",
+        "wget ",
+        "rsync ",
+        "scp ",
+        "ssh ",
+        "netcat ",
+        "nc ",
+        # Task 3 — in-process code execution (only `-c` form, avoids python --version)
+        "python -c ",
+        "python3 -c ",
+        "perl -e ",
+        "ruby -e ",
+        "bash -c ",
+        # Task 3 — root escalation
+        "su -",
+        "su root",
+        "pkexec ",
+        "doas ",
+        # Task 3 — destructive system ops
+        "kill -9 1",
+        "halt",
+        "poweroff",
+        "init 0",
+        "fdisk",
+        # Task 3 — fork bomb
+        ":(){ ",
+        # Task 3 — hex-escape printf fallback (catches malformed \x that
+        # survives canonicalize; for valid \xHH the existing rm -rf / etc.
+        # patterns catch the decoded form)
+        "printf '\\x",
     ),
     rules=(
         PermissionRule(

@@ -26,9 +26,12 @@ Per the v1 design:
 
 from __future__ import annotations
 
+import ast
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from loguru import logger
 
 from loom.agent.checkpoint import (
     CHECKPOINT_EVERY_TOKENS,
@@ -41,6 +44,33 @@ from loom.agent.permissions import (
 )
 
 CONFIG_FILENAME = "harness.toml"
+
+# Whitelist for permission-check expressions in harness.toml.
+# A rule expression is a Python expression of `args -> bool` where `args`
+# is a dict. The AST is validated against this whitelist BEFORE eval, so a
+# malicious rule cannot escape the `{"__builtins__": {}}` sandbox via
+# tricks like `().__class__.__bases__[0].__subclasses__()`.
+ALLOWED_FUNCS: frozenset[str] = frozenset({
+    "len", "str", "int", "any", "all",
+    "isinstance", "startswith", "endswith",
+})
+_DENIED_ATTRS: frozenset[str] = frozenset({
+    "__class__", "__bases__", "__subclasses__", "__globals__", "__dict__",
+    "__mro__", "__init_subclass__", "__import__",
+})
+# Node types that are never valid inside a permission check expression.
+_BLOCKED_NODES: tuple[type[ast.AST], ...] = (
+    ast.Lambda,
+    ast.FunctionDef, ast.AsyncFunctionDef,
+    ast.ClassDef,
+    ast.Import, ast.ImportFrom,
+    ast.Global, ast.Nonlocal,
+    ast.Return, ast.Yield, ast.YieldFrom,
+    ast.Starred,
+    ast.NamedExpr,         # walrus operator
+    ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp,
+    ast.IfExp,             # overkill but safe — avoids `X if Y else Z` with Y=__import__
+)
 
 
 class ConfigError(Exception):
@@ -125,25 +155,84 @@ def _parse_policy_section(section: dict | None) -> PermissionPolicy:
                 message = raw.get("message", "")
                 if not isinstance(message, str):
                     raise ConfigError(f"[permissions.rules.add[{i}].message] must be a string")
+                check_fn = _compile_check(check_src, f"permissions.rules.add[{i}].check")
+                if check_fn is None:
+                    raise ConfigError(
+                        f"[permissions.rules.add[{i}].check] expression rejected "
+                        f"by AST whitelist — see warning above"
+                    )
                 rules.append(PermissionRule(
                     tools=tuple(tools),
-                    check=_compile_check(check_src, f"permissions.rules.add[{i}].check"),
+                    check=check_fn,
                     message=message,
                 ))
 
     return PermissionPolicy(deny_patterns=base_deny, rules=tuple(rules))
 
 
+def _validate_check_ast(code: str) -> tuple[bool, int | None]:
+    """Walk an `eval`-mode AST and verify it matches the permission-check whitelist.
+
+    Returns (ok, line_number). On rejection, line_number points to the first
+    offending node (or the SyntaxError line if parsing failed).
+    """
+    try:
+        tree = ast.parse(code, mode="eval")
+    except SyntaxError as exc:
+        return False, exc.lineno
+    return _check_ast_node(tree)
+
+
+def _check_ast_node(node: ast.AST) -> tuple[bool, int | None]:
+    if isinstance(node, _BLOCKED_NODES):
+        return False, getattr(node, "lineno", None)
+    if isinstance(node, ast.Name):
+        if node.id != "args" and node.id not in ALLOWED_FUNCS:
+            return False, node.lineno
+    if isinstance(node, ast.Attribute):
+        if node.attr.startswith("__") or node.attr in _DENIED_ATTRS:
+            return False, node.lineno
+    if isinstance(node, ast.Subscript):
+        if not isinstance(node.value, ast.Name) or node.value.id != "args":
+            return False, node.lineno
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        for elt in node.elts:
+            if not isinstance(elt, ast.Constant):
+                return False, getattr(elt, "lineno", None)
+    if isinstance(node, ast.Dict):
+        for k in node.keys:
+            if k is not None and not isinstance(k, ast.Constant):
+                return False, getattr(k, "lineno", None)
+        for v in node.values:
+            if not isinstance(v, ast.Constant):
+                return False, getattr(v, "lineno", None)
+    for child in ast.iter_child_nodes(node):
+        ok, line = _check_ast_node(child)
+        if not ok:
+            return False, line
+    return True, None
+
+
 def _compile_check(expression: str, field_name: str):
     """Compile a Python expression of `args -> bool` from a string.
 
-    The expression is evaluated in a sandbox where `args` is a dict.
-    Returns the callable.
+    The expression is first validated against the AST whitelist
+    (`_validate_check_ast`) and then evaluated in a sandbox where
+    `args` is a dict. Returns the callable, or None if the AST
+    whitelist rejected the expression (logged as a warning).
     """
     try:
         code = compile(expression, f"<{field_name}>", "eval")
     except SyntaxError as exc:
         raise ConfigError(f"{field_name}: invalid Python expression ({exc.msg})") from exc
+
+    ok, line = _validate_check_ast(expression)
+    if not ok:
+        logger.warning(
+            "{}: expression rejected by AST whitelist at line {} (sandbox violation)",
+            field_name, line or "?",
+        )
+        return None
 
     def _check(args: dict) -> bool:
         try:
