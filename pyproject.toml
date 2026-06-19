@@ -46,6 +46,8 @@ extend-exclude = [
     "harness-creator",
     ".venv",
     "__pycache__",
+    ".agents",
+    "agent",
 ]
 
 [tool.ruff.lint]

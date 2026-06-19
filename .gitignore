@@ -32,6 +32,11 @@ loom.log
 .ruff_cache/
 .mypy_cache/
 
+# Sisyphus / opencode runtime artifacts (skills registry, lockfile)
+.agents/
+agent/
+skills-lock.json
+
 
 .DS_Store
 snapshot_report.html
