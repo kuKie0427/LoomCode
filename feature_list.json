@@ -405,6 +405,69 @@
       "status": "done",
       "verification": "uv run python -m loop.cli eval --fail-under 100",
       "evidence": "uv run python -m loop.cli eval --fail-under 100 → 'Eval results: 142/142 passed' (3 consecutive runs, was 138/138, +4 new cases); ./init.sh → '375 passed, 21 warnings in 53.83s' + 'Verification Complete (all green)'; uv run python -m loop.cli audit . → 'Overall: 97/100, Bottleneck: instructions' (was 93/100, +4); scope: 5/5 (was 4/5 FAIL 'One-feature-at-a-time rule exists', now PASS via AGENTS.md rule #1 wording fix); self-test: 5/5 (1/1) PASS 'Eval results: 142/142 passed'. New file: loop/eval/cases/tui_assistant_message_start.py (282 lines, 4 cases — agent-loop-assistant-message-start-in-defaults, -fires-per-llm-call, -message-start-still-once-per-invocation, agent-tui-app-wires-assistant-message-start). Rule #1: '1. **WIP=1 (one feature at a time)**: Work on exactly one feature from `feature_list.json` at a time.' Working rules #13/#14 + 3 new test files (test_markdown_linkify.py / test_status_bar.py / test_thinking_per_llm_call.py) + docs/tui-scrolling.md documented in progress.md (## Session: f-tui-thinking-per-llm-call)."
+    },
+    {
+      "id": "f-loom-rename",
+      "name": "Project rename: loop → loom",
+      "description": "Rename the project from `loop` to `loom` based on the TUI design language and brand identity. The loom weaving metaphor captures the agent's role (weaves user intent + tool calls + model responses into coherent output) better than the generic 'loop'. Already completed in design phase: docs/tui-design-language.md (318 lines, with §4.3 Header sub-section), docs/tui-design.html (1443 lines, 7 state mockups including Header collapsed/expanded), docs/loom-logo.html (1443 lines, 10-section brand identity sheet with primary mark, wordmark, lockups, icon variant, color variants, construction grid, pattern tile, real-world mockups, anti-patterns, tagline 'weaving intent into action'). This feature implements the actual rename across 6 phases. Roadmap: .sisyphus/plans/loom-rename-roadmap.md. Phase files: loom-rename-p0.md through loom-rename-p5.md. P0 and P1 are independent (can run in either order); P2 depends on P0; P3 and P4 depend on P2; P5 depends on all. Each phase is independently committable. Total estimated effort: ~7h.",
+      "dependencies": [],
+      "status": "not-started",
+      "verification": "uv run python -m loom.cli --help && uv run python -m loom.cli eval --fail-under 100 && ./init.sh && git log --oneline | grep -c 'loom-rename-p'",
+      "evidence": ""
+    },
+    {
+      "id": "f-loom-rename-p0",
+      "name": "loom-rename P0: brand asset extraction",
+      "description": "Extract primary mark SVG + icon variant SVG + generate favicon PNGs at 16/32/64 + rewrite README header with new brand. Sub-feature of f-loom-rename.",
+      "dependencies": ["f-loom-rename"],
+      "status": "done",
+      "verification": "ls docs/loom-mark.svg docs/loom-icon.svg docs/favicon-{16,32,64}.png && head -30 README.md | grep -q 'weaving intent into action'",
+      "evidence": "ls docs/loom-mark.svg docs/loom-icon.svg docs/favicon-{16,32,64}.png && head -30 README.md | grep -q 'weaving intent into action' → VERIFICATION PASSED; xmllint --noout docs/loom-mark.svg docs/loom-icon.svg → XML VALID; file docs/favicon-{16,32,64}.png → PNG image data 16×16, 32×32, 64×64 respectively; README.md first 30 lines contain loom wordmark + 'weaving intent into action' tagline"
+    },
+    {
+      "id": "f-loom-rename-p1",
+      "name": "loom-rename P1: design artifact sync",
+      "description": "Update terminal mockup titles in docs/tui-design.html from `loop —` to `loom —` across all 7 state sections. Sub-feature of f-loom-rename.",
+      "dependencies": ["f-loom-rename"],
+      "status": "in-progress",
+      "verification": "grep -c 'loop —' docs/tui-design.html | grep -q '^0$' && grep -c 'loom —' docs/tui-design.html | grep -q '^[7-9]\\|[1-9][0-9]'",
+      "evidence": ""
+    },
+    {
+      "id": "f-loom-rename-p2",
+      "name": "loom-rename P2: code package rename",
+      "description": "git mv loop/ → loom/, update all Python imports, pyproject.toml, CLI entry point. BREAKING change. Sub-feature of f-loom-rename.",
+      "dependencies": ["f-loom-rename-p0"],
+      "status": "not-started",
+      "verification": "uv run python -m loom.cli --help && grep -rn 'from loop\\.' . --include='*.py' | grep -v '\\.venv' | grep -v '\\.git' | wc -l | grep -q '^0$'",
+      "evidence": ""
+    },
+    {
+      "id": "f-loom-rename-p3",
+      "name": "loom-rename P3: tracking & docs rename",
+      "description": "AGENTS.md, feature_list.json (project field + verification commands), init.sh, progress.md header. Sub-feature of f-loom-rename.",
+      "dependencies": ["f-loom-rename-p2"],
+      "status": "not-started",
+      "verification": "./init.sh && python3 -c \"import json; print(json.load(open('feature_list.json'))['project'])\" | grep -q loom",
+      "evidence": ""
+    },
+    {
+      "id": "f-loom-rename-p4",
+      "name": "loom-rename P4: test & eval rename",
+      "description": "Update all imports in tests/ and loom/eval/cases/. May rename test_loop_*.py files to test_loom_*.py (polish). Sub-feature of f-loom-rename.",
+      "dependencies": ["f-loom-rename-p2"],
+      "status": "not-started",
+      "verification": "uv run pytest -q && uv run python -m loom.cli eval --fail-under 100",
+      "evidence": ""
+    },
+    {
+      "id": "f-loom-rename-p5",
+      "name": "loom-rename P5: atomic commits + final verification",
+      "description": "Full verification, git log review, optional test file rename, mark f-loom-rename done with evidence. Sub-feature of f-loom-rename.",
+      "dependencies": ["f-loom-rename-p3", "f-loom-rename-p4"],
+      "status": "not-started",
+      "verification": "./init.sh && uv run python -m loom.cli --help && uv run python -m loom.cli audit . && git log --oneline | grep -c 'loom-rename-p'",
+      "evidence": ""
     }
   ]
 }

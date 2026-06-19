@@ -1,0 +1,14 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <title>loom</title>
+  <desc>Simplified weave mark: 3×3 crossing hash.</desc>
+
+  <!-- Warp threads (vertical, center thicker) -->
+  <line x1="50" y1="20" x2="50" y2="180" stroke="#5b8a72" stroke-width="2.5" opacity="0.42"/>
+  <line x1="100" y1="20" x2="100" y2="180" stroke="#5b8a72" stroke-width="3" opacity="0.42"/>
+  <line x1="150" y1="20" x2="150" y2="180" stroke="#5b8a72" stroke-width="2.5" opacity="0.42"/>
+
+  <!-- Weft threads (horizontal, with over/under gaps) -->
+  <path d="M20,50 H43 M57,50 H93 M107,50 H143 M157,50 H180" stroke="#5b8a72" stroke-width="2.5" opacity="0.60" fill="none"/>
+  <path d="M20,100 H43 M57,100 H93 M107,100 H143 M157,100 H180" stroke="#5b8a72" stroke-width="2.5" opacity="0.60" fill="none"/>
+  <path d="M20,150 H43 M57,150 H93 M107,150 H143 M157,150 H180" stroke="#5b8a72" stroke-width="2.5" opacity="0.60" fill="none"/>
+</svg>
