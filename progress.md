@@ -2568,3 +2568,59 @@ $ uv run pytest -q                                   → 27 errors (all in tests
 - init.sh still references `loop/` in mypy command — will need update
 - `./init.sh` will fail until P3 fixes init.sh
 
+
+---
+
+## Session: f-loom-rename-p3
+
+**Date**: 2026-06-19
+**Plan**: loom-rename-p3
+**Status**: DONE (gate passed, scope expanded to include tests/ imports)
+
+### Summary
+- `AGENTS.md`: Project name + 9 Quick Start commands + Layout table paths + Working Rules path refs + Verification Commands + Escalation section — all `loop` → `loom` in product-name context
+- `feature_list.json`: `"project": "loom"`, all `python -m loop.cli` → `python -m loom.cli` (20+), all `loop/agent/`, `loop/eval/`, etc. paths → `loom/...`, CLI command refs in evidence → `loom`
+- `init.sh`: banner `(loop)` → `(loom)`, `mypy loop/` → `mypy loom/`, `/tmp/loop-pytest.log` → `/tmp/loom-pytest.log`
+- `progress.md`: prepend "Project rename: loop → loom (2026-06-19)" section linking to all 5 phase commits
+
+### Scope expansion: tests/ imports
+P2 deferred test imports to P4 (see P2 §Task 7: "P4 才改"), but P3's gate requires `./init.sh exit 0`, which requires pytest to collect successfully. Fixed 27 test files in `tests/`: all `from loop.X` / `import loop.X` / `loop.X` (attribute access) / `"loop.X"` (string paths) → `loom` equivalents.
+
+Eval cases were already done by P2 (verified: 0 `from loop.` references in `loom/eval/`).
+
+### Snapshot re-baseline
+`tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw` — random CSS class hash IDs (`terminal-3708634364` vs `terminal-4289414399`) changed. Diff shows ONLY ID changes, NO text content diff. Per AGENTS.md Rule #10, this is the textbook case for `--snapshot-update`. The snapshot test was previously failing in P3 due to gate strictness.
+
+### Verification (P3 gate)
+```
+$ grep -n '^# loop\|loop — minimal' AGENTS.md   → 0 matches ✓
+$ json.load(open('feature_list.json'))['project'] → 'loom' ✓
+$ grep -n 'loop\.' init.sh                       → 0 matches ✓
+$ grep -n '^## Project rename: loop → loom' progress.md → line 3 ✓
+$ ./init.sh                                       → '375 passed' + 'Verification Complete (all green)' ✓
+```
+
+### Remaining `loop` references (all intentional)
+- `agent_loop` (function/API name — keep per P2)
+- `f-loop-call-depth-guard` (feature id — stable identifier)
+- `LOOP_CALL_DEPTH`, `_MAX_LOOP_CALL_DEPTH` (env var / constant names)
+- `loop.py` (filename inside `loom/agent/`, not package)
+- `test_agent_loop.py` (test file name — function name)
+- `loop_call_depth.py` (test file name — P4 will polish)
+- `loop → loom` (describing the rename itself)
+- `from loop.` (in grep patterns inside verification fields — checking pre-rename state)
+
+### Commit
+- `305a4d5 feat(loom-rename-p3): tracking & tests rename — AGENTS.md, feature_list.json, init.sh, progress.md, tests/`
+- 32 files changed, 368 insertions(+), 279 deletions(-)
+
+### Leftover untracked (NOT in P3 scope)
+- `docs/loom-logo.html` (1444 lines) — leftover from P0/P1, not committed
+- `docs/tui-design-language.md` (319 lines) — leftover from P0/P1, not committed
+- These were untracked before P3 started; user should commit them in a separate session if intended.
+
+### Next steps (P4)
+- Plan `loom-rename-p4.md` originally scoped as "tests/ + eval/cases" — tests/ imports are now DONE (folded into P3 due to gate requirement)
+- P4 remaining scope: fixture polish (conftest.py, _shared/), test file renames (`test_loop_*.py` → `test_loom_*.py` is optional polish)
+- Eval cases: already verified clean by P2 (P4 task 3 is now largely a no-op)
+- After P4: P5 atomic commits + final `./init.sh` verification
