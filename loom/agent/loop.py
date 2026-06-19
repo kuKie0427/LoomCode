@@ -320,8 +320,33 @@ def run_repl(resume: bool = False) -> None:
                         "init.sh exited {} on SessionEnd: {}\n{}",
                         proc.returncode, proc.stdout[:200], proc.stderr[:200],
                     )
+                    try:
+                        from datetime import datetime
+                        combined = (proc.stdout or "") + (proc.stderr or "")
+                        tail_lines = combined.splitlines()[-30:]
+                        progress_path = WORKDIR / "progress.md"
+                        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+                        with progress_path.open("a", encoding="utf-8") as f:
+                            f.write(f"\n## SessionEnd auto-record ({ts})\n")
+                            f.write(f"- status: FAILED (exit {proc.returncode})\n")
+                            f.write("- last 30 lines:\n")
+                            for ln in tail_lines:
+                                f.write(f"  {ln}\n")
+                            f.write(f"- session tool calls: ~{len(history) // 2}\n")
+                    except Exception as exc:
+                        logger.warning("Failed to write progress.md: {}", exc)
             except subprocess.TimeoutExpired:
                 logger.warning("init.sh timed out on SessionEnd")
+                try:
+                    from datetime import datetime
+                    progress_path = WORKDIR / "progress.md"
+                    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    with progress_path.open("a", encoding="utf-8") as f:
+                        f.write(f"\n## SessionEnd auto-record ({ts})\n")
+                        f.write("- status: TIMEOUT (init.sh >120s)\n")
+                        f.write(f"- session tool calls: ~{len(history) // 2}\n")
+                except Exception as exc:
+                    logger.warning("Failed to write progress.md: {}", exc)
         else:
             logger.debug("init.sh not found, skip")
 

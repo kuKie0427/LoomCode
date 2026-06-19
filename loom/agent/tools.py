@@ -15,6 +15,71 @@ WORKDIR = Path.cwd()
 
 CURRENT_TODOS: list = []
 
+VERIFY_TIMEOUT_SECONDS = 600
+VERIFY_TAIL_LINES = 30
+
+
+def run_verify(target: str = ".") -> str:
+    """Run the project's init.sh verification pipeline. Returns structured pass/fail + tail.
+
+    Fail-closed: any exception is caught, recorded to trace as verify_end with
+    passed=False + error=str(exc), and a structured error string is returned.
+    Never swallows exceptions silently.
+    """
+    tr = trace_mod.current()
+    if tr is not None:
+        tr.record("verify_start", target=target)
+
+    try:
+        # safe_path() validates target is inside WORKDIR (raise ValueError if not)
+        target_path = safe_path(target)
+        init_sh = target_path / "init.sh"
+        if not init_sh.is_file():
+            elapsed_ms = 0
+            result = f"No init.sh found at {target}"
+            if tr is not None:
+                tr.record("verify_end", target=target, exit_code=-1,
+                          duration_ms=elapsed_ms, passed=False, error="missing_init_sh")
+            return result
+
+        t0 = time.monotonic()
+        proc = subprocess.run(
+            [str(init_sh)], cwd=str(target_path),
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            timeout=VERIFY_TIMEOUT_SECONDS,
+        )
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        passed = proc.returncode == 0
+
+        # Build tail (last N lines of combined stdout+stderr)
+        combined = (proc.stdout or "") + (proc.stderr or "")
+        tail_lines = combined.splitlines()[-VERIFY_TAIL_LINES:]
+        tail = "\n".join(tail_lines)
+
+        if tr is not None:
+            tr.record("verify_end", target=target, exit_code=proc.returncode,
+                      duration_ms=elapsed_ms, passed=passed)
+
+        status = "pass" if passed else "fail"
+        return (
+            f"[verify: {status} exit={proc.returncode} duration={elapsed_ms}ms]\n"
+            f"--- last {len(tail_lines)} lines of stdout ---\n{tail}"
+        )
+    except subprocess.TimeoutExpired:
+        if tr is not None:
+            tr.record("verify_end", target=target, exit_code=-1,
+                      duration_ms=VERIFY_TIMEOUT_SECONDS * 1000, passed=False,
+                      error="timeout")
+        return "[verify: fail timeout=600s]\ninit.sh did not complete within 600s"
+    except Exception as exc:
+        # fail-closed: don't swallow. Return structured error string.
+        if tr is not None:
+            tr.record("verify_end", target=target, exit_code=-1,
+                      duration_ms=0, passed=False, error=str(exc))
+        return f"[verify: fail error={type(exc).__name__}]\n{exc}"
+
+
 def run_bash(command: str) -> str:
     matched = DEFAULT_POLICY.matches_deny(command)
     if matched is not None:
@@ -209,6 +274,16 @@ TOOL_REGISTRY.register(Tool(
     input_schema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
     handler=run_load_skill,
     is_read_only=True,
+))
+TOOL_REGISTRY.register(Tool(
+    name="verify",
+    description=(
+        "Run the project's init.sh verification pipeline (lint + types + tests). "
+        "Use this BEFORE declaring a feature done. Returns pass/fail + tail of output."
+    ),
+    input_schema={"type": "object", "properties": {"target": {"type": "string"}}, "required": []},
+    handler=run_verify,
+    is_read_only=False,
 ))
 
 TOOLS = TOOL_REGISTRY.to_anthropic_schema()
