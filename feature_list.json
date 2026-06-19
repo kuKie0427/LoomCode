@@ -429,9 +429,9 @@
       "name": "loom-rename P1: design artifact sync",
       "description": "Update terminal mockup titles in docs/tui-design.html from `loop —` to `loom —` across all 7 state sections. Sub-feature of f-loom-rename.",
       "dependencies": ["f-loom-rename"],
-      "status": "in-progress",
+      "status": "done",
       "verification": "grep -c 'loop —' docs/tui-design.html | grep -q '^0$' && grep -c 'loom —' docs/tui-design.html | grep -q '^[7-9]\\|[1-9][0-9]'",
-      "evidence": ""
+      "evidence": "grep -c 'loop —' tui-design.html → 0; grep -c 'loom —' → 7; wc -l → 1443 (unchanged); HTML parser → OK; Playwright text verification: all 7 title bars show 'loom — ...' (state-1 '80×24', state-2 'deepseek-v4 — idle', state-3 'deepseek-v4 — streaming', state-4 'permission required', state-5 'tool call detail', state-6 'deepseek-v4 — idle', state-7 'deepseek-v4 — header expanded'); header collapsed row '▼ ● MCP:3/3 ◐ 2/5 todos ◐ 1 subagent' unchanged; 7 screenshots saved to /tmp/opencode/tui-design-shots/state-{1..7}-v3.png (114-179KB each). Changes: sed 'loop —' → 'loom —' (7 title bars) + Edit tool on 3 description lines (title, h1, subtitle possessive)."
     },
     {
       "id": "f-loom-rename-p2",
