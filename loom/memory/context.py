@@ -31,7 +31,12 @@ TIER2_HEADER = "## Tier 2 — Activation"
 _PROGRESS_TAIL_LINES = 80
 _HANDOFF_MAX_CHARS = 1500
 _SUBSTANTIVE_MIN_CHARS = 30
-_MARKDOWN_BULLET_RE = re.compile(r"^\s*(?:[-*]\s+|\d+\.\s+|#+\s+)")
+# Match only EMPTY bullets / headers (whitespace + marker + nothing else),
+# NOT bullet lines that have substantive content. `- ` matches (empty);
+# `- Finished` does NOT match (has content after marker).
+_MARKDOWN_BULLET_RE = re.compile(r"^\s*(?:[-*]\s*|\d+\.\s*)")
+_MARKDOWN_HEADER_RE = re.compile(r"^\s*#+\s+")
+_MARKDOWN_HR_RE = re.compile(r"^\s*-{3,}\s*$")
 
 
 def truncate_to_tokens(text: str, max_tokens: int) -> str:
@@ -54,20 +59,23 @@ def truncate_to_tokens(text: str, max_tokens: int) -> str:
 def _is_substantive(text: str) -> bool:
     """Return True if text has more than _SUBSTANTIVE_MIN_CHARS of body content.
 
-    Skips lines that are entirely whitespace, blank bullets (``- ``), or just
-    markdown headers (``# Title``). Empty templates containing only headers and
-    empty list items are NOT substantive — fail-closed: we'd rather skip than
-    pollute the prompt with junk.
+    Strips structural markdown (bullets, numbers, headers, hr) and counts the
+    remaining body chars. ``- Finished`` and ``## Last task`` both contribute
+    their content after the marker. Empty templates (headers + empty bullets
+    + no real body text) yield 0 body chars and are correctly skipped.
     """
-    body_lines: list[str] = []
-    for line in text.splitlines():
-        if not line.strip():
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    body_chars: list[str] = []
+    for s in lines:
+        if _MARKDOWN_HR_RE.match(s):
             continue
-        if _MARKDOWN_BULLET_RE.match(line):
+        stripped = _MARKDOWN_BULLET_RE.sub("", s)
+        stripped = _MARKDOWN_HEADER_RE.sub("", stripped).strip()
+        if not stripped:
             continue
-        body_lines.append(line.strip())
-    body = " ".join(body_lines)
-    meaningful = sum(1 for ch in body if not ch.isspace())
+        body_chars.append(stripped)
+    body = " ".join(body_chars)
+    meaningful = sum(1 for ch in body if ch.isalpha() or ch.isdigit())
     return meaningful > _SUBSTANTIVE_MIN_CHARS
 
 
