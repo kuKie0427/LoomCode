@@ -3005,3 +3005,126 @@ All 12 new cases call real `build_system_prompt(tmpdir)` or real `Context.should
 
 ### Umbrella feature (f-harness-eval) — final
 All 3 sub-phases done: P0 (ea25cbc), P1 (3bfbc7d), P2 (this commit). Total 53 new eval cases (142 → 195). All scope, verification, cold-start checks satisfied.
+
+---
+
+## Session: f-tui-header-summary-rail (2026-06-20)
+
+**Goal**: Implement the TUI Header (summary rail) per the spec at `docs/tui-design-language.md` §4.3 — the 6th layout region (dock-top 1-line collapsed + click-to-expand overlay panel) aggregating MCP / Todo / Subagent indicators. Mock data only — no backend wiring (deferred to follow-up).
+
+### Pre-work: spec reconstruction
+
+The original `docs/tui-design-language.md` was lost from the working tree between sessions (never committed, ~318 lines). Reconstructed from `docs/tui-design.html` (HTML mockup, 1443 lines, 7 states with §-annotations) + the original session description in `progress.md` (lines 2133-2302). New version: 410 lines, §0–§7 + §4.3 Header sub-section + Appendix A/B. Verified §-citation coverage matches HTML mockup exactly (all 6 §2 rules + §4.3 + 7 main sections).
+
+### Delegation (deep category, 30min budget, timed out)
+
+Delegated atomic implementation to ONE deep worker with the spec as the contract. Worker delivered:
+
+**New files (4):**
+- `loom/tui/header.py` (398 lines) — `Header(Static)` collapsed widget + `HeaderOverlay(Widget)` expanded panel + `HeaderState`/`MCPServer`/`TodoItem`/`Subagent` dataclasses + pure glyph computation functions (`mcp_glyph`, `todo_glyph`, `subagent_glyph`) + `DEFAULT_MOCK_STATE` (3 MCPs with 1 error, 5 todos, 1 subagent running)
+- `tests/test_tui_header.py` (372 lines, 23 tests) — 8 unit tests for glyph computation + 4 snapshot tests (collapsed-empty, collapsed-populated, collapsed-subagent-hidden, expanded) + 11 behavioral/integration tests (compose order, dock-top invariant, no-transition CSS, click-toggles-overlay, overlay-contains-3-sections, custom-not-builtin invariant)
+- `loom/eval/cases/tui_header.py` (303 lines, 8 cases) — glyph-mcp-healthy, glyph-mcp-error, glyph-todo-active, glyph-todo-empty, subagent-hidden-when-zero, dock-top-invariant, instant-toggle-no-transition, include-header-in-app-compose
+- `tests/__snapshots__/test_tui_header/` (4 snapshot baselines)
+
+**Modified files (3):**
+- `loom/tui/app.py` (+35 lines) — `from loom.tui.header import DEFAULT_MOCK_STATE, Header, HeaderOverlay`; CSS `#header` + `#header-overlay` blocks (dock-top, height 1, panel background, hairline border, NO transition per spec §6); compose yields `Header(id="header")` FIRST; `on_mount` injects DEFAULT_MOCK_STATE; `on_header_toggle` mounts/removes overlay instantly
+- `loom/eval/cases/__init__.py` (+1 line) — register `tui_header` alphabetically
+- `tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw` — **legitimate re-baseline** (text content now includes the new Header line `▼ ◌ MCP:3/3 ◐ 5/5 todos ◐ 1 subagent`)
+
+### Post-delivery verification (per AGENTS.md rule #11)
+
+Worker timed out at 30min. Inspected the working tree per the timeout protocol:
+
+1. **Out-of-scope modification**: `tests/test_status_bar.py` (worker changed `test_no_header_widget` to assert a new invariant). **Reverted** per rule #11.
+2. **Downstream test failure caused by revert**: `test_no_header_widget` asserted `len(app.query(Header)) == 0` but the new loom Header class is also named `Header` — Textual's `app.query(Header)` matches by CSS class name (NOT just class identity), so it found the loom Header and failed.
+3. **Resolution**: Deleted the obsolete `test_no_header_widget` from `tests/test_status_bar.py` (it's testing an invariant that no longer holds — Header IS now present by design). Added equivalent invariant to `tests/test_tui_header.py` as `test_app_uses_custom_header_not_textual_builtin` which uses `type(w) is X` class identity checks to disambiguate loom vs Textual's built-in Header. **The Textual `app.query()` matches by CSS class name behavior is now documented in the test docstring** as a future-proofing note.
+
+### Housekeeping (necessary for init.sh to pass)
+
+Sisyphus/opencode runtime artifacts (`.agents/`, `agent/`, `skills-lock.json`) appeared during the worker session. Not created by the worker — they are the agent system's skills registry and lockfile. Without gitignore + ruff exclusion, they caused 8 ruff errors in `init.sh`. Minimal housekeeping:
+- `.gitignore` — added `.agents/`, `agent/`, `skills-lock.json`
+- `pyproject.toml` `[tool.ruff].extend-exclude` — added `.agents`, `agent`
+
+This is not feature scope drift — it's required for `init.sh` to pass (per AGENTS.md rule #3: "Verification required: A feature is `done` only after `./init.sh` exits 0").
+
+### Final verification
+
+| Gate | Command | Result |
+|---|---|---|
+| Static | `uv run ruff check .` | All checks passed! |
+| Type | `uv run mypy loom/` | Success: no issues found |
+| Tests | `uv run pytest -q` | **397 passed, 23 warnings in 67s** (was 375 baseline + 22 net: 23 new tests - 1 removed obsolete) |
+| Snapshots | (embedded in pytest) | 7 snapshots passed (4 new header + 3 existing re-baselined: empty-layout re-baselined legitimately, others unchanged) |
+| Eval | `uv run python -m loom.cli eval --fail-under 100` | **204/204 passed** (was 195/195, +9 new header cases) |
+| Smoke | `./init.sh` | "Verification Complete (all green)" — exit 0 |
+
+### Spec enforcement summary
+
+| Spec rule | Enforcement |
+|---|---|
+| §2 rule 1 — bounded re-layout | `#header` `height: 1`, `#header-overlay` `max-height: 16` (≈360px). Snapshot tests assert these. |
+| §2 rule 5 — 2-col indentation | Overlay section headers at outer column, detail rows `padding-left: 2`. No 3rd tier. |
+| §2 rule 6 — hard interrupts fill screen | HeaderOverlay is NOT a ModalScreen (it's a panel, not consent). Consent gates remain full-screen via PermissionScreen / ToolCallModal. |
+| §4.3.1 — hide rule (zero count → hidden) | `subagent_glyph([])` returns `(None, 0)` → section omitted. `mcp_glyph([])` and `todo_glyph([])` return `○` (empty indicator, section hidden by caller). Eval case `header-subagent-hidden-when-zero` locks this. |
+| §4.3.2 — 3-level indent max | Section header (outer) + 2-col detail rows. No 4th tier. |
+| §6 — instant transitions (no easing) | `#header-overlay` has NO `transition:` CSS. Eval case `header-instant-toggle-no-transition` locks this. |
+| §5 anti-pattern — no auto-load | Overlay starts hidden (`display: None` until `on_header_toggle` mounts it). |
+
+### Files NOT changed (per WIP=1)
+
+- `chat_log.py`, `status_bar.py`, `composer.py`, `screens.py`, `messages.py`, `kitty_patch.py` — untouched
+- `tests/test_chat_log_streaming.py`, `tests/test_thinking_per_llm_call.py`, etc. — untouched
+- Only test_status_bar.py had to lose one obsolete test (test_no_header_widget — invariant no longer holds post-Header feature)
+
+### Mock data (DEFAULT_MOCK_STATE)
+
+```python
+HeaderState(
+    mcps=[
+        MCPServer("db", "connected"),
+        MCPServer("fs", "connected"),
+        MCPServer("gh", "error"),  # intentionally error for variety
+    ],
+    todos=[
+        TodoItem("Read context.py", "done"),
+        TodoItem("Fix microcompact preservation", "active"),  # intentionally active
+        TodoItem("Add regression test", "pending"),
+        TodoItem("Update progress.md", "pending"),
+        TodoItem("Commit", "pending"),
+    ],
+    subagents=[
+        Subagent("extract-001", "running", "4s"),  # intentionally running
+    ],
+)
+```
+
+Renders as collapsed line: `▼ ◌ MCP:3/3   ◐ 5/5 todos   ◐ 1 subagent` (matches HTML mockup state-6 design).
+
+### Next step recommendation
+
+`feature_list.json` has 50 features (49 done + 1 in-progress → to be flipped to done in this commit). No remaining TUI-region features. The Header region now implements the 6-region layout per spec §3. Future TUI work that consumes this spec as ground truth:
+
+- **Backend wiring**: expose MCP server state, todo_write results, subagent count from agent_loop to TUI (separate feature)
+- **Header overlay behavior**: subagent row click → scroll to ChatLog marker (currently no-op, needs marker ID tracking from agent loop)
+- **Other §7 open decisions**: two-pane mode, Zen mode, narrow-terminal minimums (per `docs/tui-design-language.md` §7)
+- **Compliance audit**: walk all spec rules against current `loom/tui/` and snapshot any remaining deviations
+
+### Working rule promotion (rule #15 candidate)
+
+The Textual `app.query(WidgetClass)` matches by CSS class name (not class identity) — see fix in `tests/test_tui_header.py::test_app_uses_custom_header_not_textual_builtin`. This is a non-obvious API behavior that bit us. Future widgets with names colliding with built-in Textual widgets (Header, Footer, Input, etc.) will hit the same trap. **Rule #15**: "When defining a custom Textual widget whose name matches a built-in (Header/Footer/Input/Button/etc.), use `type(w) is X` class identity checks in tests, NOT `app.query(X)` — Textual's `query()` matches by CSS class name, which both widgets share." Promote to AGENTS.md if this recurs.
+
+### Files changed in this session (no commit yet)
+
+- `?? docs/tui-design-language.md` (NEW, 410 lines — spec reconstruction)
+- `?? loom/tui/header.py` (NEW, 398 lines)
+- `?? loom/eval/cases/tui_header.py` (NEW, 303 lines)
+- `?? tests/test_tui_header.py` (NEW, 372 lines, 23 tests)
+- `?? tests/__snapshots__/test_tui_header/test_*.raw` (NEW, 4 snapshot baselines)
+- `M  loom/tui/app.py` (+35)
+- `M  loom/eval/cases/__init__.py` (+1)
+- `M  feature_list.json` (added entry + status flip to done — see next step)
+- `M  tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw` (legitimate re-baseline — Header now appears in empty layout)
+- `M  tests/test_status_bar.py` (-15 — removed obsolete test_no_header_widget)
+- `M  .gitignore` (+4 — Sisyphus/opencode system artifacts)
+- `M  pyproject.toml` (+2 — ruff exclude Sisyphus dirs)
+- `M  progress.md` (this section)

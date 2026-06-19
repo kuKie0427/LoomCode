@@ -22,6 +22,7 @@ from loom.agent.loop import WORKDIR, agent_loop
 from loom.tui import kitty_patch  # noqa: F401  # side-effect: patches XTermParser
 from loom.tui.chat_log import ChatLog
 from loom.tui.composer import Composer
+from loom.tui.header import DEFAULT_MOCK_STATE, Header, HeaderOverlay
 from loom.tui.messages import (
     AssistantTurnEnd,
     AssistantTurnStart,
@@ -39,6 +40,23 @@ class AgentTUIApp(App):
     Screen {
         layout: vertical;
         background: $background;
+    }
+    #header {
+        dock: top;
+        height: 1;
+        background: $panel;
+        color: $text-muted;
+        text-style: dim;
+        padding: 0 2;
+    }
+    #header-overlay {
+        dock: top;
+        height: auto;
+        max-height: 16;
+        overflow-y: auto;
+        background: $panel 97%;
+        padding: 1 2;
+        border-bottom: solid $border;
     }
     #chat-log {
         height: 1fr;
@@ -142,6 +160,7 @@ class AgentTUIApp(App):
         status_bar = self.query_one(StatusBar)
         status_bar.ctx_window = self.llm.get_context_window()
         self._sync_status_bar()
+        self.query_one(Header).update_state(DEFAULT_MOCK_STATE)
 
     def on_key(self, event) -> None:
         pass
@@ -253,10 +272,26 @@ class AgentTUIApp(App):
         return asker
 
     def compose(self) -> ComposeResult:
+        yield Header(id="header")
         yield ChatLog(id="chat-log")
         with Vertical(id="chrome"):
             yield StatusBar(id="status-bar")
             yield Composer(id="composer")
+
+    def on_header_toggle(self, message: Header.Toggle) -> None:
+        try:
+            existing = self.query_one(HeaderOverlay)
+        except Exception:
+            existing = None
+        if existing is not None:
+            existing.remove()
+            message.stop()
+            return
+        header = self.query_one(Header)
+        overlay = HeaderOverlay(id="header-overlay")
+        overlay.update_state(header._state)
+        self.screen.mount(overlay, before=self.query_one(ChatLog))
+        message.stop()
 
     def on_assistant_turn_start(self, _: AssistantTurnStart) -> None:
         chat_log = self.query_one(ChatLog)

@@ -29,6 +29,7 @@ from loom.eval.cases import (
     tui_app,  # noqa: F401
     tui_assistant_message_start,  # noqa: F401
     tui_collapsible,  # noqa: F401
+    tui_header,  # noqa: F401
     tui_permission,  # noqa: F401
     tui_thinking_callback,  # noqa: F401
     user_hooks,  # noqa: F401
