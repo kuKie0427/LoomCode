@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "loop"
+name = "loom"
 version = "0.2.0"
 description = "Minimal Claude-Code-like Python coding agent: agent_loop, tools, hooks, context compression, subagent delegation, harness tooling."
 readme = "README.md"
@@ -29,10 +29,10 @@ dev = [
 ]
 
 [project.scripts]
-loop = "loop.cli:main"
+loom = "loom.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["loop"]
+packages = ["loom"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

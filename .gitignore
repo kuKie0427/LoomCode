@@ -23,6 +23,7 @@ MEMORY.md
 
 test.py
 loop.log
+loom.log
 .pytest_cache/
 
 .env
