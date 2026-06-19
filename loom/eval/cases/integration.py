@@ -134,8 +134,8 @@ class SubagentReturnsStructuredMetadata(EvalCase):
 
 
 class LoopAuditScoresItself(EvalCase):
-    name = "loop-audit-scores-itself"
-    description = "loop audit . on this project scores ≥ 70 (success metric)"
+    name = "loom-audit-scores-itself"
+    description = "loom audit . on this project scores ≥ 70 (success metric)"
 
     def run(self) -> EvalResult:
         repo_root = Path(__file__).resolve().parents[3]

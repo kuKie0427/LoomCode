@@ -142,7 +142,7 @@ def score_harness(files: list[HarnessFile], *, target: Path, skip_self_test: boo
     checks = {
         "instructions": [
             _file_check(by_path, ("AGENTS.md", "CLAUDE.md"), "Agent instruction file exists"),
-            _text_check(agents, ("Startup Workflow", "Before writing code"), "Startup workflow documented"),
+            _text_check(agents, ("## Quick Start", "Quick Start"), "Startup workflow documented"),
             _text_check(agents, ("Definition of Done", "done only when"), "Definition of done documented"),
             _text_check(agents, ("Verification Commands", "./init.sh", "test", "verify"),
                         "Verification commands discoverable"),

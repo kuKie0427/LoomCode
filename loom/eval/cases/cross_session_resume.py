@@ -229,11 +229,11 @@ class CheckpointMaybeSaveFiresAtTokenThreshold(EvalCase):
 
 class CheckpointResumeCliRestoresHistory(EvalCase):
     name = "checkpoint-resume-cli-restores-history"
-    description = "End-to-end: plant checkpoint → `loop run --resume` (stdin=exit) → history logged as restored"
+    description = "End-to-end: plant checkpoint → `loom run --resume` (stdin=exit) → history logged as restored"
 
     def run(self) -> EvalResult:
         import shutil
-        wd = Path(tempfile.mkdtemp(prefix="loop-eval-resume-"))
+        wd = Path(tempfile.mkdtemp(prefix="loom-eval-resume-"))
         shutil.rmtree(wd, ignore_errors=True)
         wd.mkdir(parents=True)
 

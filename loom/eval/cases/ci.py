@@ -35,13 +35,13 @@ class CIWorkflowRunsInitSh(EvalCase):
 
 class CIWorkflowRunsEval(EvalCase):
     name = "ci-workflow-runs-eval"
-    description = "CI workflow runs the eval suite (Phase 5 acceptance: 'loop eval runs in CI')"
+    description = "CI workflow runs the eval suite (Phase 5 acceptance: 'loom eval runs in CI')"
 
     def run(self) -> EvalResult:
         path = REPO_ROOT / ".github" / "workflows" / "ci.yml"
         text = path.read_text(encoding="utf-8")
-        if "loop.cli eval" not in text and "loop eval" not in text:
-            return EvalResult(name=self.name, passed=False, detail="loop eval not invoked")
+        if "loom.cli eval" not in text:
+            return EvalResult(name=self.name, passed=False, detail="loom eval not invoked")
         if "--fail-under" not in text:
             return EvalResult(name=self.name, passed=False, detail="eval has no --fail-under gate")
         return EvalResult(name=self.name, passed=True, detail="eval + --fail-under wired")
@@ -68,6 +68,6 @@ class CIWorkflowRunsAudit(EvalCase):
     def run(self) -> EvalResult:
         path = REPO_ROOT / ".github" / "workflows" / "ci.yml"
         text = path.read_text(encoding="utf-8")
-        if "loop.cli audit" not in text and "loom audit" not in text:
-            return EvalResult(name=self.name, passed=False, detail="loop audit not invoked")
+        if "loom.cli audit" not in text:
+            return EvalResult(name=self.name, passed=False, detail="loom audit not invoked")
         return EvalResult(name=self.name, passed=True, detail="audit wired")

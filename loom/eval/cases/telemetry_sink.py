@@ -17,7 +17,7 @@ class TelemetryConfigParsesSinkCommand(EvalCase):
     description = "[telemetry] sink_command is parsed and stored"
 
     def run(self) -> EvalResult:
-        wd = Path(tempfile.mkdtemp(prefix="loop-eval-telemetry-"))
+        wd = Path(tempfile.mkdtemp(prefix="loom-eval-telemetry-"))
         try:
             (wd / "harness.toml").write_text(
                 '[telemetry]\nsink_command = "/usr/bin/true"\n',
@@ -39,7 +39,7 @@ class TelemetryConfigDefaultNoSink(EvalCase):
     description = "No [telemetry] section → sink_command is None"
 
     def run(self) -> EvalResult:
-        wd = Path(tempfile.mkdtemp(prefix="loop-eval-telemetry-"))
+        wd = Path(tempfile.mkdtemp(prefix="loom-eval-telemetry-"))
         try:
             (wd / "harness.toml").write_text("", encoding="utf-8")
             cfg = load_config(wd)
@@ -58,7 +58,7 @@ class TelemetryConfigRejectsNonStringSink(EvalCase):
     description = "[telemetry] sink_command = 123 raises ConfigError"
 
     def run(self) -> EvalResult:
-        wd = Path(tempfile.mkdtemp(prefix="loop-eval-telemetry-"))
+        wd = Path(tempfile.mkdtemp(prefix="loom-eval-telemetry-"))
         try:
             (wd / "harness.toml").write_text(
                 "[telemetry]\nsink_command = 123\n",
@@ -95,7 +95,7 @@ class TelemetryTraceCallsSinkWithStdin(EvalCase):
     description = "Trace.record() pipes JSON line to sink_command via stdin"
 
     def run(self) -> EvalResult:
-        wd = Path(tempfile.mkdtemp(prefix="loop-eval-telemetry-"))
+        wd = Path(tempfile.mkdtemp(prefix="loom-eval-telemetry-"))
         marker = wd / "marker.txt"
         sink = wd / "sink.sh"
         sink.write_text(
@@ -130,7 +130,7 @@ class TelemetrySinkFailureDoesntBreakTrace(EvalCase):
     description = "sink_command points to nonexistent path → warning logged, trace still written"
 
     def run(self) -> EvalResult:
-        wd = Path(tempfile.mkdtemp(prefix="loop-eval-telemetry-"))
+        wd = Path(tempfile.mkdtemp(prefix="loom-eval-telemetry-"))
         try:
             tr = Trace(wd, "test-session", sink_command="/nonexistent/sink")
             try:

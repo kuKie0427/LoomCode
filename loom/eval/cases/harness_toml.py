@@ -208,7 +208,7 @@ class HarnessTomlPartialOverridesKeepOtherDefaults(EvalCase):
 
 class HarnessTomlInitScaffoldsSkeleton(EvalCase):
     name = "harness-toml-init-scaffolds-skeleton"
-    description = "loop init writes a commented harness.toml skeleton (helps users discover the config)"
+    description = "loom init writes a commented harness.toml skeleton (helps users discover the config)"
 
     def run(self) -> EvalResult:
         import shutil

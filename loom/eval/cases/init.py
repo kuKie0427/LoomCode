@@ -4,7 +4,7 @@ from loom.eval.runner import EvalCase, EvalResult
 
 class InitSmokeEmptyDir(EvalCase):
     name = "init-smoke-empty-dir"
-    description = "loop init creates the 5-file minimum in an empty directory"
+    description = "loom init creates the 5-file minimum in an empty directory"
 
     def run(self) -> EvalResult:
         r = run_loop_cli("init", target_name="init-smoke-empty")
@@ -19,7 +19,7 @@ class InitSmokeEmptyDir(EvalCase):
 
 class InitScaffoldsPythonProject(EvalCase):
     name = "init-scaffolds-python-project"
-    description = "loop init in a Python project uses pytest + python -m compileall"
+    description = "loom init in a Python project uses pytest + python -m compileall"
 
     def run(self) -> EvalResult:
         r = run_loop_cli("init", setup="pyproject.toml", target_name="init-py-scaffold")
@@ -36,7 +36,7 @@ class InitScaffoldsPythonProject(EvalCase):
 
 class InitSkipsExisting(EvalCase):
     name = "init-skips-existing"
-    description = "loop init preserves pre-existing files when force is not set"
+    description = "loom init preserves pre-existing files when force is not set"
 
     def run(self) -> EvalResult:
         r = run_loop_cli("init", target_name="init-skip-existing")
@@ -53,7 +53,7 @@ class InitSkipsExisting(EvalCase):
 
 class InitForceOverwrites(EvalCase):
     name = "init-force-overwrites"
-    description = "loop init --force overwrites existing files"
+    description = "loom init --force overwrites existing files"
 
     def run(self) -> EvalResult:
         r = run_loop_cli("init", target_name="init-force")
@@ -74,7 +74,7 @@ class InitForceOverwrites(EvalCase):
 
 class InitWithAgentFileClaude(EvalCase):
     name = "init-with-agent-file-claude"
-    description = "loop init --agent-file CLAUDE.md creates CLAUDE.md instead of AGENTS.md"
+    description = "loom init --agent-file CLAUDE.md creates CLAUDE.md instead of AGENTS.md"
 
     def run(self) -> EvalResult:
         r = run_loop_cli("init", "--agent-file", "CLAUDE.md", target_name="init-claude")
@@ -90,7 +90,7 @@ class InitWithAgentFileClaude(EvalCase):
 
 class InitCustomCommands(EvalCase):
     name = "init-custom-commands"
-    description = "loop init --commands overrides stack detection"
+    description = "loom init --commands overrides stack detection"
 
     def run(self) -> EvalResult:
         r = run_loop_cli("init", "--commands", "make test,make lint", target_name="init-custom-cmd")

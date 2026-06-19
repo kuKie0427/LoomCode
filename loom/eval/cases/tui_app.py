@@ -16,7 +16,7 @@ from loom.eval.runner import EvalCase, EvalResult
 
 class TuiPackageImports(EvalCase):
     name = "tui-package-imports"
-    description = "loop.tui and AgentTUIApp are importable"
+    description = "loom.tui and AgentTUIApp are importable"
 
     def run(self) -> EvalResult:
         try:
@@ -28,7 +28,7 @@ class TuiPackageImports(EvalCase):
                 detail=f"Import failed: {type(exc).__name__}: {exc}",
             )
         return EvalResult(name=self.name, passed=True,
-                          detail="loop.tui + AgentTUIApp importable")
+                          detail="loom.tui + AgentTUIApp importable")
 
 
 # ── Case 2: required attributes ──────────────────────────────────────────────

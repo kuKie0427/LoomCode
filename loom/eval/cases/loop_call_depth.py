@@ -10,7 +10,7 @@ from loom.eval.runner import EvalCase, EvalResult
 
 class LoopCallDepthEnforcedAtMax(EvalCase):
     name = "loom-call-depth-enforced-at-max"
-    description = "LOOP_CALL_DEPTH=3 with subprocess.run('loop ...') exits 1 with depth-error log"
+    description = "LOOP_CALL_DEPTH=3 with subprocess.run('loom ...') exits 1 with depth-error log"
 
     def run(self) -> EvalResult:
         env = os.environ.copy()
@@ -66,7 +66,7 @@ class LoopCallDepthIncrementsAcrossCalls(EvalCase):
 
 class LoopCallDepthAllowsNormalCall(EvalCase):
     name = "loom-call-depth-allows-normal-call"
-    description = "LOOP_CALL_DEPTH unset (or 0) → 'loop audit --help' runs without depth error"
+    description = "LOOP_CALL_DEPTH unset (or 0) → 'loom audit --help' runs without depth error"
 
     def run(self) -> EvalResult:
         env = os.environ.copy()

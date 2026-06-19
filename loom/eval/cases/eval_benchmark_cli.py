@@ -10,7 +10,7 @@ from loom.eval.runner import EvalCase, EvalResult
 
 class EvalBenchmarkResumeCliAvailable(EvalCase):
     name = "eval-benchmark-resume-cli-available"
-    description = "loop eval --benchmark resume 是合法的 CLI 调用(不需要真跑 benchmark,只测 parser)"
+    description = "loom eval --benchmark resume 是合法的 CLI 调用(不需要真跑 benchmark,只测 parser)"
 
     def run(self) -> EvalResult:
         wd = Path(tempfile.mkdtemp("cli-bench-test"))
