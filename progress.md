@@ -2671,3 +2671,36 @@ Items 1-8 are P5 polish candidates. Items 9 is a NIT (descriptions only). Items 
 
 **Status**: P0-P4 all `done`. Only P5 (final verification + commit) remains. f-loom-rename umbrella still `not-started` (P5 will mark it done after final verification).
 
+---
+
+## f-loom-rename complete: rename to loom shipped (2026-06-19)
+
+Final phase of the `loop → loom` rename project. All 6 phases complete.
+
+**Final state**:
+- ./init.sh: 375 passed, 0 ruff, 0 mypy
+- uv run python -m loom.cli eval --fail-under 100: 142/142 passed
+- uv run python -m loom.cli audit .: 97/100
+- uv run python -m loom.cli --help: prints `loom` program name
+- git log: 5 atomic phase commits (ac77374, c2c9949, 836fc55, 305a4d5, ebffb0b)
+- commit 836fc55: 65 file renames detected by git (similarity 82-100%)
+
+**Phase summary**:
+| Phase | Commit | Scope |
+|-------|--------|-------|
+| P0 | ac77374 | Brand assets: docs/loom-mark.svg, docs/loom-icon.svg, docs/favicon-{16,32,64}.png, README header |
+| P1 | c2c9949 | tui-design.html: 7 terminal mockup titles `loop —` → `loom —` |
+| P2 | 836fc55 | `loop/` → `loom/` package rename, 65 files (R082–R100 similarity), all imports updated, CLI entry, pyproject |
+| P3 | 305a4d5 | AGENTS.md / feature_list.json / init.sh / progress.md / tests/ — all `loop` references → `loom` |
+| P4 | ebffb0b | tests/ docstring + file-path polish (3 lines) + f-loom-rename-p4 status flip |
+| P5 | (this commit) | Final verification + evidence + f-loom-rename → done |
+
+**Total LOC change**: ~115 files touched (65 .py rename + 4 brand files + 11 doc/track + 27 test imports + 8 NIT polish).
+
+**f-loom-rename**: `done`. Project successfully renamed `loop → loom`. Optional follow-ups (not in scope of this feature):
+- CHANGELOG.md `[Unreleased]` — Project rename to loom
+- git tag `v0.2.0-rename`
+- GitHub repo rename (user action required)
+- PyPI rename (user action required)
+- README badge / link updates if pointing to old repo URL
+

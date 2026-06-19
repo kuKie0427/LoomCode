@@ -431,9 +431,9 @@
       "name": "Project rename: loop → loom",
       "description": "Rename the project from `loop` to `loom` based on the TUI design language and brand identity. The loom weaving metaphor captures the agent's role (weaves user intent + tool calls + model responses into coherent output) better than the generic 'loop'. Already completed in design phase: docs/tui-design-language.md (318 lines, with §4.3 Header sub-section), docs/tui-design.html (1443 lines, 7 state mockups including Header collapsed/expanded), docs/loom-logo.html (1443 lines, 10-section brand identity sheet with primary mark, wordmark, lockups, icon variant, color variants, construction grid, pattern tile, real-world mockups, anti-patterns, tagline 'weaving intent into action'). This feature implements the actual rename across 6 phases. Roadmap: .sisyphus/plans/loom-rename-roadmap.md. Phase files: loom-rename-p0.md through loom-rename-p5.md. P0 and P1 are independent (can run in either order); P2 depends on P0; P3 and P4 depend on P2; P5 depends on all. Each phase is independently committable. Total estimated effort: ~7h.",
       "dependencies": [],
-      "status": "not-started",
+      "status": "done",
       "verification": "uv run python -m loom.cli --help && uv run python -m loom.cli eval --fail-under 100 && ./init.sh && git log --oneline | grep -c 'loom-rename-p'",
-      "evidence": ""
+      "evidence": "6 phases complete (P0 brand assets ac77374 / P1 design sync c2c9949 / P2 code rename 836fc55 / P3 tracking rename 305a4d5 / P4 test rename ebffb0b / P5 verify). ./init.sh → 375 pytest passed, 0 ruff, 0 mypy. uv run python -m loom.cli eval --fail-under 100 → 142/142 passed. uv run python -m loom.cli audit . → 97/100. uv run python -m loom.cli --help → 'loom' program name. git log shows 5 atomic rename commits. P2 commit 836fc55 used 'git mv' for 65 files; git auto-detected rename with similarity 82-100%. Total rename scope: 65 .py + 4 design files (mark/icon/favicons) + 11 doc/track files (README/AGENTS/feature_list/init.sh/progress) + 27 test files (P3) + 8 test file polish (P4) = ~115 files touched across 5 atomic commits."
     },
     {
       "id": "f-loom-rename-p0",
@@ -498,9 +498,9 @@
         "f-loom-rename-p3",
         "f-loom-rename-p4"
       ],
-      "status": "not-started",
+      "status": "done",
       "verification": "./init.sh && uv run python -m loom.cli --help && uv run python -m loom.cli audit . && git log --oneline | grep -c 'loom-rename-p'",
-      "evidence": ""
+      "evidence": "./init.sh → '375 passed, 21 warnings' (all green); uv run python -m loom.cli eval → 'Eval results: 142/142 passed'; uv run python -m loom.cli audit . → 'Overall: 97/100'; git log shows 5 atomic phase commits (ac77374/c2c9949/836fc55/305a4d5/ebffb0b); commit 836fc55 detected 65 file renames (R082–R100) preserving history; CLI --help prints 'loom' program name; TUI smoke exits cleanly via timeout. P5 plan task 3 (test file rename) is a no-op (no test_loop_*.py exist)."
     },
     {
       "id": "f-harness-eval",
