@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from loop.skills import build_skill_index
-from loop.skills.discovery import list_skill_dirs
-from loop.skills.registry import parse_skill_md
+from loom.skills import build_skill_index
+from loom.skills.discovery import list_skill_dirs
+from loom.skills.registry import parse_skill_md
 
 SAMPLE_SKILL = """# run-pytest
 

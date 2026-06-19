@@ -2,7 +2,7 @@
 
 from textual._xterm_parser import XTermParser
 
-from loop.tui import kitty_patch
+from loom.tui import kitty_patch
 
 
 def test_batched_codepoints():

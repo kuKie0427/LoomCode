@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from loop.agent.checkpoint import (
+from loom.agent.checkpoint import (
     CHECKPOINT_EVERY_TOKENS,
     CHECKPOINT_EVERY_TOOL_CALLS,
     default_path_for,

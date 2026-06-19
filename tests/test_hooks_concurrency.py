@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from loop.agent.hooks import HOOKS, HOOKS_LOCK, Hooks
+from loom.agent.hooks import HOOKS, HOOKS_LOCK, Hooks
 
 
 def _reset_hooks():

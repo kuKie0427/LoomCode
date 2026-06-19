@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from loop.agent.tool_registry import Tool, ToolRegistry
+from loom.agent.tool_registry import Tool, ToolRegistry
 
 
 def hello(args: dict) -> str:
@@ -90,7 +90,7 @@ class TestToolRegistry:
 
 class TestAgentToolRegistryIntegration:
     def test_loop_tools_loaded_into_registry(self) -> None:
-        from loop.agent.tools import TOOL_REGISTRY
+        from loom.agent.tools import TOOL_REGISTRY
         names = TOOL_REGISTRY.names()
         assert "bash" in names
         assert "read_file" in names
@@ -101,7 +101,7 @@ class TestAgentToolRegistryIntegration:
         assert "todo_write" in names
 
     def test_loop_tools_marked_read_only_where_safe(self) -> None:
-        from loop.agent.tools import TOOL_REGISTRY
+        from loom.agent.tools import TOOL_REGISTRY
         for name in ("read_file", "memory_read", "memory_search", "glob", "load_skill"):
             tool = TOOL_REGISTRY.get(name)
             assert tool is not None

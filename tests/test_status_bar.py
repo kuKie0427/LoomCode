@@ -15,9 +15,9 @@ import asyncio
 
 from textual.events import MouseScrollDown, MouseScrollUp
 
-from loop.tui.app import AgentTUIApp
-from loop.tui.chat_log import ChatLog
-from loop.tui.status_bar import StatusBar, _format_tokens, _progress_bar
+from loom.tui.app import AgentTUIApp
+from loom.tui.chat_log import ChatLog
+from loom.tui.status_bar import StatusBar, _format_tokens, _progress_bar
 
 
 def test_format_tokens_compact():
@@ -184,7 +184,7 @@ def test_wheel_event_posted_to_composer_scrolls_chatlog():
     """
 
     async def driver():
-        from loop.tui.composer import Composer
+        from loom.tui.composer import Composer
 
         app = AgentTUIApp()
         async with app.run_test(size=(80, 20)) as pilot:
@@ -219,7 +219,7 @@ def test_layout_has_unified_chrome_container():
     """
 
     async def driver():
-        from loop.tui.composer import Composer
+        from loom.tui.composer import Composer
 
         app = AgentTUIApp()
         async with app.run_test(size=(120, 25)) as pilot:
@@ -335,7 +335,7 @@ def test_wheel_event_with_cursor_over_composer_uses_app_on_event():
     """
 
     async def driver():
-        from loop.tui.composer import Composer
+        from loom.tui.composer import Composer
 
         app = AgentTUIApp()
         async with app.run_test(size=(80, 20)) as pilot:

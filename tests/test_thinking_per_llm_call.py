@@ -6,7 +6,7 @@ appended its thinking text to the stale, hidden ``ThinkingDisplay`` from
 the first call, so the user never saw it.
 
 The fix is in two parts:
-1. ``loop/agent/loop.py`` fires a new ``on_assistant_message_start`` callback
+1. ``loop/agent/loom.py`` fires a new ``on_assistant_message_start`` callback
    before **each** LLM call within the while loop. The existing
    ``on_message_start`` keeps its once-per-session semantic.
 2. ``loop/tui/app.py`` wires ``on_assistant_message_start`` to the same
@@ -20,8 +20,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 
-from loop.tui.app import AgentTUIApp
-from loop.tui.chat_log import ChatLog, ThinkingDisplay
+from loom.tui.app import AgentTUIApp
+from loom.tui.chat_log import ChatLog, ThinkingDisplay
 
 
 def test_run_agent_turn_callbacks_include_per_message_start():
@@ -46,7 +46,7 @@ def test_show_thinking_spinner_creates_new_display_each_call():
     """
 
     async def driver():
-        from loop.tui.messages import (
+        from loom.tui.messages import (
             AssistantTurnEnd,
             AssistantTurnStart,
             TextDelta,
@@ -106,7 +106,7 @@ def test_thinking_display_widget_count_grows_with_llm_calls():
     """
 
     async def driver():
-        from loop.tui.messages import (
+        from loom.tui.messages import (
             AssistantTurnEnd,
             AssistantTurnStart,
             TextDelta,

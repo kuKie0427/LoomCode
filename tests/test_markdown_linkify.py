@@ -24,8 +24,8 @@ import inspect
 
 import pytest
 
-from loop.tui.app import AgentTUIApp
-from loop.tui.chat_log import (
+from loom.tui.app import AgentTUIApp
+from loom.tui.chat_log import (
     AssistantMessage,
     StreamingOverlay,
     ThinkingDisplay,
@@ -127,7 +127,7 @@ def test_mounted_assistant_message_with_filename_has_no_link_segment():
     """
 
     async def driver():
-        from loop.tui.chat_log import _markdown_parser_factory
+        from loom.tui.chat_log import _markdown_parser_factory
 
         app = AgentTUIApp()
         async with app.run_test(size=(80, 20)) as pilot:

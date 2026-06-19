@@ -4,8 +4,8 @@ from unittest.mock import Mock
 
 import pytest
 
-import loop.agent.hooks as hook_module
-from loop.agent.hooks import HOOKS, Hooks
+import loom.agent.hooks as hook_module
+from loom.agent.hooks import HOOKS, Hooks
 
 
 class MockBlock:

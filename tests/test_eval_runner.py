@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from loop.eval.runner import (
+from loom.eval.runner import (
     EvalCase,
     EvalResult,
     discover_evals,

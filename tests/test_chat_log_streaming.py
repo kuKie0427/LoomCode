@@ -19,7 +19,7 @@ import asyncio
 
 from textual.app import App, ComposeResult
 
-from loop.tui.chat_log import ChatLog, StreamingOverlay
+from loom.tui.chat_log import ChatLog, StreamingOverlay
 
 
 class _ChatLogApp(App):

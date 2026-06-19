@@ -11,7 +11,7 @@ from unittest.mock import PropertyMock, patch
 
 import pytest
 
-from loop.tui.chat_log import (
+from loom.tui.chat_log import (
     ChatLog,
     _has_markdown_syntax,
     _is_structured_line,

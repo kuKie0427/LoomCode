@@ -4,7 +4,7 @@ import json
 import stat
 from pathlib import Path
 
-from loop.init_cmd import init
+from loom.init_cmd import init
 
 EXPECTED_FILES = (
     "AGENTS.md",

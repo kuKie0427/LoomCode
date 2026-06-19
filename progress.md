@@ -1,5 +1,25 @@
 # Session Progress Log
 
+## Project rename: loop → loom (2026-06-19)
+
+The product has been renamed from `loop` to `loom`. The new name reflects the
+TUI design language: the agent **weaves** user intent, tool calls, and model
+responses into coherent output — a better metaphor than a generic execution
+loop. Brand assets (primary mark, icon, favicon, README header) shipped in
+commit `ac77374`; TUI design sync shipped in `c2c9949`; the Python package
+`loop/` was renamed to `loom/` in `836fc55`; tracking + docs (this commit)
+follows; tests + eval renames land in P4; final atomic verification lands in
+P5.
+
+| Phase | Commit | Scope |
+|---|---|---|
+| P0 | `ac77374` | Brand assets (primary mark, icon, favicon, README header) |
+| P1 | `c2c9949` | TUI design artifact sync (terminal titles in `tui-design.html`) |
+| P2 | `836fc55` | Code: `loop/` package → `loom/`, all Python imports |
+| P3 | (this) | Tracking: `AGENTS.md`, `feature_list.json`, `init.sh`, `progress.md` |
+| P4 | (pending) | Tests + eval (`tests/`, `loom/eval/cases/`) |
+| P5 | (pending) | Atomic commits + final `./init.sh` verification |
+
 ## Current State
 
 **Last Updated:** 2026-06-17 13:35

@@ -5,7 +5,7 @@ import threading
 
 import pytest
 
-from loop.agent.trace import Trace, current, default_path_for, start, stop
+from loom.agent.trace import Trace, current, default_path_for, start, stop
 
 
 @pytest.fixture

@@ -1,8 +1,8 @@
 from textual.app import App, ComposeResult
 
-from loop.tui.app import AgentTUIApp
-from loop.tui.screens import PermissionScreen
-from loop.tui.widgets import ToolCallCard
+from loom.tui.app import AgentTUIApp
+from loom.tui.screens import PermissionScreen
+from loom.tui.widgets import ToolCallCard
 
 
 def test_empty_layout(snap_compare):

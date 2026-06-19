@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from loop.audit_cmd import (
+from loom.audit_cmd import (
     HarnessFile,
     audit,
     format_score_report,
@@ -13,7 +13,7 @@ from loop.audit_cmd import (
     load_harness_files,
     score_harness,
 )
-from loop.init_cmd import init
+from loom.init_cmd import init
 
 
 def _make_minimal_harness(root: Path) -> None:

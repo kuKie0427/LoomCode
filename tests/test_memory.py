@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from loop.memory.context import (
+from loom.memory.context import (
     COMBINED_BUDGET,
     TIER1_TOKEN_BUDGET,
     TIER2_TOKEN_BUDGET,
@@ -15,13 +15,13 @@ from loop.memory.context import (
     load_tier3,
     truncate_to_tokens,
 )
-from loop.memory.paths import (
+from loom.memory.paths import (
     find_project_root,
     is_own_project,
     memory_dir,
     memory_file,
 )
-from loop.memory.store import MemoryStore, token_count
+from loom.memory.store import MemoryStore, token_count
 
 
 @pytest.fixture

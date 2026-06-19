@@ -2,7 +2,7 @@
 
 import subprocess
 
-from loop.agent.prompt import BOUNDARY, SystemPrompt
+from loom.agent.prompt import BOUNDARY, SystemPrompt
 
 
 class TestAddStatic:

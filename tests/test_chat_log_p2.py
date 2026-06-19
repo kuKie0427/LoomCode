@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from loop.tui.chat_log import (
+from loom.tui.chat_log import (
     ChatLog,
     CollapsibleToolOutput,
     ThinkingDisplay,
@@ -36,7 +36,7 @@ def log():
 def log_no_async():
     chat = ChatLog()
     chat.compose()
-    with patch("loop.tui.chat_log.asyncio.create_task") as create_task:
+    with patch("loom.tui.chat_log.asyncio.create_task") as create_task:
         chat._create_task_mock = create_task
         yield chat
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from loop.detect import (
+from loom.detect import (
     detect_package_manager,
     detect_project,
     init_script_content,

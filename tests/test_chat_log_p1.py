@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from loop.tui.chat_log import (
+from loom.tui.chat_log import (
     ChatLog,
     StreamingOverlay,
     ToolCallMarker,
@@ -35,7 +35,7 @@ def log_no_async():
     chat = ChatLog()
     chat.compose()
     with (
-        patch("loop.tui.chat_log.asyncio.create_task") as create_task,
+        patch("loom.tui.chat_log.asyncio.create_task") as create_task,
         patch.object(ChatLog, "set_interval") as set_interval,
         patch.object(StreamingOverlay, "update_content") as update_content,
     ):
@@ -285,7 +285,7 @@ class TestShowThinkingSpinnerNoBodyLeak:
         assert log_no_async._current_body is None
 
     def test_show_thinking_spinner_resets_stale_body(self, log_no_async):
-        from loop.tui.chat_log import AssistantMessage
+        from loom.tui.chat_log import AssistantMessage
 
         log_no_async._current_body = AssistantMessage("stale")
         log_no_async.show_thinking_spinner()

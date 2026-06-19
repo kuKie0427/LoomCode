@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from anthropic.types import TextBlock
 
-from loop.agent.tools import spawn_subagent
+from loom.agent.tools import spawn_subagent
 
 
 @pytest.fixture

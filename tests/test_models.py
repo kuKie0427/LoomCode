@@ -1,6 +1,6 @@
-from loop.agent.llm import LLMClient
+from loom.agent.llm import LLMClient
 
-ANTHROPIC_PATCH = "loop.agent.llm.Anthropic"
+ANTHROPIC_PATCH = "loom.agent.llm.Anthropic"
 
 
 def test_init_creates_anthropic_client(mocker, monkeypatch):

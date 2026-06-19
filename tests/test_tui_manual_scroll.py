@@ -12,8 +12,8 @@ import asyncio
 
 from textual.events import MouseScrollDown, MouseScrollUp
 
-from loop.tui.app import AgentTUIApp
-from loop.tui.chat_log import ChatLog, UserMessage
+from loom.tui.app import AgentTUIApp
+from loom.tui.chat_log import ChatLog, UserMessage
 
 
 async def _seed_overflow(app: AgentTUIApp) -> ChatLog:
@@ -121,7 +121,7 @@ def test_status_bar_hint_mentions_mouse_wheel():
     async def driver():
         app = AgentTUIApp()
         async with app.run_test(size=(80, 20)) as pilot:
-            from loop.tui.status_bar import StatusBar
+            from loom.tui.status_bar import StatusBar
             status_bar = app.query_one(StatusBar)
             await _seed_overflow(app)
             await pilot.pause(0.3)

@@ -5,10 +5,10 @@ from unittest.mock import MagicMock
 import pytest
 from anthropic.types import TextBlock, ToolUseBlock
 
-import loop.agent.hooks as hook
-import loop.agent.loop as main
-import loop.agent.tools
-from loop.agent.hooks import Hooks
+import loom.agent.hooks as hook
+import loom.agent.loop as main
+import loom.agent.tools
+from loom.agent.hooks import Hooks
 
 
 @pytest.fixture(autouse=True)
@@ -206,7 +206,7 @@ class TestSpawnSubagent:
         mock_client.messages.create.return_value = mock_response
         main.llm_client.client = mock_client
 
-        result = loop.agent.tools.spawn_subagent("Analyze the codebase")
+        result = loom.agent.tools.spawn_subagent("Analyze the codebase")
 
         assert isinstance(result, str)
         assert "Subagent completed the task successfully." in result

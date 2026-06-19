@@ -3,7 +3,7 @@ set -e
 
 cd "$(dirname "$0")"
 
-echo "=== Harness Initialization (loop) ==="
+echo "=== Harness Initialization (loom) ==="
 
 if ! command -v uv >/dev/null 2>&1; then
     echo "✗ uv is not installed."
@@ -21,12 +21,12 @@ uv run ruff check .
 
 echo ""
 echo "=== 3/4 Type check (mypy) ==="
-uv run mypy loop/
+uv run mypy loom/
 
 echo ""
 echo "=== 4/4 Tests (pytest) ==="
 set +e
-uv run pytest 2>&1 | tee /tmp/loop-pytest.log
+uv run pytest 2>&1 | tee /tmp/loom-pytest.log
 PYTEST_EXIT=${PIPESTATUS[0]}
 set -e
 
@@ -38,7 +38,7 @@ fi
 
 EXPECTED=$(uv run python - <<'PY'
 import json, re, sys
-log = open("/tmp/loop-pytest.log").read()
+log = open("/tmp/loom-pytest.log").read()
 failed = set(re.findall(r"^FAILED (\S+)", log, re.MULTILINE))
 if not failed:
     print("UNEXPECTED: no FAILED line parsed")
