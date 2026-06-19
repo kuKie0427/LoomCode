@@ -21,6 +21,12 @@ async def _seed_overflow(app: AgentTUIApp) -> ChatLog:
     await chat_log.append_user_message("hello")
     for i in range(60):
         chat_log.append_streaming_text(f"line {i}\n\n")
+    deadline = 5.0
+    waited = 0.0
+    step = 0.05
+    while chat_log.max_scroll_y <= 0 and waited < deadline:
+        await asyncio.sleep(step)
+        waited += step
     return chat_log
 
 

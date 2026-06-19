@@ -31,6 +31,7 @@ AgentCallback = Callable[..., None]
 
 DEFAULT_CALLBACKS: dict[str, AgentCallback | None] = {
     "on_message_start": None,
+    "on_assistant_message_start": None,
     "on_text_delta": None,
     "on_thinking_delta": None,
     "on_tool_use": None,
@@ -171,6 +172,12 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                 cb["on_compact"](msg_count_before, len(messages))
             if tr is not None:
                 tr.record("autocompact", tool_calls_so_far=tool_call_count)
+        # Fires before EACH LLM call, so the TUI can show the
+        # thinking spinner (and reset the thinking display) for every
+        # round of reasoning, not just the first. ``on_message_start``
+        # is preserved for the once-per-session semantic.
+        if cb["on_assistant_message_start"] is not None:
+            cb["on_assistant_message_start"]()
         if stream_text is not None:
             # ===== STREAMING PATH =====
             from anthropic.types import Message, TextBlock, ToolUseBlock, Usage

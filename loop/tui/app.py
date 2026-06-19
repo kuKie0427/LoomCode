@@ -10,10 +10,12 @@ import os
 import subprocess
 
 from loguru import logger
+from textual import messages as textual_messages
 from textual import work
 from textual.app import App, ComposeResult
+from textual.containers import Vertical
+from textual.events import MouseScrollDown, MouseScrollUp
 from textual.reactive import reactive
-from textual.widgets import Header
 
 from loop.agent.llm import LLMClient
 from loop.agent.loop import WORKDIR, agent_loop
@@ -38,11 +40,6 @@ class AgentTUIApp(App):
         layout: vertical;
         background: $background;
     }
-    Header {
-        background: $background;
-        color: $text-muted;
-        text-style: dim;
-    }
     #chat-log {
         height: 1fr;
         background: $background;
@@ -60,26 +57,32 @@ class AgentTUIApp(App):
     #chat-log:focus-within {
         background: $boost 3%;
     }
+    #chrome {
+        dock: bottom;
+        height: auto;
+        background: $surface;
+        margin: 0 2 1 2;
+        padding: 0;
+        border: none;
+    }
+    #chrome:focus-within {
+        background: $boost;
+    }
     #status-bar {
         height: 1;
-        dock: bottom;
-        background: $background;
+        background: transparent;
         color: $text-muted;
-        padding: 0 2;
+        padding: 0 1;
     }
     #composer {
         height: auto;
         max-height: 8;
         min-height: 3;
-        dock: bottom;
-        background: $surface;
+        background: transparent;
         border: none;
-        padding: 1 2;
-        margin: 0 2 1 2;
+        padding: 0 1 1 1;
+        margin: 0;
         color: $text;
-    }
-    #composer:focus {
-        background: $boost;
     }
     #composer .text-area--cursor {
         background: $accent;
@@ -93,6 +96,8 @@ class AgentTUIApp(App):
     _main_loop: asyncio.AbstractEventLoop | None
     streaming_text: reactive[str] = reactive("")
     tool_call_count: reactive[int] = reactive(0)
+    user_turn_count: reactive[int] = reactive(0)
+    ctx_tokens: reactive[int] = reactive(0)
 
     BINDINGS = [
         ("ctrl+c", "cancel_stream", "Cancel"),
@@ -134,9 +139,96 @@ class AgentTUIApp(App):
         """Capture the main event loop for cross-thread async dispatch."""
         self._main_loop = asyncio.get_running_loop()
         self.query_one("#composer", Composer).focus()
+        status_bar = self.query_one(StatusBar)
+        status_bar.ctx_window = self.llm.get_context_window()
+        self._sync_status_bar()
 
     def on_key(self, event) -> None:
         pass
+
+    def on_mouse_scroll_up(self, event: MouseScrollUp) -> None:
+        if self._forward_scroll_to_chatlog(event, direction=-1):
+            event.stop()
+
+    def on_mouse_scroll_down(self, event: MouseScrollDown) -> None:
+        if self._forward_scroll_to_chatlog(event, direction=1):
+            event.stop()
+
+    async def on_event(self, event) -> None:
+        """Intercept mouse wheel events at the App boundary so they always
+        reach the ChatLog, regardless of which widget the cursor is over.
+
+        Textual's standard event flow dispatches mouse events to the topmost
+        widget at the cursor, then bubbles through that widget's parent
+        chain. The App's `on_mouse_scroll_*` only fires when an event is
+        posted to the App's message pump — which never happens for real
+        driver input. So we have to intercept before the screen forwards
+        the event. We allow the event to continue through `super().on_event`
+        after handling so the cursor widget still receives it (e.g. to
+        update hover states), but the scroll has already been applied.
+        """
+        if isinstance(event, MouseScrollUp) and not event.is_forwarded:
+            if self._forward_scroll_to_chatlog(event, direction=-1):
+                event.stop()
+                return
+        elif isinstance(event, MouseScrollDown) and not event.is_forwarded:
+            if self._forward_scroll_to_chatlog(event, direction=1):
+                event.stop()
+                return
+        await super().on_event(event)
+
+    def _forward_scroll_to_chatlog(self, event, direction: int) -> bool:
+        """Route any unhandled wheel event to the ChatLog so the user can
+        scroll history regardless of where the cursor sits (Composer, gutter,
+        status bar, etc.). Returns True if the chat log accepted the scroll.
+        """
+        try:
+            chat_log = self.query_one(ChatLog)
+        except Exception:
+            return False
+        if chat_log.max_scroll_y <= 0:
+            return False
+        step = max(1, int(self.scroll_sensitivity_y))
+        new_y = max(
+            0.0,
+            min(float(chat_log.max_scroll_y), chat_log.scroll_y + direction * step),
+        )
+        if new_y == chat_log.scroll_y:
+            return False
+        chat_log.scroll_to(y=new_y, animate=False, immediate=True)
+        # ``scroll_to`` only updates the logical scroll position; the
+        # visual repaint is normally scheduled via the compositor's idle
+        # process, but in real terminals that repaint can be deferred
+        # until something else (focus change, next event) wakes the loop.
+        # Post the Update/UpdateScroll messages directly so the screen
+        # sees the dirty widget on its next pump cycle and repaints
+        # without waiting for the wheel-event focus handoff.
+        try:
+            chat_log._set_dirty(chat_log.size.region)
+            self.screen.post_message(textual_messages.Update(chat_log))
+            self.screen.post_message(textual_messages.UpdateScroll())
+        except Exception:
+            pass
+        return True
+
+    def _sync_status_bar(self) -> None:
+        try:
+            status_bar = self.query_one(StatusBar)
+        except Exception:
+            return
+        status_bar.turns = self.user_turn_count
+        status_bar.tools = self.tool_call_count
+        status_bar.ctx_tokens = self.ctx_tokens
+        status_bar.ctx_window = self.llm.get_context_window()
+
+    def watch_user_turn_count(self, _old: int, _new: int) -> None:
+        self._sync_status_bar()
+
+    def watch_tool_call_count(self, _old: int, _new: int) -> None:
+        self._sync_status_bar()
+
+    def watch_ctx_tokens(self, _old: int, _new: int) -> None:
+        self._sync_status_bar()
 
     def _make_tui_asker(self):
         """Build an asker that pushes PermissionScreen onto the app via the main loop.
@@ -161,10 +253,10 @@ class AgentTUIApp(App):
         return asker
 
     def compose(self) -> ComposeResult:
-        yield Header()
         yield ChatLog(id="chat-log")
-        yield StatusBar(id="status-bar")
-        yield Composer(id="composer")
+        with Vertical(id="chrome"):
+            yield StatusBar(id="status-bar")
+            yield Composer(id="composer")
 
     def on_assistant_turn_start(self, _: AssistantTurnStart) -> None:
         chat_log = self.query_one(ChatLog)
@@ -195,11 +287,21 @@ class AgentTUIApp(App):
         chat_log.append_system_note(
             f"[Compacted: {message.msgs_before} → {message.msgs_after} messages]"
         )
+        self._refresh_ctx_tokens()
 
     def on_assistant_turn_end(self, message: AssistantTurnEnd) -> None:
         self.tool_call_count = self.tool_call_count + message.tool_calls
         chat_log = self.query_one(ChatLog)
         chat_log._finalize_streaming()
+        self._refresh_ctx_tokens()
+
+    def _refresh_ctx_tokens(self) -> None:
+        from loop.agent.loop import context as global_context
+
+        try:
+            self.ctx_tokens = global_context.current_tokens(self.history)
+        except Exception:
+            pass
 
     async def on_composer_submitted(self, event: Composer.Submitted) -> None:
         user_msg = event.value.strip()
@@ -220,6 +322,9 @@ class AgentTUIApp(App):
             await self.action_quit()
         elif cmd == "clear":
             self.history.clear()
+            self.user_turn_count = 0
+            self.tool_call_count = 0
+            self.ctx_tokens = 0
             await chat_log.clear_content()
         elif cmd == "help":
             chat_log.append_system_note(
@@ -228,6 +333,7 @@ class AgentTUIApp(App):
         elif cmd == "model":
             if args.strip():
                 self.llm.change_model(args.strip())
+                self._sync_status_bar()
                 chat_log.append_system_note(f"Model changed to **{self.llm.model}**")
             else:
                 chat_log.append_system_note(f"Current model: **{self.llm.model}**")
@@ -238,6 +344,11 @@ class AgentTUIApp(App):
                 ckpt = checkpoint.load(WORKDIR)
                 if ckpt is not None:
                     self.history = ckpt.get("messages", [])
+                    self.user_turn_count = sum(
+                        1 for m in self.history if m.get("role") == "user"
+                    )
+                    self.tool_call_count = ckpt.get("tool_call_count", 0)
+                    self._refresh_ctx_tokens()
                     chat_log.append_system_note(
                         f"Resumed from checkpoint ({ckpt.get('saved_at', '?')}, "
                         f"{len(self.history)} messages)"
@@ -259,11 +370,15 @@ class AgentTUIApp(App):
 
     async def run_agent_turn(self, user_msg: str) -> None:
         self.history.append({"role": "user", "content": user_msg})
+        self.user_turn_count = self.user_turn_count + 1
         chat_log = self.query_one(ChatLog)
         await chat_log.append_user_message(user_msg)
 
         callbacks = {
             "on_message_start": lambda: self.post_message(AssistantTurnStart()),
+            "on_assistant_message_start": lambda: self.post_message(
+                AssistantTurnStart()
+            ),
             "on_text_delta": lambda chunk: self.post_message(TextDelta(chunk)),
             "on_thinking_delta": lambda chunk: self.post_message(ThinkingDelta(chunk)),
             "on_tool_use": lambda name, inp, uid: self.post_message(ToolUseStarted(name, inp, uid)),

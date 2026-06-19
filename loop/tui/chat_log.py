@@ -29,6 +29,26 @@ _TICK_INTERVAL_SECONDS = 0.05
 _SLOW_TICKS_PER_FRAME = 4
 
 
+def _markdown_parser_factory():
+    """Build a markdown-it parser that disables the linkify (URL auto-detect)
+    rule.
+
+    The default ``gfm-like`` preset enabled by ``textual.widgets.Markdown``
+    turns on ``linkify-it``, which matches any ``domain.tld`` against the
+    public-suffix list and turns it into a clickable link. File names with
+    a TLD-shaped extension (e.g. ``conftest.py``, ``setup.sh``, ``README.md``,
+    ``a.py``) get re-rendered as ``http://conftest.py`` and clicked in the
+    user's terminal — they open the OS default browser pointed at a
+    non-existent domain. We disable the linkify rule while keeping the rest
+    of the gfm-like preset (tables, strikethrough, inline HTML).
+    """
+    from markdown_it import MarkdownIt
+
+    parser = MarkdownIt("gfm-like")
+    parser.options["linkify"] = False
+    return parser
+
+
 def _is_structured_line(line: str) -> bool:
     """Check if a line starts a Markdown structure that needs newlines preserved."""
     stripped = line.lstrip()
@@ -116,6 +136,10 @@ class UserMessage(Markdown):
     }
     """
 
+    def __init__(self, markdown: str | None = None, **kwargs: Any) -> None:
+        kwargs.setdefault("parser_factory", _markdown_parser_factory)
+        super().__init__(markdown, **kwargs)
+
 
 class AssistantMessage(Markdown):
     DEFAULT_CSS = """
@@ -128,6 +152,10 @@ class AssistantMessage(Markdown):
     }
     """
 
+    def __init__(self, markdown: str | None = None, **kwargs: Any) -> None:
+        kwargs.setdefault("parser_factory", _markdown_parser_factory)
+        super().__init__(markdown, **kwargs)
+
 
 class StreamingOverlay(Markdown):
     DEFAULT_CSS = """
@@ -139,6 +167,10 @@ class StreamingOverlay(Markdown):
         border: none;
     }
     """
+
+    def __init__(self, markdown: str | None = None, **kwargs: Any) -> None:
+        kwargs.setdefault("parser_factory", _markdown_parser_factory)
+        super().__init__(markdown, **kwargs)
 
     def update_content(self, text: str) -> None:
         self.update(_normalize_for_stream(text))
@@ -169,6 +201,7 @@ class ThinkingDisplay(Markdown):
     """
 
     def __init__(self, markdown: str = "", **kwargs: Any) -> None:
+        kwargs.setdefault("parser_factory", _markdown_parser_factory)
         super().__init__(markdown, **kwargs)
         self.display = False
 
@@ -257,7 +290,7 @@ class CollapsibleToolOutput(Vertical):
         self.display = False
 
     def compose(self) -> ComposeResult:
-        yield Markdown(_truncate(self._output))
+        yield Markdown(_truncate(self._output), parser_factory=_markdown_parser_factory)
 
     def toggle(self) -> None:
         self.display = not self.display
@@ -316,7 +349,11 @@ class ToolCallModal(ModalScreen):
             if self._args_str:
                 body_parts.append(f"**Args:**\n```json\n{self._args_str}\n```")
             body_parts.append(f"**{icon} Result:**\n```text\n{self._output_str}\n```")
-            yield Markdown("\n\n".join(body_parts), id="tc-modal-body")
+            yield Markdown(
+                "\n\n".join(body_parts),
+                id="tc-modal-body",
+                parser_factory=_markdown_parser_factory,
+            )
             yield Button("Close", id="tc-modal-close", variant="primary")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

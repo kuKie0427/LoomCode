@@ -2043,3 +2043,67 @@ User said: "不要用快捷键，实现鼠标滚轮滚动" — reject the previo
 
 ### Verification
 348 pytest (+1 net), 138 eval, 0 ruff, 0 mypy, ./init.sh green.
+
+## Session: f-tui-thinking-per-llm-call (2026-06-19)
+
+**Goal**: track 4 coupled but untracked working-tree changes as 1 WIP=1 feature.
+
+The user authorized bundling 4 separate concerns into one feature entry (atomic commit). All 4 changes were already implemented and tested but had no `feature_list.json` entry. This session only adds the feature entry, the eval cases, and one cosmetic AGENTS.md fix.
+
+### 4 changes bundled
+
+| # | Change | File(s) | Working rule |
+|---|---|---|---|
+| 1 | NEW `on_assistant_message_start` callback fires BEFORE EACH LLM call inside the agent loop's while loop (preserves once-per-session `on_message_start`) | `loop/agent/loop.py` (DEFAULT_CALLBACKS + while loop top) | #14 |
+| 2 | TUI CSS refactor — `#chrome` Vertical wrapper replaces Header + dock:bottom on StatusBar/Composer, focus CSS moves to `#chrome:focus-within` | `loop/tui/app.py` (compose + CSS) | — |
+| 3 | Markdown linkify fix — `_markdown_parser_factory()` disables linkify-it, threaded through all 6 Markdown subclasses (UserMessage/AssistantMessage/StreamingOverlay/ThinkingDisplay/CollapsibleToolOutput/ToolCallModal) | `loop/tui/chat_log.py` | #13 |
+| 4 | Thinking display per-LLM-call fix — TUI wires `on_assistant_message_start` to AssistantTurnStart so spinner + fresh ThinkingDisplay appear on every reasoning round | `loop/tui/app.py` (run_agent_turn) | #14 |
+
+### 4 new eval cases
+
+| Case | Locks down |
+|---|---|
+| `agent-loop-assistant-message-start-in-defaults` | `DEFAULT_CALLBACKS` has `on_assistant_message_start` key AND can be overridden by caller |
+| `agent-loop-assistant-message-start-fires-per-llm-call` | 2-LLM-call scenario (tool_use → end_turn): `on_assistant_message_start` × 2, `on_message_start` × 1 |
+| `agent-loop-message-start-still-once-per-invocation` | Single-LLM-call regression guard: `on_message_start == 1` AND `on_assistant_message_start == 1` |
+| `agent-tui-app-wires-assistant-message-start` | `inspect.getsource(AgentTUIApp.run_agent_turn)` contains both `on_message_start` and `on_assistant_message_start` callback wirings |
+
+### AGENTS.md rule #1 wording fix (audit cosmetic regression)
+
+`loop/audit_cmd.py:173` checks for literal `"One feature at a time"` or `"one-feature-at-a-time"` in AGENTS.md (scope check). The previous rule #1 read `**WIP=1**: Work on exactly one feature from feature_list.json at a time.` — semantically correct but missing the audit-required phrase. Rewrote to:
+
+> `1. **WIP=1 (one feature at a time)**: Work on exactly one feature from `feature_list.json` at a time.`
+
+Preserves the WIP=1 semantic, adds the audit-required alias. Scope dimension now **5/5**.
+
+### Verification
+
+```
+$ uv run python -m loop.cli eval --fail-under 100
+Eval results: 142/142 passed   (was 138, +4 new cases)
+
+$ ./init.sh
+====================== 375 passed, 21 warnings in 58.05s =======================
+3 snapshots passed.
+=== Verification Complete (all green) ===
+
+$ uv run python -m loop.cli audit .
+Overall: 97/100
+Bottleneck: instructions
+  scope: 5/5 (5/5)   ← was 4/5 FAIL, now PASS
+    PASS One-feature-at-a-time rule exists
+    ...
+  self-test: 5/5 (1/1)
+    PASS Eval results: 142/142 passed
+```
+
+### Files changed (this commit)
+
+- `M  feature_list.json` (+1 entry: `f-tui-thinking-per-llm-call`, status `in-progress`, evidence empty — orchestrator marks done)
+- `M  AGENTS.md` (rule #1 wording — adds "one feature at a time" alias for audit scope check)
+- `M  loop/eval/cases/__init__.py` (register `tui_assistant_message_start` alphabetically)
+- `?? loop/eval/cases/tui_assistant_message_start.py` (NEW, 4 cases)
+
+### Files NOT changed (in scope: implementation already done)
+
+The 4 implementation changes were already in the working tree (untracked files: `tests/test_markdown_linkify.py`, `tests/test_status_bar.py`, `tests/test_thinking_per_llm_call.py`, `docs/tui-scrolling.md`, plus modifications to `loop/agent/loop.py`, `loop/tui/app.py`, `loop/tui/chat_log.py`, `loop/tui/composer.py`, `loop/tui/status_bar.py`, `tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw`, `tests/test_tui_manual_scroll.py`). This feature only tracks them — orchestrator will commit them atomically.
