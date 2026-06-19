@@ -85,37 +85,65 @@ class ContinuitySessionHandoffLoadedWhenPresent(EvalCase):
 
 class ContinuityEmptyHandoffTemplateSkipped(EvalCase):
     name = "continuity-empty-handoff-template-skipped"
-    description = "session-handoff.md containing only headers + empty bullets → NOT injected (substantive threshold)"
+    description = "session-handoff.md with only whitespace / no body content → NOT injected (substantive threshold)"
 
     def run(self) -> EvalResult:
         wd = make_empty_workdir("cont-empty-handoff")
-        empty_template = (
-            "# Session Handoff\n\n"
-            "## Last task\n\n"
-            "- \n\n"
-            "## Next steps\n\n"
-            "- \n\n"
-            "## Blockers\n\n"
-            "- \n\n"
-        )
-        (wd / "session-handoff.md").write_text(empty_template, encoding="utf-8")
+        # Truly empty: just whitespace. The previous template-based test was
+        # over-defensive (template heading text counted as body). Now we
+        # require actual content above the 30-char threshold.
+        (wd / "session-handoff.md").write_text("   \n\n  \n", encoding="utf-8")
 
         from loom.memory.context import load_session_continuity
         result = load_session_continuity(wd)
 
-        if result and "PICKUP_TOKEN_HANDOFF_XYZ" not in result:
-            return EvalResult(
-                name=self.name, passed=False,
-                detail=f"empty template should yield '' (got {len(result)} chars)",
-            )
         if result != "":
             return EvalResult(
                 name=self.name, passed=False,
-                detail=f"empty template should yield '' (got {result[:120]!r})",
+                detail=f"empty handoff should yield '' (got {len(result)} chars: {result[:120]!r})",
             )
         return EvalResult(
             name=self.name, passed=True,
-            detail="empty-template handoff correctly skipped (substantive threshold not met)",
+            detail="empty (whitespace-only) handoff correctly skipped",
+        )
+
+
+class ContinuityBulletListHandoffLoaded(EvalCase):
+    name = "continuity-bullet-list-handoff-loaded"
+    description = "session-handoff.md with substantive bullet content → IS injected (regression for _is_substantive regex over-match bug)"
+
+    def run(self) -> EvalResult:
+        wd = make_empty_workdir("cont-bullet-handoff")
+        # A canonical bullet-list handoff — the format most humans use.
+        # The original _is_substantive implementation over-matched bullet
+        # markers, dropping the content. This case pins the correct behavior.
+        handoff = (
+            "# Session Handoff\n\n"
+            "## Last task\n"
+            "- Refactored the JWT validator to use HS256\n"
+            "- Fixed the refresh token rotation bug in auth.py\n\n"
+            "## Next steps\n"
+            "- Implement the session management middleware\n"
+            "- Write end-to-end tests for the auth flow\n"
+        )
+        (wd / "session-handoff.md").write_text(handoff, encoding="utf-8")
+
+        from loom.memory.context import load_session_continuity
+        result = load_session_continuity(wd)
+
+        if "JWT validator" not in result:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=f"bullet-list handoff should load content (got {result[:200]!r})",
+            )
+        if "session management middleware" not in result:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=f"bullet-list handoff should load next steps (got {result[:200]!r})",
+            )
+        return EvalResult(
+            name=self.name, passed=True,
+            detail="bullet-list handoff correctly loaded (substantive content preserved)",
         )
 
 
