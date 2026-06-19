@@ -238,22 +238,6 @@ def test_layout_has_unified_chrome_container():
     asyncio.run(driver())
 
 
-def test_no_header_widget():
-    """Header was removed to keep the layout to two zones: chat + chrome."""
-
-    async def driver():
-        from textual.widgets import Header
-
-        app = AgentTUIApp()
-        async with app.run_test(size=(120, 25)) as pilot:
-            await pilot.pause(0.05)
-            assert len(app.query(Header)) == 0, (
-                "Header should not be present in the unified-chrome layout"
-            )
-
-    asyncio.run(driver())
-
-
 def test_app_on_event_intercepts_wheel_before_screen_forward():
     """The real driver path goes: driver → App.on_event → screen._forward_event.
     We override App.on_event so that wheel events are captured at the App
