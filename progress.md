@@ -2508,3 +2508,43 @@ README now has both brand identity (logo + tagline + description) AND a concrete
 
 **Ready for P2**: All CRITICAL and MAJOR plan issues resolved. P2 can be loaded in a new session without context pollution from this polish work.
 
+---
+
+## Session: f-loom-rename-p2
+
+**Date**: 2026-06-19
+**Plan**: loom-rename-p2
+**Status**: DONE (gate passed, BREAKING change committed)
+
+### Summary
+- `git mv loop/ → loom/` (preserves rename history, all files show R status with >53% similarity)
+- All `from loop.X` / `import loop.X` replaced in `loom/` source (0 remaining)
+- `pyproject.toml` updated: `name = "loom"`, `loom = "loom.cli:main"`, `packages = ["loom"]`
+- CLI strings updated: `prog="loom"`, `description="loom — ..."`, version string, help texts
+- Status bar display, log file name (`loom.log`), eval report title, audit self-test subprocess all updated
+- Docstrings referencing `loop` as project name updated throughout `loom/` source
+- `tests/` NOT touched (P4 scope) — known failures deferred
+
+### Known P4-deferred issues
+- 27 test collection errors in `tests/` due to `from loop.X` imports (all expected, P4 will fix)
+- Eval cases pass at 142/142 despite the test failures (eval suite is independent of pytest)
+
+### Verification
+```
+$ grep -rn 'from loop\.' loom/ --include='*.py'   → 0 lines
+$ grep -rn 'import loop\.' loom/ --include='*.py'  → 0 lines
+$ uv run python -m loom.cli --help                  → exit 0 (prog="loom")
+$ uv run python -m loom.cli eval --fail-under 100   → Eval results: 142/142 passed
+$ uv run pytest -q                                   → 27 errors (all in tests/, P4-deferred)
+```
+
+### Commit
+- `836fc55 feat(loom-rename-p2)!: BREAKING — rename loop/ package to loom/, update all imports`
+- 77 files changed, 389 insertions(+), 388 deletions(-)
+- Rename detection: 70 files with R status (53%-100% similarity)
+
+### Next steps (P3)
+- AGENTS.md, feature_list.json (project field), init.sh, progress.md header
+- init.sh still references `loop/` in mypy command — will need update
+- `./init.sh` will fail until P3 fixes init.sh
+
