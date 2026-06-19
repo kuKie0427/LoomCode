@@ -91,6 +91,26 @@ class CheckpointConfig:
 
 
 @dataclass(frozen=True)
+class LLMConfig:
+    """LLM client tuning knobs.
+
+    max_output_tokens: ceiling on tokens the model may emit per response.
+    Default 8000. Overridable via ``[llm] max_output_tokens`` in harness.toml.
+    """
+
+    max_output_tokens: int = 8000
+
+    @classmethod
+    def from_defaults(cls) -> LLMConfig:
+        return cls(max_output_tokens=8000)
+
+
+# Module-level singleton — callers reference this directly for the default
+# (when no HarnessConfig is in scope). Tests use harness.toml overrides.
+LLM_CONFIG: LLMConfig = LLMConfig.from_defaults()
+
+
+@dataclass(frozen=True)
 class TelemetryConfig:
     """Telemetry sink configuration.
 
@@ -108,6 +128,7 @@ class HarnessConfig:
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
     disabled_tools: frozenset[str] = field(default_factory=frozenset)
     run_init_sh_on_session_end: bool = True
+    llm: LLMConfig = field(default_factory=LLMConfig.from_defaults)
 
     @classmethod
     def from_defaults(cls) -> HarnessConfig:
@@ -277,6 +298,16 @@ def _parse_telemetry_section(section: dict | None) -> TelemetryConfig:
     return TelemetryConfig(sink_command=sink)
 
 
+def _parse_llm_section(section: dict | None) -> LLMConfig:
+    base = LLMConfig.from_defaults()
+    if not section:
+        return base
+    max_tokens = section.get("max_output_tokens", base.max_output_tokens)
+    if not isinstance(max_tokens, int) or max_tokens <= 0:
+        raise ConfigError("[llm] max_output_tokens must be a positive integer")
+    return LLMConfig(max_output_tokens=max_tokens)
+
+
 def load_config(workdir: Path) -> HarnessConfig:
     """Read `<workdir>/harness.toml` and return a HarnessConfig.
 
@@ -302,6 +333,7 @@ def load_config(workdir: Path) -> HarnessConfig:
         checkpoint=_parse_checkpoint_section(data.get("checkpoint")),
         telemetry=_parse_telemetry_section(data.get("telemetry")),
         disabled_tools=_parse_tools_section(data.get("tools")),
+        llm=_parse_llm_section(data.get("llm")),
     )
 
 
@@ -337,4 +369,7 @@ _SKELETON = """# harness.toml — per-project loom agent config
 
 # [telemetry]
 # sink_command = "/usr/local/bin/loom-collector"  # Receives JSON events via stdin
+
+# [llm]
+# max_output_tokens = 8000  # ceiling on tokens emitted per response (default 8000)
 """

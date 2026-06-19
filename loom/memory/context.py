@@ -1,6 +1,7 @@
 """Three-tier context loading.
 
 Tier 1 (always loaded, ~500 tokens): feature list summary + memory index
+Tier 1.5 (always loaded, ~800 tokens): session-handoff.md + last 80 lines of progress.md
 Tier 2 (loaded on activation, ~2000 tokens): AGENTS.md + relevant skill bodies
 Tier 3 (on demand via tool call): topic docs (docs/architecture.md, etc.)
 
@@ -11,17 +12,26 @@ word-based heuristic from ``loom.memory.store.token_count``.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from loom.memory.paths import DEFAULT_WORKDIR, memory_file
 from loom.memory.store import token_count
 
 TIER1_TOKEN_BUDGET = 500
+TIER15_TOKEN_BUDGET = 800
 TIER2_TOKEN_BUDGET = 2000
-COMBINED_BUDGET = TIER1_TOKEN_BUDGET + TIER2_TOKEN_BUDGET
+COMBINED_BUDGET = TIER1_TOKEN_BUDGET + TIER15_TOKEN_BUDGET + TIER2_TOKEN_BUDGET
 
 TIER1_HEADER = "## Tier 1 — Always Loaded"
+TIER15_HEADER = "## Tier 1.5 — Session Continuity"
 TIER2_HEADER = "## Tier 2 — Activation"
+
+# Tier 1.5 knobs (all exposed for tests + future tuning)
+_PROGRESS_TAIL_LINES = 80
+_HANDOFF_MAX_CHARS = 1500
+_SUBSTANTIVE_MIN_CHARS = 30
+_MARKDOWN_BULLET_RE = re.compile(r"^\s*(?:[-*]\s+|\d+\.\s+|#+\s+)")
 
 
 def truncate_to_tokens(text: str, max_tokens: int) -> str:
@@ -39,6 +49,71 @@ def truncate_to_tokens(text: str, max_tokens: int) -> str:
     kept.append("")
     kept.append(f"... [truncated at {max_tokens} tokens; call memory_search for the rest]")
     return "\n".join(kept)
+
+
+def _is_substantive(text: str) -> bool:
+    """Return True if text has more than _SUBSTANTIVE_MIN_CHARS of body content.
+
+    Skips lines that are entirely whitespace, blank bullets (``- ``), or just
+    markdown headers (``# Title``). Empty templates containing only headers and
+    empty list items are NOT substantive — fail-closed: we'd rather skip than
+    pollute the prompt with junk.
+    """
+    body_lines: list[str] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        if _MARKDOWN_BULLET_RE.match(line):
+            continue
+        body_lines.append(line.strip())
+    body = " ".join(body_lines)
+    meaningful = sum(1 for ch in body if not ch.isspace())
+    return meaningful > _SUBSTANTIVE_MIN_CHARS
+
+
+def load_session_continuity(workdir: Path = DEFAULT_WORKDIR) -> str:
+    """Build the Tier 1.5 'where did we leave off?' section.
+
+    Reads:
+    - session-handoff.md (full content if substantive, truncated to _HANDOFF_MAX_CHARS)
+    - progress.md (last _PROGRESS_TAIL_LINES lines if it exists)
+
+    Returns ``""`` when neither file has meaningful content. Otherwise returns
+    a Tier 1.5 block truncated to TIER15_TOKEN_BUDGET tokens.
+
+    Fail-closed: any exception in the read/parse pipeline is logged and treated
+    as 'file absent' — the caller gets ``""`` rather than a broken Tier 1.5.
+    """
+    handoff_path = workdir / "session-handoff.md"
+    progress_path = workdir / "progress.md"
+    handoff_text = ""
+    progress_text = ""
+
+    try:
+        if handoff_path.exists():
+            raw = handoff_path.read_text(encoding="utf-8")
+            if _is_substantive(raw):
+                handoff_text = raw[:_HANDOFF_MAX_CHARS]
+    except Exception:
+        handoff_text = ""
+
+    try:
+        if progress_path.exists():
+            lines = progress_path.read_text(encoding="utf-8").splitlines()
+            tail = lines[-_PROGRESS_TAIL_LINES:]
+            progress_text = "\n".join(tail)
+    except Exception:
+        progress_text = ""
+
+    if not handoff_text and not progress_text:
+        return ""
+
+    sections = [TIER15_HEADER]
+    if handoff_text:
+        sections.append("### session-handoff.md\n" + handoff_text)
+    if progress_text:
+        sections.append(f"### progress.md (last {_PROGRESS_TAIL_LINES} lines)\n" + progress_text)
+    return truncate_to_tokens("\n\n".join(sections), TIER15_TOKEN_BUDGET)
 
 
 def _feature_status_summary(workdir: Path) -> str:

@@ -4,10 +4,42 @@ from anthropic import Anthropic
 from anthropic.types import MessageParam, ToolResultBlockParam, ToolUseBlockParam
 from loguru import logger
 
+from loom.agent.config import LLM_CONFIG
+
 KEEP_RECENT = 6
 COMPACTABLE_TOOLS = {"bash", "glob", "todo_write", "task"}
 TAIL_TOKEN_BUDGET_PERCENT = 0.1
-COMPACT_MAX_OUTPUT_TOKENS = 8000
+# Backward-compat alias — prefer LLM_CONFIG.max_output_tokens for new code.
+# Kept as a module constant so external imports keep working after the P2 refactor.
+COMPACT_MAX_OUTPUT_TOKENS = LLM_CONFIG.max_output_tokens
+
+# Default model for accurate token counting when caller doesn't pass one.
+# Falls back to a cheap / always-available model name so count_tokens works
+# even when the project's primary model differs.
+_DEFAULT_MODEL = "claude-haiku-4-5"
+
+# Cache for accurate token counts, keyed by id(messages). Same message-list
+# object is not recounted across should_compact / current_tokens calls.
+_token_cache: dict[int, int] = {}
+
+
+def _count_tokens_accurate(messages: list[MessageParam], model: str) -> int:
+    """Call anthropic.messages.count_tokens(). Returns -1 on any failure.
+
+    Cached by id(messages) — same list object → no second HTTP roundtrip.
+    """
+    key = id(messages)
+    if key in _token_cache:
+        return _token_cache[key]
+    try:
+        client = Anthropic()
+        result = client.messages.count_tokens(model=model, messages=cast(list, messages))
+        count = int(result.input_tokens)
+    except Exception as e:
+        logger.debug("count_tokens failed ({}), falling back to heuristic", e)
+        return -1
+    _token_cache[key] = count
+    return count
 
 COMPACT_PROMPT = """你正在压缩一段对话历史。请阅读以下消息，输出一个结构化摘要。
 
@@ -205,8 +237,17 @@ class Context:
         delta = self.estimate_tokens(new_messages)
         return self.last_input_tokens + delta
 
-    def should_compact(self, messages: list[MessageParam], context_window: int) -> bool:
-        return self.current_tokens(messages) >= context_window * 0.85
+    def should_compact(self, messages: list[MessageParam], context_window: int, model: str | None = None) -> bool:
+        cheap = self.current_tokens(messages)
+        gate = context_window * self.THRESHOLD * 0.9
+        if cheap < gate:
+            return cheap >= context_window * self.THRESHOLD
+        # Cheap says we're close — call real counter for an accurate read.
+        # Use max(cheap, accurate) as the safe estimate: better to over-trigger
+        # (harmless compaction) than to under-trigger (context overflow).
+        accurate = _count_tokens_accurate(messages, model or _DEFAULT_MODEL)
+        total = max(cheap, accurate) if accurate > 0 else cheap
+        return total >= context_window * self.THRESHOLD
 
     def _extract_text(self, content) -> str:
         if not isinstance(content, list):

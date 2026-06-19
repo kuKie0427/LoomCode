@@ -11,6 +11,8 @@ import dotenv
 from anthropic import Anthropic, AsyncAnthropic
 from loguru import logger
 
+from loom.agent.config import LLM_CONFIG
+
 dotenv.load_dotenv()
 
 _MODEL_WINDOWS = {
@@ -75,10 +77,12 @@ class LLMClient:
         # Also signal the producer thread so the async stream aborts promptly.
         self._cancel_event.set()
 
-    def stream_iter(self, system, messages, tools, max_tokens=8000) -> Iterator[StreamEvent]:
+    def stream_iter(self, system, messages, tools, max_tokens: int | None = None) -> Iterator[StreamEvent]:
         # Reset per-stream state so a previously cancelled stream can't poison us.
         self._cancelled = False
         self._cancel_event = threading.Event()
+        if max_tokens is None:
+            max_tokens = LLM_CONFIG.max_output_tokens
 
         event_queue: queue.Queue[StreamEvent | None] = queue.Queue()
 

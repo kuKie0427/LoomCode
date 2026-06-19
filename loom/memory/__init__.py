@@ -12,7 +12,7 @@ Public surface:
   loom.memory.context  three-tier context loading
 """
 
-from loom.memory.context import load_tier1, load_tier2, load_tier3
+from loom.memory.context import load_session_continuity, load_tier1, load_tier2, load_tier3
 from loom.memory.paths import is_own_project, memory_dir, memory_file, session_log_path
 from loom.memory.store import MemoryStore
 
@@ -22,6 +22,7 @@ __all__ = [
     "memory_dir",
     "memory_file",
     "session_log_path",
+    "load_session_continuity",
     "load_tier1",
     "load_tier2",
     "load_tier3",

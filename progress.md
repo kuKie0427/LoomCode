@@ -2932,3 +2932,76 @@ Pytest: 375 passed
 ### Next step (per plan ⛔ Session 边界)
 - `git commit` → `/handoff` → end session
 - P2 (instructions cache) is the next phase, but per plan's session boundary rule, this session ends here
+
+## Session: f-harness-eval-p2-instructions-cache (2026-06-20)
+
+### Scope (per plan §执行内容)
+4 production-code changes + 12 new eval cases + 9 gate verifications + 1 commit.
+- Task 1: AGENTS.md ≤ 12000 chars → `SystemPrompt.static` (was Tier 2 only)
+- Task 2: Real token counter via `Anthropic().messages.count_tokens()` with id-keyed cache + char/4 fallback
+- Task 3: Consolidate 5 hard-coded `max_tokens=8000` → `LLM_CONFIG.max_output_tokens` (`[llm]` harness.toml override)
+- Task 4: Tier 1.5 session continuity — `session-handoff.md` (full, max 1500 chars) + last 80 lines of `progress.md`, capped at 800 tokens, with `_is_substantive()` fail-closed (skips templates containing only empty bullets/headers)
+- Task 5: Register 4 new eval modules + AGENTS.md doc notes + progress.md + feature_list.json
+
+### Files (9 modified + 4 new in scope, 0 unrequested)
+- `loom/agent/loop.py` — build_system_prompt injects AGENTS.md ≤ 12000 into static; load_session_continuity between tier1 and tier2; 2 max_tokens=8000 → LLM_CONFIG.max_output_tokens (lines 188, 224); should_compact() now passes llm_client.model
+- `loom/agent/prompt.py` — AGENTS_MD_STATIC_LIMIT = 12000 (bumped from plan's 6000 — project AGENTS.md is 10030 chars; threshold tunable per plan §风险)
+- `loom/agent/context.py` — _token_cache (id-keyed), _count_tokens_accurate (Anthropic SDK with -1 fallback), should_compact near-threshold gate (cheap-first, accurate-only when cheap ≥ 0.9 * threshold), max(cheap, accurate) safety bias (better to over-compact than overflow), COMPACT_MAX_OUTPUT_TOKENS = LLM_CONFIG.max_output_tokens alias
+- `loom/agent/config.py` — LLMConfig(max_output_tokens=8000) dataclass + from_defaults + module-level LLM_CONFIG singleton, _parse_llm_section, HarnessConfig.llm field, skeleton [llm] block
+- `loom/agent/llm.py` — stream_iter max_tokens: int | None = None with default to LLM_CONFIG.max_output_tokens
+- `loom/agent/tools.py` — spawn_subagent max_tokens = LLM_CONFIG.max_output_tokens
+- `loom/memory/context.py` — TIER15_TOKEN_BUDGET=800, TIER15_HEADER, _is_substantive (skips lines that are pure bullet/header; returns False if < 30 non-whitespace chars in body), load_session_continuity (handoff full + last 80 lines of progress.md, truncated to 800 tokens)
+- `loom/memory/__init__.py` — export load_session_continuity
+- `loom/eval/cases/__init__.py` — register 4 new modules alphabetically
+- `AGENTS.md` — 2 new notes (cache strategy threshold 12000, cold-start continuity)
+- `loom/eval/cases/instructions_static.py` (NEW, 95 lines) — 3 cases
+- `loom/eval/cases/real_token_counter.py` (NEW, 165 lines) — 4 cases
+- `loom/eval/cases/max_output_tokens_config.py` (NEW, 165 lines) — 1 case
+- `loom/eval/cases/cold_start_continuity.py` (NEW, 134 lines) — 4 cases
+- `feature_list.json` — f-harness-eval-p2-instructions-cache status in-progress → done; f-harness-eval umbrella not-started → done
+- `progress.md` — this section
+
+### Verification (all 9 gates green)
+- Gate 1: `uv run python -m loom.cli eval --fail-under 100` → 195/195 passed (was 183, +12 cases)
+- Gate 2: `uv run python -c "from loom.agent.loop import build_system_prompt; sp = build_system_prompt(); assert 'Working Rules' in ''.join(sp.static); print('Gate 2 PASS')"` → exit 0
+- Gate 3: `uv run python -c "from loom.memory.context import load_session_continuity; from pathlib import Path; out = load_session_continuity(Path('.')); assert 'Tier 1.5' in out; print('Gate 3 PASS')"` → exit 0 (real progress.md + session-handoff.md present in project → loaded into Tier 1.5)
+- Gate 4: `grep -rn '\b8000\b' loom/agent/ --include='*.py'` → only `config.py:98,101,105,374` (all at definition site); context.py, llm.py, loop.py, tools.py all reference LLM_CONFIG.max_output_tokens
+- Gate 5: `uv run mypy loom/` → Success: no issues found in 74 source files
+- Gate 6: `uv run ruff check loom/` → All checks passed!
+- Gate 7: `uv run pytest -q` → 375 passed, 21 warnings (no regression from baseline 375)
+- Gate 8: `feature_list.json` f-harness-eval-p2-instructions-cache status=done with evidence + f-harness-eval umbrella=done
+- Gate 9: progress.md this section appended
+
+### Design decisions
+1. **`max(cheap, accurate)` for safety**: real API can return a lower count than the cheap estimate when last_input_tokens is synthetic (e.g. test setup) or when the agent's view of context is stale. Trusting the max keeps the agent safe (over-compact = harmless, under-compact = context overflow). The P1 reviewer flagged this exact risk for failure-mode case 3 (autocompapt fail → context overflow); P2 makes that path less likely by validating near the threshold.
+
+2. **AGENTS_MD_STATIC_LIMIT bumped 6000 → 12000**: plan's 6000 was an experience-initial value, but the project's own AGENTS.md is 10030 chars. Without bumping, the project's static would still come from Tier 2 (not what we wanted to test). 12000 covers current + 2K growth headroom. Documented in prompt.py comment.
+
+3. **`_is_substantive` skips whole lines**: plan said "strip whitespace + bullets, count chars > 30", but my first attempt only stripped the `# ` prefix — the header TITLE TEXT remained and pushed the count above 30. Final algorithm skips entire lines that match bullet/header pattern, then counts remaining non-whitespace chars. Empty templates (just headers + empty bullets) yield ~0 chars → fail-closed (returns False, no Tier 1.5 injection).
+
+4. **Two context.py files**: kept strictly separate. `loom/agent/context.py` (Task 2, no `from __future__`) and `loom/memory/context.py` (Task 4, with `from __future__`). Confused them once during planning, not in code.
+
+5. **`LLM_CONFIG` module-level singleton + `HarnessConfig.llm` field**: singleton for callers that don't have a HarnessConfig in scope (5 hot-path sites: stream_iter default, subagent, loop's 2 paths, context's _generate_summary); HarnessConfig.llm for the harness.toml override path. Tests patch both atomically.
+
+6. **Id-keyed token cache**: `_token_cache: dict[int, int]` keyed by `id(messages)` (list object identity). Same list → no second HTTP roundtrip. Cached on success, not on failure (next call retries). Memory bounded by long-lived message lists — for a session with N user turns there are N+1 message lists, each cached once.
+
+7. **`should_compact` signature change**: added keyword-only `model: str | None = None` 3rd arg. All 7 existing callers (eval cases + loop.py:178) backward-compatible via default.
+
+### Key gotchas hit
+1. **`max_tokens=8000` locations** — plan said 5, actual locations: `context.py:10` (alias), `llm.py:78` (default kwarg), `loop.py:188` (positional), `loop.py:224` (kwarg), `tools.py:347` (kwarg). Plan also cited `tools.py:272` which was the P1-hot-fixed verify timeout line — IGNORE that. The `DEFAULT_WINDOW = 128000` in llm.py:20 is context window size, not max_output, ALSO IGNORE per plan §必须不做.
+
+2. **Gate 2 failure on first run**: project's AGENTS.md (10030 chars) > AGENTS_MD_STATIC_LIMIT (6000) → falls back to Tier 2 → 'Working Rules' NOT in static. Fix: bump limit to 12000. Re-ran → PASS.
+
+3. **2 pre-existing eval cases failed after my changes**: `should-compact-triggers-at-threshold` and `pre-compact-fires-before-autocompact` both set `last_input_tokens` to a high synthetic value to simulate near-full context, then call real SDK. Real API returned low token counts (6 instead of 902), so `total = accurate` was 6, < 8500 threshold, returned False. Fix: `total = max(cheap, accurate)` — better to over-compact than under-compact.
+
+4. **mypy + ruff on new code**: 1 mypy error (FakeAsyncClient assignment to AsyncAnthropic-typed attr) → `# type: ignore[assignment]`. 10 ruff autofixable issues (imports, f-strings without placeholders, unused vars) → `--fix` cleaned. 2 leftover F841 (unused result var) → removed assignments.
+
+5. **`.pyc` cache false matches**: `grep -rn '8000'` initially showed `__pycache__/config.cpython-313.pyc` because the old compiled version had `8000` literal. Fix: `find loom -name __pycache__ -type d -exec rm -rf {} +` before grep, or use `--include='*.py'`.
+
+6. **empty template test failure**: my first `_is_substantive` only stripped the `# ` prefix, leaving "Session Handoff", "Last task", "Next steps", "Blockers" as body text → 41 chars > 30 → returns True. Fix: skip entire lines that match bullet/header pattern (then only body content remains). Test template now correctly yields 0 chars → returns False → Tier 1.5 NOT injected.
+
+### Eval case real-path exercise (P0/P1 review lesson)
+All 12 new cases call real `build_system_prompt(tmpdir)` or real `Context.should_compact()` against tmpdir files, not mock-and-True. The 4 cold-start cases write real progress.md/session-handoff.md to tmpdirs and assert against the rendered prompt. The 4 token cases patch `loom.agent.context.Anthropic` and assert call counts/call args against the real function's behavior. The 1 8000 case patches `LLM_CONFIG` and exercises all 5 sites via real async-stream init.
+
+### Umbrella feature (f-harness-eval) — final
+All 3 sub-phases done: P0 (ea25cbc), P1 (3bfbc7d), P2 (this commit). Total 53 new eval cases (142 → 195). All scope, verification, cold-start checks satisfied.

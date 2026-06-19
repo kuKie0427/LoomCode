@@ -11,17 +11,17 @@ from loguru import logger
 
 import loom.agent.checkpoint as checkpoint
 import loom.agent.trace as trace_mod
-from loom.agent.config import HarnessConfig, load_config
+from loom.agent.config import LLM_CONFIG, HarnessConfig, load_config
 from loom.agent.context import Context
 from loom.agent.hooks import Hooks
 from loom.agent.llm import LLMClient, StreamEvent
-from loom.agent.prompt import SystemPrompt
+from loom.agent.prompt import AGENTS_MD_STATIC_LIMIT, SystemPrompt
 from loom.agent.tools import (
     TOOL_HANDLERS,
     TOOLS,
 )
 from loom.agent.user_hooks import discover_user_hooks, make_shell_callback
-from loom.memory import load_tier1, load_tier2
+from loom.memory import load_session_continuity, load_tier1, load_tier2
 from loom.skills import build_skill_index
 
 dotenv.load_dotenv()
@@ -65,6 +65,14 @@ def build_system_prompt(workdir: Path = WORKDIR) -> SystemPrompt:
     sp.add_static("行为准则：小心操作，不破坏系统，不泄露数据。")
     sp.add_static("语言风格：简洁、直接、无废话。")
 
+    # AGENTS.md ≤ AGENTS_MD_STATIC_LIMIT → 进 static 段(可被 prompt cache 利用)
+    # > AGENTS_MD_STATIC_LIMIT → 不进 static,留给 load_tier2 处理(避免膨胀 system prompt)
+    agents_md_path = workdir / "AGENTS.md"
+    if agents_md_path.exists():
+        agents_md = agents_md_path.read_text(encoding="utf-8")
+        if len(agents_md) <= AGENTS_MD_STATIC_LIMIT:
+            sp.add_static("--- Project Working Rules ---\n" + agents_md)
+
     sp.add_dynamic(f"工作目录: {workdir}")
     sp.add_dynamic(sp.get_git_context(workdir))
 
@@ -75,6 +83,9 @@ def build_system_prompt(workdir: Path = WORKDIR) -> SystemPrompt:
     tier1 = load_tier1(workdir)
     if tier1:
         memory_parts.append(tier1)
+    continuity = load_session_continuity(workdir)
+    if continuity:
+        memory_parts.append(continuity)
     tier2 = load_tier2(workdir)
     if tier2:
         memory_parts.append(tier2)
@@ -164,7 +175,7 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
     tool_call_count = 0
     tokens_at_last_checkpoint = context.current_tokens(messages)
     while True:
-        if context.should_compact(messages, llm_client.get_context_window()):
+        if context.should_compact(messages, llm_client.get_context_window(), llm_client.model):
             hooks.trigger_hooks("PreCompact", messages, context.last_input_tokens)
             msg_count_before = len(messages)
             context.autocompact(messages, llm_client.client, llm_client.model, llm_client.get_context_window())
@@ -185,7 +196,7 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
             input_tokens = 0
             output_tokens = 0
             stop_reason = "end_turn"
-            for ev in stream_text(SYSTEM, messages, cast(list, TOOLS), 8000):
+            for ev in stream_text(SYSTEM, messages, cast(list, TOOLS), LLM_CONFIG.max_output_tokens):
                 if ev.kind == "text":
                     content_blocks.append(TextBlock(type="text", text=ev.text))
                     if cb["on_text_delta"] is not None:
@@ -221,7 +232,7 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
             # ===== SYNC PATH (unchanged) =====
             response = llm_client.client.messages.create(
                 model=llm_client.model, system=SYSTEM, messages=messages,
-                tools=cast(list, TOOLS), max_tokens=8000,
+                tools=cast(list, TOOLS), max_tokens=LLM_CONFIG.max_output_tokens,
             )
         context.update(len(messages), response)
         if tr is not None:

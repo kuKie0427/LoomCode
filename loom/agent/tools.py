@@ -6,6 +6,7 @@ from anthropic.types import MessageParam, ToolParam
 from loguru import logger
 
 import loom.agent.trace as trace_mod
+from loom.agent.config import LLM_CONFIG
 from loom.agent.permissions import DEFAULT_POLICY
 from loom.agent.tool_registry import Tool, ToolRegistry
 from loom.memory import MemoryStore
@@ -71,7 +72,7 @@ def run_verify(target: str = ".") -> str:
             tr.record("verify_end", target=target, exit_code=-1,
                       duration_ms=VERIFY_TIMEOUT_SECONDS * 1000, passed=False,
                       error="timeout")
-        return "[verify: fail timeout=600s]\ninit.sh did not complete within 600s"
+        return f"[verify: fail timeout={VERIFY_TIMEOUT_SECONDS}s]\ninit.sh did not complete within {VERIFY_TIMEOUT_SECONDS}s"
     except Exception as exc:
         # fail-closed: don't swallow. Return structured error string.
         if tr is not None:
@@ -344,7 +345,7 @@ def spawn_subagent(description: str, llm_client=None, hooks=None) -> str:
         turn_count += 1
         response = llm_client.client.messages.create(
             model=llm_client.model, system=SUB_SYSTEM,
-            messages=messages, tools=SUB_TOOLS, max_tokens=8000,
+            messages=messages, tools=SUB_TOOLS, max_tokens=LLM_CONFIG.max_output_tokens,
         )
         messages.append({"role": "assistant", "content": response.content})
         if response.stop_reason != "tool_use":

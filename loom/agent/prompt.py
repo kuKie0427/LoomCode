@@ -7,6 +7,12 @@ from loguru import logger
 # 边界标记 — 用它来分割缓存段和非缓存段
 BOUNDARY = "\n\n---\n\n"
 
+# AGENTS.md static段注入阈值：≤ 此字符数直接进 SystemPrompt.static
+# (然后可被prompt cache利用); > 此值则回退到Tier 2(当前行为)。
+# 12000 chars ≈ ~3000 tokens — covers loom's AGENTS.md (10K) plus growth headroom.
+# Tunable: see plan §风险 (P2 review note).
+AGENTS_MD_STATIC_LIMIT = 12000
+
 @dataclass
 class SystemPrompt:
     static: list[str] = field(default_factory=list)
