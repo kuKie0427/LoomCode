@@ -433,6 +433,12 @@ class AgentTUIApp(App):
         """f-tui-header-backend-wiring: agent's todo list changed (todo_write ran)."""
         self._header_state.todos = self._convert_agent_todos(message.todos)
         self.query_one(Header).update_state(self._header_state)
+        done = sum(1 for t in message.todos if t.get("status") == "completed")
+        active = sum(1 for t in message.todos if t.get("status") == "in_progress")
+        pending = sum(1 for t in message.todos if t.get("status") == "pending")
+        summary = f"{done} done, {active} active, {pending} pending"
+        chat_log = self.query_one(ChatLog)
+        chat_log.emit_todo_note(summary)
 
     def on_subagent_start(self, message: SubagentStart) -> None:
         """f-tui-header-backend-wiring: a subagent was spawned (task tool called)."""
@@ -440,6 +446,8 @@ class AgentTUIApp(App):
             Subagent(id=message.subagent_id, state="running", elapsed="0s")
         )
         self.query_one(Header).update_state(self._header_state)
+        chat_log = self.query_one(ChatLog)
+        chat_log.add_subagent_marker(message.subagent_id, message.description)
 
     def on_subagent_end(self, message: SubagentEnd) -> None:
         """f-tui-header-backend-wiring: subagent finished (done or error)."""
@@ -449,6 +457,10 @@ class AgentTUIApp(App):
                 sub.elapsed = f"{int(message.elapsed)}s"
                 break
         self.query_one(Header).update_state(self._header_state)
+        chat_log = self.query_one(ChatLog)
+        chat_log.complete_subagent_marker(
+            message.subagent_id, message.elapsed, message.state
+        )
 
     def on_subagent_row_clicked(self, message: Header.SubagentRowClicked) -> None:
         """Spec §4.3.2: dismiss overlay + scroll ChatLog to subagent marker."""

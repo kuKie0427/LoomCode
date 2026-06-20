@@ -363,6 +363,37 @@ class ToolCallModal(ModalScreen):
         self.dismiss(result)
 
 
+class SubagentMarker(Static):
+    can_focus = True
+
+    DEFAULT_CSS = """
+    SubagentMarker {
+        width: auto;
+        height: 1;
+        background: transparent;
+        color: $accent;
+        text-style: bold;
+        padding: 0 0 0 2;
+        margin: 0 0 0 0;
+    }
+    SubagentMarker:hover {
+        text-style: bold underline;
+    }
+    SubagentMarker.marker-done {
+        color: $success;
+        text-style: dim;
+    }
+    SubagentMarker.marker-error {
+        color: $error;
+    }
+    """
+
+    def __init__(self, subagent_id: str, description: str, **kwargs: Any) -> None:
+        super().__init__(f"◐ task: {description}", **kwargs)
+        self._subagent_id = subagent_id
+        self._description = description
+
+
 class ToolCallMarker(Static):
     can_focus = True
 
@@ -449,6 +480,8 @@ class ChatLog(VerticalScroll):
         self._thinking_reasoning: str = ""
         self._tool_markers: dict[str, ToolCallMarker] = {}
         self._tool_outputs: dict[str, CollapsibleToolOutput] = {}
+        self._subagent_markers: dict[str, SubagentMarker] = {}
+        self._last_todo_summary: str = ""
         self._assistant_label_mounted: bool = False
         self._stream_full_text: str = ""
         self._stream_flush_timer: Any = None
@@ -460,6 +493,10 @@ class ChatLog(VerticalScroll):
         self._assistant_label_mounted = False
         self._stream_full_text = ""
         self._tool_outputs.clear()
+        # _subagent_markers and _last_todo_summary are intentionally NOT
+        # reset here — they are timeline state that persists across user
+        # turns (mirroring _tool_markers, which also persists). Use
+        # clear_content() (the /clear slash command) to reset both.
         self._sticky = True
         label = TurnLabel("▎ you", classes="role-user")
         body = UserMessage(text)
@@ -622,6 +659,38 @@ class ChatLog(VerticalScroll):
         if self._sticky:
             self.scroll_end()
 
+    def add_subagent_marker(self, subagent_id: str, description: str) -> None:
+        self._force_flush_stream_buffer()
+        self._finalize_streaming()
+        self._current_body = None
+        marker = SubagentMarker(subagent_id, description)
+        self._subagent_markers[subagent_id] = marker
+        asyncio.create_task(self._mount_async(marker))
+        if self._sticky:
+            self.scroll_end()
+
+    def complete_subagent_marker(
+        self, subagent_id: str, elapsed: float, state: str
+    ) -> None:
+        marker = self._subagent_markers.get(subagent_id)
+        if marker is None:
+            return
+        elapsed_str = f"{elapsed:.1f}s" if elapsed < 60 else f"{int(elapsed)}s"
+        if state == "done":
+            marker.update(f"◑ task: {marker._description} · done {elapsed_str}")
+            marker.add_class("marker-done")
+        else:
+            marker.update(f"⊗ task: {marker._description} · error {elapsed_str}")
+            marker.add_class("marker-error")
+        if self._sticky:
+            self.scroll_end()
+
+    def emit_todo_note(self, summary: str) -> None:
+        if summary == self._last_todo_summary:
+            return
+        self._last_todo_summary = summary
+        self.append_system_note(f"todos: {summary}")
+
     def append_system_note(self, text: str) -> None:
         self._force_flush_stream_buffer()
         self._finalize_streaming()
@@ -637,6 +706,8 @@ class ChatLog(VerticalScroll):
             await child.remove()
         self._tool_markers.clear()
         self._tool_outputs.clear()
+        self._subagent_markers.clear()
+        self._last_todo_summary = ""
         self._current_body = None
         self._current_overlay = None
         self._thinking_display = None

@@ -3535,3 +3535,42 @@ Temp measurement scripts (`measure_narrow.py`, `measure_narrow_full.py`, `snap_h
 ### Emergent follow-up (NOT done this session)
 
 `f-tui-inline-event-markers` — Q1 dialogue surfaced that subagent start/end + todo updates only update the Header overlay state, with NO marker in the ChatLog timeline. User wants these events visible inline in the conversation. Proposed but not yet built — candidate for next session.
+
+## Session: f-tui-inline-event-markers (2026-06-20)
+
+**Goal**: Mount inline markers in ChatLog for subagent and todo lifecycle events.
+
+**What was done**:
+- Added `SubagentMarker(Static)` widget in `loom/tui/chat_log.py` with three glyphs: `◐` (start), `◑` (done), `⊗` (error)
+- Added `add_subagent_marker(subagent_id, description)` and `complete_subagent_marker(subagent_id, elapsed, state)` methods to ChatLog
+- Added `emit_todo_note(summary)` with dedup via `_last_todo_summary`
+- Wired `app.py` handlers: `on_subagent_start` → `add_subagent_marker`, `on_subagent_end` → `complete_subagent_marker`, `on_todo_update` → `emit_todo_note`
+- 16 unit tests in `tests/test_chat_log_inline_markers.py`
+- 4 eval cases in `loom/eval/cases/tui_inline_markers.py`
+
+**Verification**: `./init.sh` → 444 pytest passed, 223/223 eval cases, 0 ruff, 0 mypy — all green.
+
+**Files modified**:
+- `loom/tui/chat_log.py` — SubagentMarker class + 3 new methods + _subagent_markers dict + _last_todo_summary + clear_content cleanup
+- `loom/tui/app.py` — on_todo_update/on_subagent_start/on_subagent_end handler wiring
+- `tests/test_chat_log_inline_markers.py` — new file, 16 tests
+- `loom/eval/cases/tui_inline_markers.py` — new file, 4 eval cases
+- `loom/eval/cases/__init__.py` — register tui_inline_markers
+- `feature_list.json` — new entry f-tui-inline-event-markers
+
+### Post-review fixes (2026-06-20)
+
+Review of the shipped implementation surfaced one HIGH bug + one no-op test (MEDIUM 1):
+
+- **HIGH**: `ChatLog.append_user_message` cleared `_subagent_markers` + `_last_todo_summary` on every new user turn. The user wanted a persistent timeline ("scroll ChatLog 看完整 timeline"); the wipe contradicted that. **Fixed** by removing the two lines from `append_user_message`. Added an explanatory comment so future maintainers don't reintroduce them for "symmetry with `_tool_outputs.clear()`". `_tool_markers` already persists across turns — the asymmetry was a bug, not a feature. **Regression test**: `TestTimelinePersistsAcrossUserTurns` (2 tests) locks both `_subagent_markers` and `_last_todo_summary` persistence.
+- **MEDIUM 1**: `test_initial_text_contains_description` was a no-op — `hasattr(marker, '_update_text')` is always False, so the assertion evaluated to `True` regardless. **Fixed** by checking `str(marker.render())` instead.
+
+Net: 16 → 18 tests (446 pytest total), still 223/223 eval cases, `./init.sh` green.
+
+LOW issues deferred to a follow-up chore (not blocking commit):
+- `state: str` should be `Literal["done", "error"]` (type safety)
+- `marker._description` accessed cross-class (leaky abstraction; add property)
+- Description silently truncated to 60 chars without `…` indicator
+- Missing `tui-app-wires-todo-update-emit-todo-note` eval case (4→5)
+- `asyncio.get_event_loop()` deprecated in `test_clear_resets_markers`
+- DOM widget leak on `add_subagent_marker` with same id (theoretical, never hits in practice)
