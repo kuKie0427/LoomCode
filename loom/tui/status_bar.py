@@ -10,6 +10,8 @@ _BAR_EMPTY = "░"
 _CTX_WARN_RATIO = 0.60
 _CTX_DANGER_RATIO = 0.85
 
+_SEP = "·"
+
 
 def _format_tokens(n: int) -> str:
     if n < 1000:
@@ -17,6 +19,12 @@ def _format_tokens(n: int) -> str:
     if n < 1_000_000:
         return f"{n / 1000:.1f}k"
     return f"{n / 1_000_000:.1f}M"
+
+
+def _format_elapsed(seconds: int) -> str:
+    if seconds < 3600:
+        return f"{seconds // 60}:{seconds % 60:02d}"
+    return f"{seconds // 3600}:{(seconds % 3600) // 60:02d}:{seconds % 60:02d}"
 
 
 def _progress_bar(ratio: float, width: int = _BAR_WIDTH) -> str:
@@ -44,6 +52,8 @@ class StatusBar(Static):
     tools: reactive[int] = reactive(0)
     ctx_tokens: reactive[int] = reactive(0)
     ctx_window: reactive[int] = reactive(0)
+    elapsed_seconds: reactive[int] = reactive(0)
+    git_branch: reactive[str] = reactive("")
 
     def render(self) -> str:
         app = self.app
@@ -53,9 +63,9 @@ class StatusBar(Static):
         ratio = self.ctx_tokens / ctx_window if ctx_window > 0 else 0.0
         bar = _progress_bar(ratio)
         color_open = {
-            "ctx-ok": "[green]",
-            "ctx-warn": "[yellow]",
-            "ctx-danger": "[red]",
+            "ctx-ok": "[$success]",
+            "ctx-warn": "[$warning]",
+            "ctx-danger": "[$error]",
         }[_ctx_color_class(ratio)]
         ctx_str = (
             f"ctx: {color_open}{bar}[/] "
@@ -63,7 +73,20 @@ class StatusBar(Static):
             f"({ratio * 100:.0f}%)"
         )
 
-        return (
-            f" loom | model: {model} | turns: {self.turns} | "
-            f"tools: {self.tools} | {ctx_str} "
-        )
+        # Opencode-style bottom dock: stats on the left, key hints on the right,
+        # separated by a wider gap. Key hints are dimmed in $text-faint so they
+        # read as "ambient" — the eye is pulled to the live stats first.
+        stat_parts = [
+            "loom",
+            model,
+        ]
+        if self.git_branch:
+            stat_parts.append(f"[$text-muted]⎇[/] {self.git_branch}")
+        stat_parts.append(f"{self.turns}t·{self.tools}tl")
+        stat_parts.append(ctx_str)
+
+        elapsed = _format_elapsed(self.elapsed_seconds)
+        key_hints = f"[$text-faint]esc ^l /[/] [dim]{elapsed}[/]"
+
+        joined_stats = f" {_SEP} ".join(stat_parts)
+        return f" {joined_stats}   {key_hints} "

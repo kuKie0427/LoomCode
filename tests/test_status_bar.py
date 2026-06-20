@@ -66,7 +66,7 @@ def test_status_bar_turns_counts_user_messages_only():
                 f"(history={len(app.history)}, turns={status_bar.turns})"
             )
             text = status_bar.render()
-            assert "turns: 3" in text
+            assert "3t" in text and "turns:" not in text
 
     asyncio.run(driver())
 
@@ -173,10 +173,10 @@ def test_status_bar_updates_after_user_turn_count_changes():
         async with app.run_test(size=(120, 25)) as pilot:
             await pilot.pause(0.05)
             status_bar = app.query_one(StatusBar)
-            assert "turns: 0" in status_bar.render()
+            assert "0t" in status_bar.render() and "turns:" not in status_bar.render()
             app.user_turn_count = 5
             await pilot.pause(0.05)
-            assert "turns: 5" in status_bar.render()
+            assert "5t" in status_bar.render() and "turns:" not in status_bar.render()
 
     asyncio.run(driver())
 
