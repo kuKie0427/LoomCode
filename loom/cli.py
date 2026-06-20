@@ -72,7 +72,8 @@ def _build_parser() -> argparse.ArgumentParser:
     trace_show = trace_sub.add_parser("show", help="Show recent trace events")
     trace_show.add_argument("--limit", "-n", type=int, default=20, help="How many recent events")
     trace_show.add_argument("--workdir", type=Path, default=Path("."), help="Project workdir")
-    trace_sub.add_parser("path", help="Print the trace file path")
+    trace_path = trace_sub.add_parser("path", help="Print the trace file path")
+    trace_path.add_argument("--workdir", type=Path, default=Path("."), help="Project workdir")
 
     eval_p = sub.add_parser("eval", help="Run the eval suite and report")
     eval_p.add_argument("--workdir", type=Path, default=Path("."), help="Project workdir")

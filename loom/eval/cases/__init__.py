@@ -30,6 +30,7 @@ from loom.eval.cases import (
     session_hooks,  # noqa: F401
     stop_event_helper,  # noqa: F401
     telemetry_sink,  # noqa: F401
+    trace_path,  # noqa: F401
     tui_app,  # noqa: F401
     tui_assistant_message_start,  # noqa: F401
     tui_async_init_sh,  # noqa: F401

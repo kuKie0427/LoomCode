@@ -4130,3 +4130,42 @@ uv run python -m loom.cli run  0.16s user 0.02s system 37% cpu 0.486 total
 ### Working rule candidates (for promotion if recurring)
 
 - **#21 (rule 11 in AGENTS.md applies)**: When refactoring from sync to fire-and-forget execution model, every eval case that asserts side-effects (marker files, stderr warnings) of the synchronous execution MUST be relaxed to "best-effort" assertions — daemon threads are killed during `Py_Finalize()` and their subprocesses become orphans. Update the test name's description to reflect this.
+
+---
+
+## Chore: fix `loom trace path` AttributeError (2026-06-21)
+
+**Goal:** Close out the P3-surfaced pre-existing bug — `loom trace path` raised `AttributeError: 'Namespace' object has no attribute 'workdir'` because the `trace_path` subparser was missing the `--workdir` argument that `trace_show` had. The shared handler at loom/cli.py:148 read `args.workdir.resolve()` unconditionally.
+
+**Root cause** (one line): the subparser registration at loom/cli.py:79 was `trace_sub.add_parser("path", ...)` with no `--workdir` argument, while `trace_show` right above it had one. A copy-paste asymmetry from the original implementation.
+
+**Fix** (loom/cli.py:79):
+```python
+# Before:
+trace_sub.add_parser("path", help="Print the trace file path")
+# After:
+trace_path = trace_sub.add_parser("path", help="Print the trace file path")
+trace_path.add_argument("--workdir", type=Path, default=Path("."), help="Project workdir")
+```
+
+**Regression guard** (loom/eval/cases/trace_path.py — new, 1 case):
+- `loom-trace-path-prints-valid-path`: runs `loom trace path` (default workdir) + `loom trace path --workdir /tmp` (custom), asserts both exit 0 and return paths ending in `trace.jsonl` under the right workdir.
+
+**Verification:**
+- `loom trace path` (before): `AttributeError: 'Namespace' object has no attribute 'workdir'`
+- `loom trace path` (after): prints `/Users/lanf/pra/die/loop/.minicode/trace.jsonl`
+- `loom trace path --workdir /tmp` (after): prints `/private/tmp/.minicode/trace.jsonl`
+- `loom trace path --help` (after): shows the new `--workdir WORKDIR` option
+- New eval case in-process (3 runs): all `passed=True`
+- Full `loom eval --fail-under 100` after fix: **233/233 passed** (was 232; +1 new case)
+- `uv run ruff check .`: clean (fixed 2 issues: import sort + unused `Path` import)
+- `uv run mypy loom/`: clean (83 source files; +1 from P4's 82)
+
+**Working tree final state:** 2 files modified (loom/cli.py + loom/eval/cases/__init__.py) + 2 files added (loom/eval/cases/trace_path.py + feature_list.json entry).
+
+**Files changed:**
+- `M loom/cli.py` (+2 lines: --workdir arg + variable capture)
+- `M loom/eval/cases/__init__.py` (+1 line: register trace_path alphabetically)
+- `A loom/eval/cases/trace_path.py` (77 lines: module docstring + 1 case)
+- `M feature_list.json` (+1 entry: f-chore-fix-loom-trace-path-bug)
+- `M progress.md` (this section)
