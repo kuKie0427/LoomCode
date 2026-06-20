@@ -38,7 +38,54 @@ DEFAULT_CALLBACKS: dict[str, AgentCallback | None] = {
     "on_tool_result": None,
     "on_compact": None,
     "on_message_end": None,
+    # Backend wiring for f-tui-header-backend-wiring — fired by tools.py
+    # to expose MCP/todo/subagent state to the TUI Header. Module-level
+    # dispatcher below lets tools.py fire without circular imports.
+    "on_todo_update": None,
+    "on_subagent_start": None,
+    "on_subagent_end": None,
 }
+
+
+# Module-level callback dispatcher — lets loom/agent/tools.py fire
+# callbacks (on_todo_update / on_subagent_start / on_subagent_end)
+# without importing agent_loop at module load (would be a circular
+# import: tools.py is imported by loop.py). set_active_callbacks() is
+# called once at agent_loop entry; clear_active_callbacks() in finally.
+_active_callbacks: dict | None = None
+
+
+def set_active_callbacks(cb: dict) -> None:
+    """Store the active callbacks dict for in-loop access by tools.
+
+    Called once at the start of ``agent_loop``. ``tools.py`` reads
+    this via ``fire_callback(name, *args)``.
+    """
+    global _active_callbacks
+    _active_callbacks = cb
+
+
+def clear_active_callbacks() -> None:
+    """Clear the active callbacks dict. Called in agent_loop's finally."""
+    global _active_callbacks
+    _active_callbacks = None
+
+
+def fire_callback(name: str, *args: object) -> None:
+    """Fire a named callback if one is active. Silent no-op if not set.
+
+    Errors in user-supplied callbacks are logged but do not propagate —
+    a buggy TUI callback must never crash the agent loop.
+    """
+    if _active_callbacks is None:
+        return
+    cb = _active_callbacks.get(name)
+    if cb is None:
+        return
+    try:
+        cb(*args)
+    except Exception:
+        logger.warning("Callback {} raised; ignoring", name)
 
 
 def configure_logging() -> None:
@@ -165,115 +212,122 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
     if llm_client is None:
         llm_client = globals()["llm_client"]
     hooks.trigger_hooks("AgentStart")
-    if cb["on_message_start"] is not None:
-        cb["on_message_start"]()
-    session_id = uuid.uuid4().hex[:12]
-    trace_mod.start(WORKDIR, session_id)
-    tr = trace_mod.current()
-    if tr is not None:
-        tr.record("session_start", workdir=str(WORKDIR), initial_messages=len(messages))
-    tool_call_count = 0
-    tokens_at_last_checkpoint = context.current_tokens(messages)
-    while True:
-        if context.should_compact(messages, llm_client.get_context_window(), llm_client.model):
-            hooks.trigger_hooks("PreCompact", messages, context.last_input_tokens)
-            msg_count_before = len(messages)
-            context.autocompact(messages, llm_client.client, llm_client.model, llm_client.get_context_window())
-            if cb["on_compact"] is not None:
-                cb["on_compact"](msg_count_before, len(messages))
+    # Wire module-level dispatcher for tools.py to fire backend callbacks
+    # (on_todo_update / on_subagent_start / on_subagent_end). Must be
+    # cleared in finally so stale callbacks don't leak between sessions.
+    set_active_callbacks(cb)
+    try:
+            if cb["on_message_start"] is not None:
+                cb["on_message_start"]()
+            session_id = uuid.uuid4().hex[:12]
+            trace_mod.start(WORKDIR, session_id)
+            tr = trace_mod.current()
             if tr is not None:
-                tr.record("autocompact", tool_calls_so_far=tool_call_count)
-        # Fires before EACH LLM call, so the TUI can show the
-        # thinking spinner (and reset the thinking display) for every
-        # round of reasoning, not just the first. ``on_message_start``
-        # is preserved for the once-per-session semantic.
-        if cb["on_assistant_message_start"] is not None:
-            cb["on_assistant_message_start"]()
-        if stream_text is not None:
-            # ===== STREAMING PATH =====
-            from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
-            content_blocks: list = []
-            input_tokens = 0
-            output_tokens = 0
-            stop_reason = "end_turn"
-            for ev in stream_text(SYSTEM, messages, cast(list, TOOLS), LLM_CONFIG.max_output_tokens):
-                if ev.kind == "text":
-                    content_blocks.append(TextBlock(type="text", text=ev.text))
-                    if cb["on_text_delta"] is not None:
-                        cb["on_text_delta"](ev.text)
-                elif ev.kind == "thinking":
-                    if cb["on_thinking_delta"] is not None:
-                        cb["on_thinking_delta"](ev.text)
-                elif ev.kind == "tool_use":
-                    content_blocks.append(ToolUseBlock(
-                        type="tool_use",
-                        id=ev.tool_id,
-                        name=ev.tool_name,
-                        input=ev.tool_input or {},
-                    ))
-                elif ev.kind == "usage":
-                    if ev.input_tokens:
-                        input_tokens = ev.input_tokens
-                    if ev.output_tokens:
-                        output_tokens = ev.output_tokens
-                    if ev.stop_reason:
-                        stop_reason = ev.stop_reason
-            response = Message(
-                id="stream-" + uuid.uuid4().hex[:8],
-                type="message",
-                role="assistant",
-                content=content_blocks,
-                model=llm_client.model,
-                stop_reason=cast(Any, stop_reason),
-                stop_sequence=None,
-                usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens),
-            )
-        else:
-            # ===== SYNC PATH (unchanged) =====
-            response = llm_client.client.messages.create(
-                model=llm_client.model, system=SYSTEM, messages=messages,
-                tools=cast(list, TOOLS), max_tokens=LLM_CONFIG.max_output_tokens,
-            )
-        context.update(len(messages), response)
-        if tr is not None:
-            tr.record("llm_response", stop_reason=response.stop_reason,
-                      tokens_in=getattr(response.usage, "input_tokens", 0),
-                      tokens_out=getattr(response.usage, "output_tokens", 0))
-        messages.append({"role": "assistant", "content": response.content})
-
-        if response.stop_reason != "tool_use":
-            hooks.trigger_hooks("AgentStop", messages)
-            checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
-            if tr is not None:
-                tr.record("session_end", tool_calls=tool_call_count, turns=len(messages))
-            if cb["on_message_end"] is not None:
-                cb["on_message_end"](tool_call_count, len(messages))
-            trace_mod.stop()
-            return
-
-        tool_uses = [b for b in response.content if b.type == "tool_use"]
-        if cb["on_tool_use"] is not None:
-            for block in tool_uses:
-                cb["on_tool_use"](block.name, block.input, block.id)
-        if tr is not None and tool_uses:
-            tr.record("tool_batch", tools=[b.name for b in tool_uses], size=len(tool_uses))
-        results = _run_tool_turn(tool_uses, hooks)
-        if cb["on_tool_result"] is not None:
-            for r in results:
-                if r is not None:
-                    cb["on_tool_result"](r.get("tool_use_id", ""), str(r.get("content", "")), r.get("is_error", False))
-        tool_call_count += len(tool_uses)
-        messages.append({"role": "user", "content": results})
-
-        new_tokens = context.current_tokens(messages) - tokens_at_last_checkpoint
-        ckpt_cfg = _active_config.checkpoint
-        if checkpoint.is_due(tool_call_count, new_tokens,
-                             ckpt_cfg.every_tool_calls, ckpt_cfg.every_tokens):
-            saved_path = checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
-            if tr is not None:
-                tr.record("checkpoint_save", path=str(saved_path),
-                          tool_calls=tool_call_count, new_tokens=new_tokens)
+                tr.record("session_start", workdir=str(WORKDIR), initial_messages=len(messages))
+            tool_call_count = 0
             tokens_at_last_checkpoint = context.current_tokens(messages)
+            while True:
+                if context.should_compact(messages, llm_client.get_context_window(), llm_client.model):
+                    hooks.trigger_hooks("PreCompact", messages, context.last_input_tokens)
+                    msg_count_before = len(messages)
+                    context.autocompact(messages, llm_client.client, llm_client.model, llm_client.get_context_window())
+                    if cb["on_compact"] is not None:
+                        cb["on_compact"](msg_count_before, len(messages))
+                    if tr is not None:
+                        tr.record("autocompact", tool_calls_so_far=tool_call_count)
+                # Fires before EACH LLM call, so the TUI can show the
+                # thinking spinner (and reset the thinking display) for every
+                # round of reasoning, not just the first. ``on_message_start``
+                # is preserved for the once-per-session semantic.
+                if cb["on_assistant_message_start"] is not None:
+                    cb["on_assistant_message_start"]()
+                if stream_text is not None:
+                    # ===== STREAMING PATH =====
+                    from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
+                    content_blocks: list = []
+                    input_tokens = 0
+                    output_tokens = 0
+                    stop_reason = "end_turn"
+                    for ev in stream_text(SYSTEM, messages, cast(list, TOOLS), LLM_CONFIG.max_output_tokens):
+                        if ev.kind == "text":
+                            content_blocks.append(TextBlock(type="text", text=ev.text))
+                            if cb["on_text_delta"] is not None:
+                                cb["on_text_delta"](ev.text)
+                        elif ev.kind == "thinking":
+                            if cb["on_thinking_delta"] is not None:
+                                cb["on_thinking_delta"](ev.text)
+                        elif ev.kind == "tool_use":
+                            content_blocks.append(ToolUseBlock(
+                                type="tool_use",
+                                id=ev.tool_id,
+                                name=ev.tool_name,
+                                input=ev.tool_input or {},
+                            ))
+                        elif ev.kind == "usage":
+                            if ev.input_tokens:
+                                input_tokens = ev.input_tokens
+                            if ev.output_tokens:
+                                output_tokens = ev.output_tokens
+                            if ev.stop_reason:
+                                stop_reason = ev.stop_reason
+                    response = Message(
+                        id="stream-" + uuid.uuid4().hex[:8],
+                        type="message",
+                        role="assistant",
+                        content=content_blocks,
+                        model=llm_client.model,
+                        stop_reason=cast(Any, stop_reason),
+                        stop_sequence=None,
+                        usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens),
+                    )
+                else:
+                    # ===== SYNC PATH (unchanged) =====
+                    response = llm_client.client.messages.create(
+                        model=llm_client.model, system=SYSTEM, messages=messages,
+                        tools=cast(list, TOOLS), max_tokens=LLM_CONFIG.max_output_tokens,
+                    )
+                context.update(len(messages), response)
+                if tr is not None:
+                    tr.record("llm_response", stop_reason=response.stop_reason,
+                              tokens_in=getattr(response.usage, "input_tokens", 0),
+                              tokens_out=getattr(response.usage, "output_tokens", 0))
+                messages.append({"role": "assistant", "content": response.content})
+
+                if response.stop_reason != "tool_use":
+                    hooks.trigger_hooks("AgentStop", messages)
+                    checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
+                    if tr is not None:
+                        tr.record("session_end", tool_calls=tool_call_count, turns=len(messages))
+                    if cb["on_message_end"] is not None:
+                        cb["on_message_end"](tool_call_count, len(messages))
+                    trace_mod.stop()
+                    return
+
+                tool_uses = [b for b in response.content if b.type == "tool_use"]
+                if cb["on_tool_use"] is not None:
+                    for block in tool_uses:
+                        cb["on_tool_use"](block.name, block.input, block.id)
+                if tr is not None and tool_uses:
+                    tr.record("tool_batch", tools=[b.name for b in tool_uses], size=len(tool_uses))
+                results = _run_tool_turn(tool_uses, hooks)
+                if cb["on_tool_result"] is not None:
+                    for r in results:
+                        if r is not None:
+                            cb["on_tool_result"](r.get("tool_use_id", ""), str(r.get("content", "")), r.get("is_error", False))
+                tool_call_count += len(tool_uses)
+                messages.append({"role": "user", "content": results})
+
+                new_tokens = context.current_tokens(messages) - tokens_at_last_checkpoint
+                ckpt_cfg = _active_config.checkpoint
+                if checkpoint.is_due(tool_call_count, new_tokens,
+                                     ckpt_cfg.every_tool_calls, ckpt_cfg.every_tokens):
+                    saved_path = checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
+                    if tr is not None:
+                        tr.record("checkpoint_save", path=str(saved_path),
+                                  tool_calls=tool_call_count, new_tokens=new_tokens)
+                    tokens_at_last_checkpoint = context.current_tokens(messages)
+    finally:
+        clear_active_callbacks()
 
 
 def run_repl(resume: bool = False) -> None:
@@ -301,21 +355,21 @@ def run_repl(resume: bool = False) -> None:
             saved_at = ckpt.get("saved_at", "unknown")
             logger.info(f"Resumed from checkpoint ({saved_at}, {len(history)} messages, {ckpt.get('tool_call_count', '?')} tool calls)")
     while True:
-        try:
-            query = input("\033[36m >> \033[0m")
-        except (EOFError, KeyboardInterrupt):
-            break
-        if query.strip().lower() in ("exit", ""):
-            break
-        history.append({"role": "user", "content": query})
-        agent_loop(history)
-        for msg in history:
-            for block in msg["content"]:
-                if getattr(block, "type", None) == "thinking":
-                    print(f"\033[35m{block.thinking}\033[0m")
-                if getattr(block, "type", None) == "text":
-                    print(block.text)
-        print()
+            try:
+                query = input("\033[36m >> \033[0m")
+            except (EOFError, KeyboardInterrupt):
+                break
+            if query.strip().lower() in ("exit", ""):
+                break
+            history.append({"role": "user", "content": query})
+            agent_loop(history)
+            for msg in history:
+                for block in msg["content"]:
+                    if getattr(block, "type", None) == "thinking":
+                        print(f"\033[35m{block.thinking}\033[0m")
+                    if getattr(block, "type", None) == "text":
+                        print(block.text)
+            print()
     hooks.trigger_hooks("SessionEnd", history, 0)
 
     if _active_config.run_init_sh_on_session_end:

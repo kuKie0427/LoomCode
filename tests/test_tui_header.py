@@ -49,6 +49,7 @@ from loom.tui.header import (
     subagent_glyph,
     todo_glyph,
 )
+from loom.tui.messages import SubagentEnd, SubagentStart, TodoUpdate
 
 
 def test_mcp_glyph_all_connected():
@@ -599,3 +600,188 @@ def test_escape_is_noop_when_no_overlay():
             assert not still_present, "ESC with no overlay should not create one"
 
     asyncio.run(driver())
+
+
+# ── Backend wiring tests (f-tui-header-backend-wiring) ────────────────────
+
+
+def test_app_initial_header_state_has_mcp_servers_from_tool_registry():
+    """App._build_initial_header_state snapshots MCP servers from TOOL_REGISTRY.
+
+    Each loom tool becomes one MCPServer (state='connected' by default;
+    'disabled' if the tool name is in harness.toml [policy].disabled_tools).
+
+    The Header starts with empty todo + subagent lists — those are
+    populated by agent_loop callbacks during a session.
+    """
+
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.05)
+            state = app._header_state
+            assert len(state.mcps) > 0, (
+                "expected at least 1 MCP server from TOOL_REGISTRY, got 0"
+            )
+            # Spot-check: every MCP server has a known tool name + 'connected' state
+            # (none of loom's built-in tools are disabled by default).
+            for server in state.mcps:
+                assert server.name, f"MCP server must have a non-empty name: {server}"
+                assert server.state in ("connected", "error", "disabled"), (
+                    f"unexpected state {server.state!r} for {server.name}"
+                )
+            assert state.todos == [], f"todos must start empty, got {state.todos}"
+            assert state.subagents == [], (
+                f"subagents must start empty, got {state.subagents}"
+            )
+
+    asyncio.run(driver())
+
+
+def test_app_on_todo_update_replaces_todo_list():
+    """App.on_todo_update converts agent's todo format to TUI TodoItem."""
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.05)
+            agent_todos = [
+                {"content": "Read context.py", "status": "completed"},
+                {"content": "Fix microcompact", "status": "in_progress"},
+                {"content": "Add test", "status": "pending"},
+            ]
+            app.on_todo_update(TodoUpdate(agent_todos))
+            await pilot.pause(0.05)
+            state = app._header_state
+            assert len(state.todos) == 3, f"expected 3 todos, got {len(state.todos)}"
+            assert state.todos[0].text == "Read context.py"
+            assert state.todos[0].state == "done", (
+                f"completed → done, got {state.todos[0].state}"
+            )
+            assert state.todos[1].text == "Fix microcompact"
+            assert state.todos[1].state == "active", (
+                f"in_progress → active, got {state.todos[1].state}"
+            )
+            assert state.todos[2].text == "Add test"
+            assert state.todos[2].state == "pending"
+
+    asyncio.run(driver())
+
+
+def test_app_on_subagent_start_appends_running_subagent():
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.05)
+            app.on_subagent_start(SubagentStart("abc12345", "extract MCP schema"))
+            await pilot.pause(0.05)
+            state = app._header_state
+            assert len(state.subagents) == 1
+            assert state.subagents[0].id == "abc12345"
+            assert state.subagents[0].state == "running"
+            assert state.subagents[0].elapsed == "0s"
+
+    asyncio.run(driver())
+
+
+def test_app_on_subagent_end_updates_existing_subagent():
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.05)
+            app.on_subagent_start(SubagentStart("xyz98765", "test"))
+            await pilot.pause(0.05)
+            app.on_subagent_end(SubagentEnd("xyz98765", 12.7, "done"))
+            await pilot.pause(0.05)
+            state = app._header_state
+            assert len(state.subagents) == 1, (
+                f"on_subagent_end should UPDATE, not add — got {len(state.subagents)} subagents"
+            )
+            assert state.subagents[0].state == "done"
+            assert state.subagents[0].elapsed == "12s", (
+                f"elapsed should be floored to int seconds, got {state.subagents[0].elapsed!r}"
+            )
+
+    asyncio.run(driver())
+
+
+def test_app_on_subagent_end_handles_unknown_id_gracefully():
+    """on_subagent_end with unknown id (e.g., end fired before start reached UI)
+    must not raise — just no-op for that id."""
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.05)
+            app.on_subagent_end(SubagentEnd("unknown_id", 5.0, "done"))
+            await pilot.pause(0.05)
+            assert app._header_state.subagents == []
+
+    asyncio.run(driver())
+
+
+def test_convert_agent_todos_handles_unknown_status():
+    """Unknown agent statuses must fall back to 'pending' (defensive)."""
+    app = AgentTUIApp.__new__(AgentTUIApp)  # skip __init__ (no driver needed)
+    converted = app._convert_agent_todos([
+        {"content": "x", "status": "unknown_status"},
+        {"content": "y", "status": "in_progress"},
+    ])
+    assert converted[0].state == "pending", (
+        f"unknown status should fall back to 'pending', got {converted[0].state}"
+    )
+    assert converted[1].state == "active"
+
+
+def test_convert_agent_todos_handles_missing_fields():
+    """Missing 'content' / 'status' should not raise; defaults to '' + 'pending'."""
+    app = AgentTUIApp.__new__(AgentTUIApp)
+    converted = app._convert_agent_todos([
+        {},  # both missing
+        {"content": "only content"},  # status missing
+        {"status": "in_progress"},  # content missing
+    ])
+    assert converted[0].text == ""
+    assert converted[0].state == "pending"
+    assert converted[1].text == "only content"
+    assert converted[1].state == "pending"
+    assert converted[2].text == ""
+    assert converted[2].state == "active"
+
+
+def test_run_todo_write_fires_on_todo_update_callback():
+    """loom/agent/tools.run_todo_write must fire on_todo_update after updating CURRENT_TODOS.
+
+    Uses module-level callback dispatcher in loom.agent.loop.
+    """
+    import loom.agent.loop as loop_mod
+    import loom.agent.tools as tools_mod
+
+    captured: list[list] = []
+
+    def cb(todos: list) -> None:
+        captured.append(list(todos))
+
+    try:
+        loop_mod.set_active_callbacks({"on_todo_update": cb})
+        result = tools_mod.run_todo_write([
+            {"content": "Task A", "status": "pending"},
+            {"content": "Task B", "status": "in_progress"},
+        ])
+        assert "Updated 2 tasks" in result
+        assert len(captured) == 1, f"expected 1 callback fire, got {len(captured)}"
+        assert len(captured[0]) == 2
+        assert captured[0][0]["content"] == "Task A"
+        assert captured[0][1]["status"] == "in_progress"
+    finally:
+        loop_mod.clear_active_callbacks()
+
+
+def test_run_todo_write_no_callback_when_no_dispatcher():
+    """Without set_active_callbacks, run_todo_write is a silent no-op for callback."""
+    import loom.agent.loop as loop_mod
+    import loom.agent.tools as tools_mod
+
+    # Ensure dispatcher is cleared
+    loop_mod.clear_active_callbacks()
+    result = tools_mod.run_todo_write([{"content": "x", "status": "pending"}])
+    assert "Updated 1 tasks" in result  # still updates CURRENT_TODOS
+    # No assertion needed for callback — it's just silently not fired

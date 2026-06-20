@@ -6,6 +6,8 @@ Callbacks fire on the worker thread; ``on_X`` handlers fire on the main
 loop.  ``post_message`` is safe to call from any thread.
 """
 
+from typing import Literal
+
 from textual.message import Message
 
 
@@ -68,3 +70,35 @@ class AssistantTurnEnd(Message):
         super().__init__()
         self.tool_calls = tool_calls
         self.total_messages = total_messages
+
+
+class TodoUpdate(Message):
+    """Posted when the agent's todo list changes (todo_write tool run)."""
+
+    def __init__(self, todos: list) -> None:
+        super().__init__()
+        self.todos = todos
+
+
+class SubagentStart(Message):
+    """Posted when a subagent begins (task tool called)."""
+
+    def __init__(self, subagent_id: str, description: str) -> None:
+        super().__init__()
+        self.subagent_id = subagent_id
+        self.description = description
+
+
+class SubagentEnd(Message):
+    """Posted when a subagent completes (or errors)."""
+
+    def __init__(
+        self,
+        subagent_id: str,
+        elapsed: float,
+        state: Literal["done", "error"],
+    ) -> None:
+        super().__init__()
+        self.subagent_id = subagent_id
+        self.elapsed = elapsed
+        self.state = state

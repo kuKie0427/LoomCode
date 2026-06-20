@@ -572,3 +572,130 @@ class HeaderAppHasCollapseAction(EvalCase):
                 " wired to collapse action"
             ),
         )
+
+
+# ── Case 15: agent_loop on_todo_update callback defined (backend wiring) ─
+
+
+class AgentLoopTodoUpdateCallbackDefined(EvalCase):
+    """f-tui-header-backend-wiring: agent_loop.DEFAULT_CALLBACKS must include
+    on_todo_update so tools.run_todo_write can fire it to update the TUI Header."""
+
+    name = "header-backend-todo-update-callback-defined"
+    description = (
+        "agent_loop.DEFAULT_CALLBACKS includes 'on_todo_update' — fired by"
+        " run_todo_write via the module-level dispatcher"
+    )
+
+    def run(self) -> EvalResult:
+        from loom.agent.loop import DEFAULT_CALLBACKS
+
+        if "on_todo_update" not in DEFAULT_CALLBACKS:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=(
+                    f"DEFAULT_CALLBACKS missing 'on_todo_update' key; got keys:"
+                    f" {sorted(DEFAULT_CALLBACKS.keys())}"
+                ),
+            )
+        return EvalResult(
+            name=self.name, passed=True,
+            detail=(
+                "DEFAULT_CALLBACKS['on_todo_update'] defined — backend"
+                " wiring contract"
+            ),
+        )
+
+
+# ── Case 16: agent_loop on_subagent_start callback defined ────────────────
+
+
+class AgentLoopSubagentStartCallbackDefined(EvalCase):
+    name = "header-backend-subagent-start-callback-defined"
+    description = (
+        "agent_loop.DEFAULT_CALLBACKS includes 'on_subagent_start' — fired by"
+        " run_task via the module-level dispatcher"
+    )
+
+    def run(self) -> EvalResult:
+        from loom.agent.loop import DEFAULT_CALLBACKS
+
+        if "on_subagent_start" not in DEFAULT_CALLBACKS:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=(
+                    f"DEFAULT_CALLBACKS missing 'on_subagent_start' key; got keys:"
+                    f" {sorted(DEFAULT_CALLBACKS.keys())}"
+                ),
+            )
+        return EvalResult(
+            name=self.name, passed=True,
+            detail=(
+                "DEFAULT_CALLBACKS['on_subagent_start'] defined — subagent"
+                " tracking contract"
+            ),
+        )
+
+
+# ── Case 17: agent_loop on_subagent_end callback defined ──────────────────
+
+
+class AgentLoopSubagentEndCallbackDefined(EvalCase):
+    name = "header-backend-subagent-end-callback-defined"
+    description = (
+        "agent_loop.DEFAULT_CALLBACKS includes 'on_subagent_end' — fired by"
+        " run_task after subagent finishes (done or error)"
+    )
+
+    def run(self) -> EvalResult:
+        from loom.agent.loop import DEFAULT_CALLBACKS
+
+        if "on_subagent_end" not in DEFAULT_CALLBACKS:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=(
+                    f"DEFAULT_CALLBACKS missing 'on_subagent_end' key; got keys:"
+                    f" {sorted(DEFAULT_CALLBACKS.keys())}"
+                ),
+            )
+        return EvalResult(
+            name=self.name, passed=True,
+            detail=(
+                "DEFAULT_CALLBACKS['on_subagent_end'] defined — subagent"
+                " completion tracking contract"
+            ),
+        )
+
+
+# ── Case 18: App on_todo_update handler exists ────────────────────────────
+
+
+class AppTodoUpdateHandlerDefined(EvalCase):
+    """AgentTUIApp must define an on_todo_update handler — receives TodoUpdate
+    message from post_message bridge and converts agent todos to TUI TodoItems."""
+
+    name = "header-backend-app-on-todo-update-handler-defined"
+    description = (
+        "AgentTUIApp defines on_todo_update(message) handler — converts agent"
+        " todo format to Header TodoItem (in_progress → active, completed → done)"
+    )
+
+    def run(self) -> EvalResult:
+        from loom.tui.app import AgentTUIApp
+
+        handler = getattr(AgentTUIApp, "on_todo_update", None)
+        if handler is None:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=(
+                    "AgentTUIApp has no on_todo_update method — todo updates"
+                    " from agent won't reach the Header"
+                ),
+            )
+        return EvalResult(
+            name=self.name, passed=True,
+            detail=(
+                "AgentTUIApp.on_todo_update is defined — cross-thread bridge"
+                " wired"
+            ),
+        )

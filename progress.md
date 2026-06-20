@@ -3239,3 +3239,102 @@ The deviation is locked in the implementation but NOT yet reflected in `docs/tui
 - `M  feature_list.json` (new entry f-tui-header-per-section-toggle)
 - `M  progress.md` (this section)
 - `M  progress.md` (this section)
+
+---
+
+## Session: f-tui-header-backend-wiring (2026-06-20)
+
+**Goal**: Replace `DEFAULT_MOCK_STATE` with real `agent_loop` state exposure. The Header widget should reflect actual MCP server connections, the agent's todo list, and active subagents — not a static mock.
+
+### Design
+
+The Header needs 3 live data sources:
+1. **MCP servers** — loom has no real MCP infra yet, so the MCP section shows loom's own tool registry (each loom tool = 1 MCP server for Header display). When real MCP support lands, the data source changes but the widget doesn't.
+2. **Todo list** — `loom/agent/tools.py` already has `CURRENT_TODOS` global. Wire it via a callback fired from `run_todo_write`.
+3. **Subagent count** — `loom/agent/tools.py::run_task` invokes `spawn_subagent`. Wire start + end callbacks to track active subagents.
+
+**Cross-thread bridging** (matches existing TUI pattern):
+- Callbacks fire from the worker thread inside `agent_loop`
+- Use `post_message` to push a Textual `Message` to the main thread
+- `App.on_*` handlers run on the main thread, update `self._header_state`, call `header.update_state(state)`
+
+**Module-level dispatcher** (for `tools.py` to fire without circular imports):
+- `loom/agent/loop.py::_active_callbacks` global
+- `set_active_callbacks(cb)` called at agent_loop entry
+- `clear_active_callbacks()` in agent_loop's `finally`
+- `fire_callback(name, *args)` is what tools.py calls (deferred import to avoid circular import)
+
+### Implementation
+
+**File 1 — `loom/agent/loop.py`** (+78 -22):
+- Added 3 new callbacks to `DEFAULT_CALLBACKS`: `on_todo_update`, `on_subagent_start`, `on_subagent_end`
+- Added module-level dispatcher: `_active_callbacks` global + `set_active_callbacks` + `clear_active_callbacks` + `fire_callback` (silent no-op if no active callbacks, logs+swallows callback exceptions to avoid crashing agent loop on buggy TUI callbacks)
+- Wrapped `agent_loop` body in `try/finally` to clear the dispatcher on every exit path (normal return, exception)
+- Required re-indenting the `while True:` loop body since `try:` added an indent level
+
+**File 2 — `loom/agent/tools.py`** (+24 -1):
+- `run_todo_write`: fires `on_todo_update(list(CURRENT_TODOS))` after the existing `CURRENT_TODOS = todos` assignment. Deferred `from loom.agent.loop import fire_callback` inside the function.
+- `run_task`: fires `on_subagent_start(uuid8, description[:60])` before `spawn_subagent` + `on_subagent_end(uuid8, elapsed, state)` in `finally` (state="done" on success, "error" on exception)
+
+**File 3 — `loom/tui/messages.py`** (+24 -0):
+- Added 3 message classes: `TodoUpdate(todos)`, `SubagentStart(subagent_id, description)`, `SubagentEnd(subagent_id, elapsed, state)` where state is `Literal["done", "error"]`
+
+**File 4 — `loom/tui/app.py`** (+82 -3):
+- Removed `DEFAULT_MOCK_STATE` import + `update_state(DEFAULT_MOCK_STATE)` call
+- Added module-level `_TODO_STATE_FROM_AGENT` map: agent's "in_progress"/"completed" → Header's "active"/"done"
+- Added `self._header_state: HeaderState` instance var (init via `_build_initial_header_state()`)
+- Added `_build_initial_header_state()`: snapshots `TOOL_REGISTRY.names()` into `MCPServer` list, applies `_active_config.disabled_tools` to mark disabled tools with state="disabled"
+- Added `_convert_agent_todos()`: maps agent's `{"content", "status"}` dict → `TodoItem(text, state)`
+- Added 3 message handlers: `on_todo_update`, `on_subagent_start`, `on_subagent_end`
+- Added 3 callbacks to `run_agent_turn`'s callbacks dict that post the messages
+
+**File 5 — `tests/test_tui_header.py`** (+9 tests):
+- `test_app_initial_header_state_has_mcp_servers_from_tool_registry` — App starts with HeaderState from TOOL_REGISTRY
+- `test_app_on_todo_update_replaces_todo_list` — todo_update converts agent format to TodoItem (in_progress→active, completed→done)
+- `test_app_on_subagent_start_appends_running_subagent`
+- `test_app_on_subagent_end_updates_existing_subagent` (elapsed floored to int seconds)
+- `test_app_on_subagent_end_handles_unknown_id_gracefully` (no raise on unknown id)
+- `test_convert_agent_todos_handles_unknown_status` (fallback to "pending")
+- `test_convert_agent_todos_handles_missing_fields` (defaults: text="", state="pending")
+- `test_run_todo_write_fires_on_todo_update_callback` (dispatcher wiring)
+- `test_run_todo_write_no_callback_when_no_dispatcher` (silent no-op)
+
+**File 6 — `loom/eval/cases/tui_header.py`** (+4 cases):
+- `header-backend-todo-update-callback-defined` — DEFAULT_CALLBACKS has `on_todo_update`
+- `header-backend-subagent-start-callback-defined`
+- `header-backend-subagent-end-callback-defined`
+- `header-backend-app-on-todo-update-handler-defined`
+
+**File 7 — `tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw`** (re-baselined):
+- Now shows the real Header line with loom's MCP servers from TOOL_REGISTRY (was showing DEFAULT_MOCK_STATE)
+- All other snapshot tests unchanged
+
+### Verification
+
+| Gate | Result |
+|---|---|
+| `uv run pytest tests/test_tui_header.py -v` | 44/44 passed (was 35/35, +9) |
+| `uv run python -m loom.cli eval --fail-under 100` | 214/214 passed (was 210/210, +4) |
+| `./init.sh` | "Verification Complete (all green)" — 418 pytest passed (was 409, +9), 9 snapshots |
+| `uv run ruff check .` | All checks passed! |
+| `uv run mypy loom/` | Success: no issues found in 76 source files |
+
+### Spec deviation note
+
+The Header spec §4.3.1 says MCP servers are real MCP connections (Claude Code style). loom has no real MCP infra yet — the Header section now shows loom's built-in tool registry (12 tools: bash, read_file, write_file, edit_file, glob, todo_write, memory_read, memory_search, memory_write, load_skill, verify, task) as MCP-equivalent servers for display purposes. When real MCP server support is added to loom, the data source in `_build_initial_header_state` changes (read from an MCP registry) but the Header widget itself doesn't.
+
+### Files changed (no commit yet)
+
+- `M  loom/agent/loop.py` (+78 -22) — callbacks + dispatcher + try/finally wrap
+- `M  loom/agent/tools.py` (+24 -1) — fire callbacks in run_todo_write + run_task
+- `M  loom/tui/messages.py` (+24 -0) — 3 new message classes
+- `M  loom/tui/app.py` (+82 -3) — header_state + handlers + callbacks + removed DEFAULT_MOCK_STATE injection
+- `M  tests/test_tui_header.py` (+9 tests)
+- `M  loom/eval/cases/tui_header.py` (+4 cases)
+- `M  tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw` (re-baseline)
+- `M  feature_list.json` (new entry f-tui-header-backend-wiring)
+- `M  progress.md` (this section)
+
+### Post-delivery cleanup (per AGENTS.md rule #11)
+
+No out-of-scope modifications. The `try/finally` wrap of `agent_loop` body required re-indenting the `while True:` loop body — verified by re-running the affected tests in isolation before declaring done. Initial run of full suite showed 1 flaky failure (`test_app_level_wheel_event_scrolls_chatlog`) which cleared on subsequent runs (test ordering sensitivity, unrelated to my changes).

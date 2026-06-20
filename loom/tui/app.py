@@ -8,6 +8,7 @@ into the main Textual event loop.
 import asyncio
 import os
 import subprocess
+from typing import Literal
 
 from loguru import logger
 from textual import messages as textual_messages
@@ -18,21 +19,35 @@ from textual.events import Click, MouseScrollDown, MouseScrollUp
 from textual.reactive import reactive
 
 from loom.agent.llm import LLMClient
-from loom.agent.loop import WORKDIR, agent_loop
+from loom.agent.loop import WORKDIR, _active_config, agent_loop
+from loom.agent.tools import TOOL_REGISTRY
 from loom.tui import kitty_patch  # noqa: F401  # side-effect: patches XTermParser
 from loom.tui.chat_log import ChatLog
 from loom.tui.composer import Composer
-from loom.tui.header import DEFAULT_MOCK_STATE, Header, HeaderOverlay
+from loom.tui.header import Header, HeaderOverlay, HeaderState, MCPServer, Subagent, TodoItem
 from loom.tui.messages import (
     AssistantTurnEnd,
     AssistantTurnStart,
     CompactOccurred,
+    SubagentEnd,
+    SubagentStart,
     TextDelta,
     ThinkingDelta,
+    TodoUpdate,
     ToolUseCompleted,
     ToolUseStarted,
 )
 from loom.tui.status_bar import StatusBar
+
+# Mapping from agent_loop's todo status (string) to the TUI Header's
+# TodoItem.state (Literal["pending", "active", "done"]). The agent uses
+# "in_progress" and "completed" (Claude Code style); the TUI uses shorter
+# "active" and "done" for compact rendering in the 1-line Header.
+_TODO_STATE_FROM_AGENT: dict[str, Literal["pending", "active", "done"]] = {
+    "pending": "pending",
+    "in_progress": "active",
+    "completed": "done",
+}
 
 
 class AgentTUIApp(App):
@@ -148,6 +163,41 @@ class AgentTUIApp(App):
         # Inject TUI asker (after apply_config so hooks instance is finalized)
         hooks._asker = self._make_tui_asker()
 
+        # f-tui-header-backend-wiring: build initial HeaderState from real
+        # backend sources. MCP servers = loom's tool registry (each loom
+        # tool is treated as an MCP-equivalent server for Header display
+        # since loom has no real MCP infra yet). Todo/subagent lists
+        # start empty — populated by callbacks during agent_loop runs.
+        self._header_state = self._build_initial_header_state()
+
+    def _build_initial_header_state(self) -> HeaderState:
+        """Snapshot of MCP servers from TOOL_REGISTRY + empty todo/subagent lists.
+
+        MCP server state reflects harness.toml [policy].disabled_tools:
+        disabled tools show as 'disabled', others as 'connected'.
+        """
+        disabled = set(_active_config.disabled_tools or [])
+        mcps = [
+            MCPServer(name=name, state="disabled" if name in disabled else "connected")
+            for name in TOOL_REGISTRY.names()
+        ]
+        return HeaderState(mcps=mcps, todos=[], subagents=[])
+
+    def _convert_agent_todos(self, todos: list) -> list[TodoItem]:
+        """Map agent_loop's todo_write format to TUI Header's TodoItem.
+
+        Agent uses Claude Code style ('in_progress' / 'completed');
+        Header uses shorter ('active' / 'done') for compact rendering.
+        Unknown statuses fall back to 'pending'.
+        """
+        result: list[TodoItem] = []
+        for t in todos:
+            content = str(t.get("content", ""))
+            agent_state = str(t.get("status", "pending"))
+            state = _TODO_STATE_FROM_AGENT.get(agent_state, "pending")
+            result.append(TodoItem(text=content, state=state))
+        return result
+
     def on_mount(self) -> None:
         """Capture the main event loop for cross-thread async dispatch."""
         self._main_loop = asyncio.get_running_loop()
@@ -155,7 +205,7 @@ class AgentTUIApp(App):
         status_bar = self.query_one(StatusBar)
         status_bar.ctx_window = self.llm.get_context_window()
         self._sync_status_bar()
-        self.query_one(Header).update_state(DEFAULT_MOCK_STATE)
+        self.query_one(Header).update_state(self._header_state)
 
     def on_key(self, event) -> None:
         pass
@@ -379,6 +429,27 @@ class AgentTUIApp(App):
         except Exception:
             pass
 
+    def on_todo_update(self, message: TodoUpdate) -> None:
+        """f-tui-header-backend-wiring: agent's todo list changed (todo_write ran)."""
+        self._header_state.todos = self._convert_agent_todos(message.todos)
+        self.query_one(Header).update_state(self._header_state)
+
+    def on_subagent_start(self, message: SubagentStart) -> None:
+        """f-tui-header-backend-wiring: a subagent was spawned (task tool called)."""
+        self._header_state.subagents.append(
+            Subagent(id=message.subagent_id, state="running", elapsed="0s")
+        )
+        self.query_one(Header).update_state(self._header_state)
+
+    def on_subagent_end(self, message: SubagentEnd) -> None:
+        """f-tui-header-backend-wiring: subagent finished (done or error)."""
+        for sub in self._header_state.subagents:
+            if sub.id == message.subagent_id:
+                sub.state = message.state
+                sub.elapsed = f"{int(message.elapsed)}s"
+                break
+        self.query_one(Header).update_state(self._header_state)
+
     async def on_composer_submitted(self, event: Composer.Submitted) -> None:
         user_msg = event.value.strip()
         if not user_msg:
@@ -464,6 +535,17 @@ class AgentTUIApp(App):
             "on_compact": lambda before, after: self.post_message(CompactOccurred(before, after)),
             "on_message_end": lambda calls, turns: self.post_message(
                 AssistantTurnEnd(calls, turns)
+            ),
+            # f-tui-header-backend-wiring: cross-thread bridge for todo /
+            # subagent state. Callbacks fire from the worker thread inside
+            # agent_loop → fire_callback (loop.py) → these lambdas →
+            # post_message (thread-safe) → main thread handlers below.
+            "on_todo_update": lambda todos: self.post_message(TodoUpdate(list(todos))),
+            "on_subagent_start": lambda sid, desc: self.post_message(
+                SubagentStart(sid, desc)
+            ),
+            "on_subagent_end": lambda sid, elapsed, state: self.post_message(
+                SubagentEnd(sid, elapsed, state)
             ),
         }
 

@@ -162,6 +162,10 @@ def run_todo_write(todos: list) -> str:
         icon = {"pending": " ", "in_progress": "\033[36m▸\033[0m", "completed": "\033[32m✓\033[0m"}[t["status"]]
         lines.append(f"  [{icon}] {t['content']}")
     logger.info("\n".join(lines))
+    # Fire backend callback for f-tui-header-backend-wiring. Deferred
+    # import to avoid circular dependency (loop.py imports tools.py).
+    from loom.agent.loop import fire_callback
+    fire_callback("on_todo_update", list(CURRENT_TODOS))
     return f"Updated {len(CURRENT_TODOS)} tasks"
 
 
@@ -391,7 +395,26 @@ TOOLS.append({
 
 
 def run_task(description: str) -> str:
-    return spawn_subagent(description)
+    # Fire backend callbacks for f-tui-header-backend-wiring. Deferred
+    # import to avoid circular dependency (loop.py imports tools.py).
+    import time
+    import uuid as _uuid
+
+    from loom.agent.loop import fire_callback
+
+    subagent_id = _uuid.uuid4().hex[:8]
+    fire_callback("on_subagent_start", subagent_id, description[:60])
+    t0 = time.monotonic()
+    state = "done"
+    try:
+        result = spawn_subagent(description)
+        return result
+    except Exception:
+        state = "error"
+        raise
+    finally:
+        elapsed = time.monotonic() - t0
+        fire_callback("on_subagent_end", subagent_id, elapsed, state)
 
 
 TOOL_HANDLERS["task"] = run_task
