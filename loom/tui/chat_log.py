@@ -125,6 +125,25 @@ class TurnLabel(Static):
     """
 
 
+class TurnSeparator(Static):
+    """Hairline divider mounted before each user turn.
+
+    Visual: a single `─` line in $border, content-column padding (0 2) so
+    it aligns with the labels below. Per §2 rule 5, this is decoration on
+    the same outer column as TurnLabel, not a new indentation tier.
+    """
+
+    DEFAULT_CSS = """
+    TurnSeparator {
+        height: 1;
+        color: $border;
+        text-style: dim;
+        padding: 0 2;
+        margin: 1 0 0 0;
+    }
+    """
+
+
 class UserMessage(Markdown):
     DEFAULT_CSS = """
     UserMessage {
@@ -148,7 +167,7 @@ class AssistantMessage(Markdown):
         color: $text;
         padding: 0 2;
         margin: 0 0 1 0;
-        border: none;
+        border-left: outer $accent-dim;
     }
     """
 
@@ -186,6 +205,101 @@ class SystemNote(Static):
         margin: 0 0 1 0;
     }
     """
+
+
+class WelcomeBanner(Static):
+    """Static idle-state splash shown while the ChatLog is empty.
+
+    Composition (revised 2026-06-21, #5): a 3D extruded stencil wordmark
+    in opencode's reference style, with a three-tone gradient that
+    produces the "3D block sitting on a surface" effect:
+
+        $accent-light  ── row 0 (top face, the lit edge)
+        $accent        ── rows 1–3 (body, the front face)
+        $accent-dim    ── row 4 (bottom face, the shadow)
+
+    Per the opencode reference image (the actual rendered logo, not
+    the simplified `logo.ts` constants): 5-row stencil letters with
+    a clear upper-face / body / lower-face color band. The 'o' has
+    a stencil cutout (a 1-cell `▀` slot in row 2) that mimics the
+    filled-square hole in opencode's 'o'. Letter widths: l=3, o=5,
+    o=5, m=7 (with 1-col separators + 2-col leading padding = 25
+    cols × 5 rows).
+
+    Pure still image — no animation (§2 rule 2). Dismissed on first
+    user message, re-shown after /clear.
+    """
+
+    DEFAULT_CSS = """
+    WelcomeBanner {
+        height: auto;
+        width: 1fr;
+        content-align: center middle;
+        padding: 2 0 0 0;
+        margin: 0 0 1 0;
+    }
+    """
+
+    # 3D extruded "loom" wordmark, 25 cols × 5 rows. Row 2 has a
+    # 1-cell `▀` stencil cutout inside each 'o' (opencode-style filled
+    # hole). Row 4 is split so that `▄` chars use $accent-dim (shadow)
+    # and `█` chars stay in $accent (body color, matching the side edges).
+    _LOOM_WORDMARK_ROW0 = "  ▀▀▀ █▀▀▀█ █▀▀▀█ █▀▀█▀▀█"
+    _LOOM_WORDMARK_ROW1 = "  ███ █   █ █   █ █  █  █"
+    _LOOM_WORDMARK_ROW2 = "  ███ █ ▀ █ █ ▀ █ █  █  █"
+    _LOOM_WORDMARK_ROW3 = "  ███ █   █ █   █ █  █  █"
+    _LOOM_WORDMARK_BOTTOM = "  ▄▄▄ █▄▄▄█ █▄▄▄█ █▄▄█▄▄█"
+
+    @staticmethod
+    def _colorize_top(row: str) -> str:
+        """Row 0 — top face. `▀` in $accent-light, `█` in $accent."""
+        out: list[str] = []
+        for ch in row:
+            if ch == "▀":
+                out.append("[$accent-light]▀[/]")
+            elif ch == "█":
+                out.append("[$accent]█[/]")
+            else:
+                out.append(ch)
+        return "".join(out)
+
+    @staticmethod
+    def _colorize_body(row: str) -> str:
+        """Body rows 1–3 — `▀` (stencil cutout) in $accent-light, rest in $accent."""
+        out: list[str] = []
+        for ch in row:
+            if ch == "▀":
+                out.append("[$accent-light]▀[/]")
+            elif ch == "█":
+                out.append("[$accent]█[/]")
+            else:
+                out.append(ch)
+        return "".join(out)
+
+    @staticmethod
+    def _colorize_bottom(row: str) -> str:
+        """Row 4 — bottom face. `▄` in $accent-dim, `█` in $accent."""
+        out: list[str] = []
+        for ch in row:
+            if ch == "▄":
+                out.append("[$accent-dim]▄[/]")
+            elif ch == "█":
+                out.append("[$accent]█[/]")
+            else:
+                out.append(ch)
+        return "".join(out)
+
+    def __init__(self, model: str = "loom", **kwargs: Any) -> None:
+        body = (
+            f"{self._colorize_top(self._LOOM_WORDMARK_ROW0)}\n"
+            f"{self._colorize_body(self._LOOM_WORDMARK_ROW1)}\n"
+            f"{self._colorize_body(self._LOOM_WORDMARK_ROW2)}\n"
+            f"{self._colorize_body(self._LOOM_WORDMARK_ROW3)}\n"
+            f"{self._colorize_bottom(self._LOOM_WORDMARK_BOTTOM)}\n\n"
+            f"[$text-muted]weaving intent into action[/]\n\n"
+            f"[$text-faint]/help · /model · /clear · /resume[/]"
+        )
+        super().__init__(body, **kwargs)
 
 
 class ThinkingDisplay(Markdown):
@@ -491,9 +605,26 @@ class ChatLog(VerticalScroll):
         self._stream_full_text: str = ""
         self._stream_flush_timer: Any = None
         self._STREAM_FLUSH_INTERVAL = 0.05
+        self._welcome: WelcomeBanner | None = None
         return iter(())
 
+    def mount_welcome(self) -> None:
+        if self._welcome is not None or self.children:
+            return
+        banner = WelcomeBanner()
+        self._welcome = banner
+        asyncio.create_task(self._mount_async(banner))
+
+    def _dismiss_welcome(self) -> None:
+        if self._welcome is not None:
+            asyncio.create_task(self._remove_widget(self._welcome))
+            self._welcome = None
+
+    async def _remove_widget(self, widget: Any) -> None:
+        await widget.remove()
+
     async def append_user_message(self, text: str) -> None:
+        self._dismiss_welcome()
         self._current_body = None
         self._assistant_label_mounted = False
         self._stream_full_text = ""
@@ -503,6 +634,7 @@ class ChatLog(VerticalScroll):
         # turns (mirroring _tool_markers, which also persists). Use
         # clear_content() (the /clear slash command) to reset both.
         self._sticky = True
+        await self.mount(TurnSeparator("─" * 60))
         label = TurnLabel("▎ you", classes="role-user")
         body = UserMessage(text)
         await self.mount(label)
@@ -726,3 +858,5 @@ class ChatLog(VerticalScroll):
         self._thinking_display = None
         self._thinking_reasoning = ""
         self._assistant_label_mounted = False
+        self._welcome = None
+        self.mount_welcome()
