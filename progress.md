@@ -3127,4 +3127,115 @@ The Textual `app.query(WidgetClass)` matches by CSS class name (not class identi
 - `M  tests/test_status_bar.py` (-15 — removed obsolete test_no_header_widget)
 - `M  .gitignore` (+4 — Sisyphus/opencode system artifacts)
 - `M  pyproject.toml` (+2 — ruff exclude Sisyphus dirs)
+
+---
+
+## Session: f-tui-header-per-section-toggle (2026-06-20)
+
+**Goal**: Fix the two UX issues the user reported after the initial Header delivery (commit 61cda27): (1) MCP/todo/subagent sections share one expand key — clicking once expanded all three; (2) After expansion there was no collapse key. Both fixed via a per-section toggle design.
+
+### User-reported issues
+
+> 目前问题： MCP/todo/subagent 状态共用一个展开键，一点三个状态都会展开；展开后没有折叠键。
+
+User chose:
+- **Per-section toggle**: only one overlay visible at a time (switch mode)
+- **Collapse**: ESC + click-outside (chat log / status bar / composer)
+
+### Design changes (deviation from initial 2026-06-19 spec, locked 2026-06-20)
+
+The original spec §4.3.2 said "click anywhere on the collapsed line → expand, ESC collapses". In practice this was ambiguous:
+- "Click anywhere on the collapsed line" → clicked once expanded ALL sections (not what user wanted)
+- "ESC collapses" → not implemented (bug per spec)
+
+The per-section toggle design changes this:
+- Each section in the collapsed line is its own clickable button (HeaderSectionButton)
+- Click a section → expand only that section's overlay
+- Click same section again → collapse (toggle)
+- Click different section → switch to that section's overlay (mutual exclusion: only 1 overlay visible)
+- ESC → collapse (per spec §4.3.2)
+- Click outside (chat log, status bar, composer) → collapse
+- Click on overlay CONTENT itself → no-op (user is reading)
+
+### Code changes
+
+**`loom/tui/header.py`** (436 line diff, +348 -194):
+- `Header` class: refactored from `Static` to `Horizontal`, composes 3 `HeaderSectionButton` children (one per `VALID_SECTIONS`: `mcp` / `todo` / `subagent`)
+- New `HeaderSectionButton(Static)` class: clickable button with `section: str` attribute, `can_focus = True`, posts `Header.SectionToggle(self._section)` on click, `event.stop()` to prevent App.on_click from collapsing the overlay we're about to mount
+- `Header.SectionToggle(Message)` replaces the old `Header.Toggle` — carries `section: str` field
+- `HeaderOverlay(Widget)` now takes `(section, state)` constructor args; renders only the selected section (was rendering all 3 sections in a single panel)
+- New CSS: `HeaderSectionButton { width: 1fr; }` so the 3 buttons fill the 1-line horizontal track evenly (no dead zones); `section-hidden` class hides buttons whose count=0
+- `Header.on_click` consumes clicks on the container itself (padding/dead zones between buttons if any) so they don't bubble to App.on_click
+- `HeaderOverlay.on_click` consumes clicks on the overlay content (user reading → no collapse)
+
+**`loom/tui/app.py`** (+69 -27):
+- Added BINDING: `("escape", "collapse_header", "Collapse header")`
+- Renamed `on_header_toggle` → `on_header_section_toggle` with 3-way logic: same section → collapse, different/none → switch or mount fresh
+- Added `action_collapse_header()` (called by ESC binding)
+- Added `App.on_click` handler that collapses overlay on any non-Header/non-HeaderOverlay click
+- Per-section overlay IDs (`header-overlay-{section}`) avoid DuplicateIds when switching (old overlay may still be in DOM pending async removal)
+- Removed `#header` CSS block from App.CSS (now lives in `Header.DEFAULT_CSS` as single source of truth)
+
+**`tests/test_tui_header.py`** (rewritten, 35 tests):
+- 8 glyph helper tests — unchanged (mcp_glyph, todo_glyph, subagent_glyph)
+- 6 snapshot tests — 3 collapsed (re-baselined for new design) + 3 per-section expanded (was 1 combined)
+- 21 behavioral tests — per-section toggle, ESC, click-outside, click-on-overlay-no-op, mutual exclusion, dock-top invariant, custom-not-builtin invariant
+
+**`loom/eval/cases/tui_header.py`** (14 cases, was 8):
+- 8 existing cases updated for new design
+- 6 new cases for per-section contract: `section-toggle-message-defined`, `three-section-buttons-in-compose`, `overlay-has-section-attribute`, `esc-binding-registered`, `on-header-section-toggle-defined`, `action-collapse-header-defined`
+
+### Snapshot updates (legitimate re-baselines, not flake)
+
+- `test_header_collapsed_empty.raw` — collapsed line is now empty (all 3 sections have count=0, buttons all hidden via `section-hidden` class)
+- `test_header_collapsed_populated.raw` — collapsed line shows 3 section buttons (was 1 line with all sections joined)
+- `test_header_collapsed_subagent_hidden.raw` — collapsed line shows MCP+todo buttons, subagent button hidden
+- `test_header_expanded.raw` — **DELETED** (was rendering all 3 sections; replaced by 3 per-section snapshots)
+- `test_header_expanded_mcp.raw` — **NEW** — overlay shows MCP section only
+- `test_header_expanded_todo.raw` — **NEW** — overlay shows todo section only
+- `test_header_expanded_subagent.raw` — **NEW** — overlay shows subagent section only
+- `test_empty_layout.raw` — re-baselined for new Header design (3 section buttons instead of 1 collapsed line)
+
+### Verification
+
+| Gate | Result |
+|---|---|
+| `uv run pytest tests/test_tui_header.py -v` | 35/35 passed (was 23/23, +12) |
+| `uv run pytest -q` (full) | 409 passed (was 397, +12 net) |
+| `uv run python -m loom.cli eval --fail-under 100` | 210/210 passed (was 204/204, +6 new eval cases) |
+| `uv run ruff check .` | All checks passed! |
+| `uv run mypy loom/` | Success: no issues found in 74 source files |
+| `./init.sh` | "Verification Complete (all green)" — exit 0 |
+
+### Files NOT changed (per WIP=1)
+
+- `loom/tui/chat_log.py`, `loom/tui/status_bar.py`, `loom/tui/composer.py`, `loom/tui/screens.py`, `loom/tui/widgets.py`, `loom/tui/messages.py`, `loom/tui/kitty_patch.py` — untouched
+- `tests/test_status_bar.py` — untouched (no obsolete tests this time, since the work was on Header not StatusBar)
+- `docs/tui-design-language.md` — untouched (spec deviation locked here, doc update is a follow-up if user wants the spec to reflect the per-section design)
+- `AGENTS.md`, `README.md`, `CHANGELOG.md` — untouched
+
+### Spec deviation note
+
+The per-section toggle design deviates from the original 2026-06-19 spec §4.3.2 (which assumed a single overlay showing all 3 sections). The deviation is:
+- **Original spec**: click anywhere on collapsed line → expand overlay with all 3 sections visible
+- **New design**: each section has its own clickable affordance; overlay shows only the clicked section
+
+The deviation is locked in the implementation but NOT yet reflected in `docs/tui-design-language.md`. A follow-up update to §4.3.2 + §2 rule 3 ("one anchor per iteration") + §5 anti-patterns may be warranted to keep spec/code aligned. Marked as a potential follow-up in the feature entry description.
+
+### Files in this commit (no commit yet)
+
+- `M  loom/tui/header.py` (436 line diff, refactor)
+- `M  loom/tui/app.py` (+69 -27, App integration)
+- `M  loom/eval/cases/tui_header.py` (14 cases, was 8)
+- `M  tests/test_tui_header.py` (35 tests, was 23)
+- `M  tests/__snapshots__/test_tui_header/test_header_collapsed_empty.raw` (re-baseline)
+- `M  tests/__snapshots__/test_tui_header/test_header_collapsed_populated.raw` (re-baseline)
+- `M  tests/__snapshots__/test_tui_header/test_header_collapsed_subagent_hidden.raw` (re-baseline)
+- `D  tests/__snapshots__/test_tui_header/test_header_expanded.raw` (deleted — replaced)
+- `?? tests/__snapshots__/test_tui_header/test_header_expanded_mcp.raw` (NEW)
+- `?? tests/__snapshots__/test_tui_header/test_header_expanded_todo.raw` (NEW)
+- `?? tests/__snapshots__/test_tui_header/test_header_expanded_subagent.raw` (NEW)
+- `M  tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw` (re-baseline)
+- `M  feature_list.json` (new entry f-tui-header-per-section-toggle)
+- `M  progress.md` (this section)
 - `M  progress.md` (this section)

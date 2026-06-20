@@ -1,20 +1,25 @@
 """Tests for the TUI Header (summary rail) — f-tui-header-summary-rail.
 
-Locks the spec contract from ``docs/tui-design-language.md`` §4.3:
+Locks the spec contract from ``docs/tui-design-language.md`` §4.3 and the
+per-section toggle design locked 2026-06-20:
 
   * Pure helper functions (mcp_glyph, todo_glyph, subagent_glyph) must
     return worst-state aggregate glyphs per spec §4.3.1.
   * The zero-count hide rule must hide entire sections, not show
     ``0/M`` placeholders.
-  * The collapsed 1-line Header must render all visible sections in
-    spec order (MCP → Todos → Subagent), each on the same line.
-  * The expanded overlay panel must mount below the collapsed line
-    and show 3 sections with 2-col indented detail rows.
+  * The collapsed 1-line Header has 3 independently clickable section
+    buttons (HeaderSectionButton) — MCP, Todos, Subagent.
+  * Each section is independently togglable; only one overlay is visible
+    at a time (mutual exclusion). Switching sections replaces the
+    overlay; clicking the same section collapses it.
+  * Collapse mechanisms: ESC key, click outside the overlay (chat log /
+    status bar / composer), click the same section button twice.
 
 Test layers:
   1. Pure helper unit tests (no Textual app needed) — 8 cases.
-  2. Snapshot tests via pytest-textual-snapshot — 4 cases covering
-     the visual contract.
+  2. Snapshot tests via pytest-textual-snapshot — collapsed + expanded
+     states for each section.
+  3. Behavioral tests — per-section toggle + collapse mechanisms.
 
 Mock data only (DEFAULT_MOCK_STATE from loom.tui.header).
 """
@@ -22,12 +27,20 @@ Mock data only (DEFAULT_MOCK_STATE from loom.tui.header).
 from __future__ import annotations
 
 import asyncio
+import inspect
+
+from textual.events import Click
 
 from loom.tui.app import AgentTUIApp
 from loom.tui.header import (
     DEFAULT_MOCK_STATE,
+    SECTION_MCP,
+    SECTION_SUBAGENT,
+    SECTION_TODO,
+    VALID_SECTIONS,
     Header,
     HeaderOverlay,
+    HeaderSectionButton,
     HeaderState,
     MCPServer,
     Subagent,
@@ -37,61 +50,46 @@ from loom.tui.header import (
     todo_glyph,
 )
 
-# ── Pure helper unit tests (no Textual app needed) ──────────────────────────
-
 
 def test_mcp_glyph_all_connected():
-    """All MCPs healthy → green ●, connected_count = total."""
     servers = [MCPServer("db", "connected"), MCPServer("fs", "connected")]
     assert mcp_glyph(servers) == ("●", 2, 2)
 
 
 def test_mcp_glyph_any_error():
-    """Any MCP error → yellow ◌, connected_count = 0 (worst state)."""
     servers = [MCPServer("db", "connected"), MCPServer("gh", "error")]
     assert mcp_glyph(servers) == ("◌", 0, 2)
 
 
 def test_mcp_glyph_empty():
-    """No MCPs → dim ○, counts 0/0 (hidden from collapsed line)."""
     assert mcp_glyph([]) == ("○", 0, 0)
 
 
 def test_todo_glyph_has_active():
-    """Any active todo → yellow ◐."""
     items = [TodoItem("x", "done"), TodoItem("y", "active")]
     assert todo_glyph(items) == ("◐", 0, 2)
 
 
 def test_todo_glyph_all_done():
-    """All todos done → green ✓."""
     items = [TodoItem("x", "done"), TodoItem("y", "done")]
     assert todo_glyph(items) == ("✓", 0, 2)
 
 
 def test_todo_glyph_empty():
-    """No todos → dim ○, counts 0/0 (hidden from collapsed line)."""
     assert todo_glyph([]) == ("○", 0, 0)
 
 
 def test_subagent_glyph_zero_count():
-    """Empty subagent list → (None, 0) — entire section hidden."""
     assert subagent_glyph([]) == (None, 0)
 
 
 def test_subagent_glyph_has_running():
-    """At least one running subagent → yellow ◐ + count."""
     items = [Subagent("extract-001", "running", "4s")]
     assert subagent_glyph(items) == ("◐", 1)
 
 
-# ── Snapshot tests (Textual snapshot framework) ────────────────────────────
-
-
 def test_header_collapsed_empty(snap_compare):
-    """All 3 sections empty → collapsed line shows only the ▼ affordance."""
     app = AgentTUIApp()
-    # Will be overridden by run_before so we can control the state.
     async def run_before(pilot):
         await pilot.pause(0.05)
         header = pilot.app.query_one(Header)
@@ -102,12 +100,9 @@ def test_header_collapsed_empty(snap_compare):
 
 
 def test_header_collapsed_populated(snap_compare):
-    """DEFAULT_MOCK_STATE → all 3 sections visible in collapsed line."""
     app = AgentTUIApp()
     async def run_before(pilot):
         await pilot.pause(0.05)
-        # on_mount already injects DEFAULT_MOCK_STATE; force a re-render
-        # to make the snapshot deterministic against the layout state.
         header = pilot.app.query_one(Header)
         header.update_state(DEFAULT_MOCK_STATE)
         await pilot.pause(0.1)
@@ -116,7 +111,6 @@ def test_header_collapsed_populated(snap_compare):
 
 
 def test_header_collapsed_subagent_hidden(snap_compare):
-    """subagent count=0 → subagent section hidden, MCP+Todo visible."""
     app = AgentTUIApp()
     state = HeaderState(
         mcps=[MCPServer("db", "connected")],
@@ -132,98 +126,196 @@ def test_header_collapsed_subagent_hidden(snap_compare):
     assert snap_compare(app, run_before=run_before, terminal_size=(120, 24))
 
 
-def test_header_expanded(snap_compare):
-    """Clicking the collapsed line expands the overlay panel."""
+def test_header_expanded_mcp(snap_compare):
     app = AgentTUIApp()
     async def run_before(pilot):
         await pilot.pause(0.05)
         header = pilot.app.query_one(Header)
         header.update_state(DEFAULT_MOCK_STATE)
-        # Click the header to mount the overlay.
-        header.post_message(Header.Toggle())
+        await pilot.pause(0.05)
+        pilot.app.query_one(f"#header-btn-{SECTION_MCP}", HeaderSectionButton).post_message(
+            Header.SectionToggle(SECTION_MCP)
+        )
         await pilot.pause(0.2)
 
     assert snap_compare(app, run_before=run_before, terminal_size=(120, 24))
 
 
-# ── Behavioral tests (no snapshot) ──────────────────────────────────────────
+def test_header_expanded_todo(snap_compare):
+    app = AgentTUIApp()
+    async def run_before(pilot):
+        await pilot.pause(0.05)
+        header = pilot.app.query_one(Header)
+        header.update_state(DEFAULT_MOCK_STATE)
+        await pilot.pause(0.05)
+        pilot.app.query_one(f"#header-btn-{SECTION_TODO}", HeaderSectionButton).post_message(
+            Header.SectionToggle(SECTION_TODO)
+        )
+        await pilot.pause(0.2)
+
+    assert snap_compare(app, run_before=run_before, terminal_size=(120, 24))
 
 
-def test_header_renders_collapsed_line_with_all_sections():
-    """The collapsed 1-line render must include the 3 visible sections."""
+def test_header_expanded_subagent(snap_compare):
+    app = AgentTUIApp()
+    async def run_before(pilot):
+        await pilot.pause(0.05)
+        header = pilot.app.query_one(Header)
+        header.update_state(DEFAULT_MOCK_STATE)
+        await pilot.pause(0.05)
+        pilot.app.query_one(
+            f"#header-btn-{SECTION_SUBAGENT}", HeaderSectionButton
+        ).post_message(Header.SectionToggle(SECTION_SUBAGENT))
+        await pilot.pause(0.2)
+
+    assert snap_compare(app, run_before=run_before, terminal_size=(120, 24))
+
+
+def test_header_compose_yields_three_section_buttons():
+    """Header (Horizontal) yields 3 HeaderSectionButton children in spec order MCP → Todo → Subagent."""
     header = Header()
-    header.update_state(DEFAULT_MOCK_STATE)
-    text = header.render()
-    assert "MCP" in text, f"missing MCP section: {text!r}"
-    assert "todos" in text, f"missing todos section: {text!r}"
-    assert "subagent" in text, f"missing subagent section: {text!r}"
-    assert text.count("\n") == 0, f"collapsed line must be 1 line, got: {text!r}"
+    buttons = list(header.compose())
+    assert len(buttons) == 3, f"expected 3 section buttons, got {len(buttons)}"
+    for btn, expected_section in zip(buttons, VALID_SECTIONS, strict=True):
+        assert isinstance(btn, HeaderSectionButton), (
+            f"child must be HeaderSectionButton, got {type(btn)}"
+        )
+        assert btn.section == expected_section, (
+            f"button section mismatch: expected {expected_section}, got {btn.section}"
+        )
+    assert [b.section for b in buttons] == [SECTION_MCP, SECTION_TODO, SECTION_SUBAGENT]
 
 
-def test_header_renders_no_sections_when_all_empty():
-    """Empty state → collapsed line is just the ▼ affordance (no 0/M placeholders)."""
+def test_section_button_renders_only_its_section():
+    state = DEFAULT_MOCK_STATE
+    btn_mcp = HeaderSectionButton(SECTION_MCP)
+    btn_mcp.update_state(state)
+    btn_todo = HeaderSectionButton(SECTION_TODO)
+    btn_todo.update_state(state)
+    btn_sub = HeaderSectionButton(SECTION_SUBAGENT)
+    btn_sub.update_state(state)
+    assert "MCP" in btn_mcp.render(), f"MCP button missing MCP: {btn_mcp.render()!r}"
+    assert "todos" in btn_todo.render(), f"todo button missing todos: {btn_todo.render()!r}"
+    assert "subagent" in btn_sub.render(), f"subagent button missing subagent: {btn_sub.render()!r}"
+
+
+def test_section_button_hides_when_count_zero():
     header = Header()
-    header.update_state(HeaderState(mcps=[], todos=[], subagents=[]))
-    text = header.render()
-    assert "MCP" not in text, f"empty MCP should be hidden: {text!r}"
-    assert "todos" not in text, f"empty todos should be hidden: {text!r}"
-    assert "subagent" not in text, f"empty subagent should be hidden: {text!r}"
-    assert "0" not in text, f"no 0 placeholders allowed: {text!r}"
-
-
-def test_header_hides_subagent_section_when_zero():
-    """subagent count=0 must hide the entire subagent section."""
-    header = Header()
-    state = HeaderState(
-        mcps=[MCPServer("db", "connected")],
-        todos=[TodoItem("one", "active")],
-        subagents=[],
-    )
+    state = HeaderState(mcps=[], todos=[], subagents=[])
     header.update_state(state)
-    text = header.render()
-    assert "MCP" in text
-    assert "todos" in text
-    assert "subagent" not in text
+    buttons = list(header.query(HeaderSectionButton))
+    for btn in buttons:
+        assert btn.render() == "", (
+            f"{btn.section} button should render empty when count=0, got {btn.render()!r}"
+        )
+        assert btn.has_class("section-hidden"), (
+            f"{btn.section} button should have section-hidden class"
+        )
 
 
-def test_header_update_state_replaces_state():
-    """update_state must replace the previous state and re-render."""
-    header = Header()
-    header.update_state(DEFAULT_MOCK_STATE)
-    assert "subagent" in header.render()
-
-    header.update_state(HeaderState(mcps=[], todos=[], subagents=[]))
-    assert "subagent" not in header.render()
-
-
-def test_header_click_posts_toggle_message():
-    """Clicking the collapsed line posts Header.Toggle (bubbles to App)."""
-    from textual.events import Click
-
+def test_header_click_mcp_button_posts_section_toggle():
     posted: list[object] = []
-    header = Header()
-    original_post = header.post_message
+    btn = HeaderSectionButton(SECTION_MCP)
+    original_post = btn.post_message
 
     def capture(msg):
         posted.append(msg)
         return original_post(msg)
 
-    header.post_message = capture  # type: ignore[method-assign]
+    btn.post_message = capture  # type: ignore[method-assign]
     try:
-        ev = Click(header, 0, 0, 0, 0, 0, False, False, False)
-        header.on_click(ev)
+        ev = Click(btn, 0, 0, 0, 0, 0, False, False, False)
+        btn.on_click(ev)
     finally:
-        header.post_message = original_post  # type: ignore[method-assign]
+        btn.post_message = original_post  # type: ignore[method-assign]
 
-    assert any(isinstance(m, Header.Toggle) for m in posted), (
-        f"Header click must post Toggle, got: {posted}"
+    assert any(
+        isinstance(m, Header.SectionToggle) and m.section == SECTION_MCP for m in posted
+    ), f"MCP click must post SectionToggle('mcp'), got: {posted}"
+
+
+def test_header_click_todo_button_posts_section_toggle():
+    posted: list[object] = []
+    btn = HeaderSectionButton(SECTION_TODO)
+    original_post = btn.post_message
+
+    def capture(msg):
+        posted.append(msg)
+        return original_post(msg)
+
+    btn.post_message = capture  # type: ignore[method-assign]
+    try:
+        ev = Click(btn, 0, 0, 0, 0, 0, False, False, False)
+        btn.on_click(ev)
+    finally:
+        btn.post_message = original_post  # type: ignore[method-assign]
+
+    assert any(
+        isinstance(m, Header.SectionToggle) and m.section == SECTION_TODO for m in posted
+    ), f"todo click must post SectionToggle('todo'), got: {posted}"
+
+
+def test_header_click_subagent_button_posts_section_toggle():
+    posted: list[object] = []
+    btn = HeaderSectionButton(SECTION_SUBAGENT)
+    original_post = btn.post_message
+
+    def capture(msg):
+        posted.append(msg)
+        return original_post(msg)
+
+    btn.post_message = capture  # type: ignore[method-assign]
+    try:
+        ev = Click(btn, 0, 0, 0, 0, 0, False, False, False)
+        btn.on_click(ev)
+    finally:
+        btn.post_message = original_post  # type: ignore[method-assign]
+
+    assert any(
+        isinstance(m, Header.SectionToggle) and m.section == SECTION_SUBAGENT
+        for m in posted
+    ), f"subagent click must post SectionToggle('subagent'), got: {posted}"
+
+
+def test_header_click_consumes_event():
+    """event.stop() must be called so App.on_click doesn't immediately collapse
+    the overlay the App is about to mount."""
+    btn = HeaderSectionButton(SECTION_MCP)
+    ev = Click(btn, 0, 0, 0, 0, 0, False, False, False)
+    btn.on_click(ev)
+    assert ev.is_forwarded is False or ev.stopped, (
+        "Section button click must stop event propagation (event.stop())"
     )
+
+
+def test_header_update_state_replaces_state():
+    """update_state must propagate to all mounted section buttons."""
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.05)
+            header = app.query_one(Header)
+            header.update_state(DEFAULT_MOCK_STATE)
+            await pilot.pause(0.05)
+            buttons = list(header.query(HeaderSectionButton))
+            assert len(buttons) == 3, f"expected 3 mounted buttons, got {len(buttons)}"
+            assert "subagent" in buttons[2].render(), (
+                f"subagent button should show subagent, got {buttons[2].render()!r}"
+            )
+
+            empty_state = HeaderState(mcps=[], todos=[], subagents=[])
+            header.update_state(empty_state)
+            await pilot.pause(0.05)
+            for btn in header.query(HeaderSectionButton):
+                assert btn.render() == "", (
+                    f"after empty update, button should be empty: {btn.render()!r}"
+                )
+
+    asyncio.run(driver())
 
 
 def test_app_compose_yields_header_before_chatlog():
     """Spec §3 — Header must be yielded before ChatLog (dock-top invariant)."""
-    import inspect
-
     src = inspect.getsource(AgentTUIApp.compose)
     header_pos = src.find('Header(id="header")')
     chatlog_pos = src.find('ChatLog(id="chat-log")')
@@ -236,40 +328,39 @@ def test_app_compose_yields_header_before_chatlog():
 
 
 def test_app_css_has_no_transition():
-    """Spec §6 — #header-overlay must NOT have any transition CSS."""
+    """Spec §6 — HeaderOverlay CSS must NOT have any transition (instant toggle)."""
     css = AgentTUIApp.CSS
-    assert "#header-overlay" in css, "CSS missing #header-overlay block"
-    # The whole CSS string must not contain "transition" — spec §6 forbids
-    # any easing for header-related widgets.
+    assert "HeaderOverlay" in css, "CSS missing HeaderOverlay block"
     assert "transition" not in css, (
         f"Header CSS must have no transition (spec §6), got: {css}"
     )
 
 
-def test_app_dock_top_invariant():
-    """The #header CSS block must include ``dock: top`` per spec §4.3.1."""
-    css = AgentTUIApp.CSS
-    # The #header block is between "#header {" and the next closing brace.
-    start = css.find("#header {")
-    assert start != -1, "CSS missing #header block"
+def test_header_default_css_has_dock_top():
+    """Header.DEFAULT_CSS must include ``dock: top`` + ``height: 1`` per spec §4.3.1."""
+    css = Header.DEFAULT_CSS
+    start = css.find("Header {")
+    assert start != -1, "Header.DEFAULT_CSS missing Header block"
     end = css.find("}", start)
     block = css[start:end]
     assert "dock: top" in block, (
-        f"#header block must include ``dock: top``, got: {block!r}"
+        f"Header block must include ``dock: top``, got: {block!r}"
     )
     assert "height: 1" in block, (
-        f"#header block must include ``height: 1`` (spec §2 rule 1), got: {block!r}"
+        f"Header block must include ``height: 1`` (spec §2 rule 1), got: {block!r}"
+    )
+
+
+def test_header_default_css_has_no_transition():
+    """Header DEFAULT_CSS must not contain transition (spec §6 — instant toggle)."""
+    assert "transition" not in Header.DEFAULT_CSS, (
+        f"Header CSS must have no transition (spec §6), got: {Header.DEFAULT_CSS}"
     )
 
 
 def test_app_uses_custom_header_not_textual_builtin():
-    """The App must use loom's custom Header (Static subclass), NOT Textual's
+    """The App must use loom's custom Header (Horizontal subclass), NOT Textual's
     built-in ``textual.widgets.Header``.
-
-    Per spec §4.3, loom's Header is a Static-based widget with dock-top CSS and
-    click-to-expand overlay. Textual's built-in Header is a different widget
-    (a title bar with default bindings) and would conflict with our custom
-    layout.
 
     Note: ``app.query(Header)`` matches by CSS class name (which both widgets
     have: ``Header``), so we use exact ``type(w) is X`` identity checks.
@@ -301,9 +392,7 @@ def test_app_uses_custom_header_not_textual_builtin():
     asyncio.run(driver())
 
 
-def test_overlay_appears_on_header_toggle():
-    """Clicking the Header mounts the HeaderOverlay; clicking again removes it."""
-
+def test_overlay_appears_on_first_section_click():
     async def driver():
         app = AgentTUIApp()
         async with app.run_test(size=(120, 24)) as pilot:
@@ -312,7 +401,6 @@ def test_overlay_appears_on_header_toggle():
             header.update_state(DEFAULT_MOCK_STATE)
             await pilot.pause(0.05)
 
-            # Initially: no overlay mounted
             try:
                 app.query_one(HeaderOverlay)
                 initial_present = True
@@ -320,45 +408,194 @@ def test_overlay_appears_on_header_toggle():
                 initial_present = False
             assert not initial_present, "HeaderOverlay must not be mounted on start"
 
-            # First click → overlay mounted
-            app.post_message(Header.Toggle())
+            app.post_message(Header.SectionToggle(SECTION_MCP))
             await pilot.pause(0.2)
-            try:
-                overlay = app.query_one(HeaderOverlay)
-            except Exception:
-                overlay = None
-            assert overlay is not None, "HeaderOverlay must be mounted after first click"
-            assert overlay.id == "header-overlay"
-
-            # Second click → overlay removed
-            app.post_message(Header.Toggle())
-            await pilot.pause(0.2)
-            try:
-                app.query_one(HeaderOverlay)
-                still_present = True
-            except Exception:
-                still_present = False
-            assert not still_present, "HeaderOverlay must be removed on second click"
+            overlay = app.query_one(HeaderOverlay)
+            assert overlay.section == SECTION_MCP, (
+                f"overlay should show MCP section, got {overlay.section}"
+            )
 
     asyncio.run(driver())
 
 
-def test_overlay_contains_three_sections():
-    """Expanded overlay must show MCP / Todos / Subagent sections."""
-
+def test_overlay_collapses_on_same_section_click():
     async def driver():
         app = AgentTUIApp()
         async with app.run_test(size=(120, 24)) as pilot:
             await pilot.pause(0.05)
             header = app.query_one(Header)
             header.update_state(DEFAULT_MOCK_STATE)
-            app.post_message(Header.Toggle())
+            await pilot.pause(0.05)
+
+            app.post_message(Header.SectionToggle(SECTION_MCP))
+            await pilot.pause(0.2)
+            assert app.query_one(HeaderOverlay).section == SECTION_MCP
+
+            app.post_message(Header.SectionToggle(SECTION_MCP))
+            await pilot.pause(0.2)
+            try:
+                app.query_one(HeaderOverlay)
+                still_present = True
+            except Exception:
+                still_present = False
+            assert not still_present, (
+                "HeaderOverlay must be removed when clicking same section"
+            )
+
+    asyncio.run(driver())
+
+
+def test_overlay_switches_section_on_different_click():
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test(size=(120, 24)) as pilot:
+            await pilot.pause(0.05)
+            header = app.query_one(Header)
+            header.update_state(DEFAULT_MOCK_STATE)
+            await pilot.pause(0.05)
+
+            app.post_message(Header.SectionToggle(SECTION_MCP))
+            await pilot.pause(0.2)
+            assert app.query_one(HeaderOverlay).section == SECTION_MCP
+
+            app.post_message(Header.SectionToggle(SECTION_TODO))
+            await pilot.pause(0.2)
+            assert app.query_one(HeaderOverlay).section == SECTION_TODO, (
+                "overlay should switch to todo section"
+            )
+
+    asyncio.run(driver())
+
+
+def test_only_one_overlay_at_a_time():
+    """Mutual exclusion: at most one HeaderOverlay mounted at any time."""
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test(size=(120, 24)) as pilot:
+            await pilot.pause(0.05)
+            header = app.query_one(Header)
+            header.update_state(DEFAULT_MOCK_STATE)
+            await pilot.pause(0.05)
+
+            for section in VALID_SECTIONS:
+                app.post_message(Header.SectionToggle(section))
+                await pilot.pause(0.1)
+                overlays = list(app.query(HeaderOverlay))
+                assert len(overlays) == 1, (
+                    f"only 1 overlay at a time, got {len(overlays)} after "
+                    f"clicking {section}"
+                )
+
+    asyncio.run(driver())
+
+
+def test_overlay_collapses_on_escape():
+    """Spec §4.3.2 — ESC collapses the overlay."""
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test(size=(120, 24)) as pilot:
+            await pilot.pause(0.05)
+            header = app.query_one(Header)
+            header.update_state(DEFAULT_MOCK_STATE)
+            await pilot.pause(0.05)
+
+            app.post_message(Header.SectionToggle(SECTION_MCP))
+            await pilot.pause(0.2)
+            assert app.query_one(HeaderOverlay).section == SECTION_MCP
+
+            await pilot.press("escape")
+            await pilot.pause(0.2)
+            try:
+                app.query_one(HeaderOverlay)
+                still_present = True
+            except Exception:
+                still_present = False
+            assert not still_present, "ESC must collapse the overlay"
+
+    asyncio.run(driver())
+
+
+def test_overlay_collapses_on_click_outside():
+    """Click on chat log (outside Header + overlay) collapses the overlay."""
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test(size=(120, 24)) as pilot:
+            await pilot.pause(0.05)
+            header = app.query_one(Header)
+            header.update_state(DEFAULT_MOCK_STATE)
+            await pilot.pause(0.05)
+
+            app.post_message(Header.SectionToggle(SECTION_MCP))
+            await pilot.pause(0.2)
+            assert app.query_one(HeaderOverlay).section == SECTION_MCP
+
+            chat_log = app.query_one("#chat-log")
+            # y=15 is below Header (y=0) and the overlay (y=1..N)
+            ev = Click(chat_log, 60, 15, 60, 15, 0, False, False, False)
+            chat_log.post_message(ev)
+            await pilot.pause(0.2)
+            try:
+                app.query_one(HeaderOverlay)
+                still_present = True
+            except Exception:
+                still_present = False
+            assert not still_present, (
+                "Click on chat log (outside Header+overlay) must collapse overlay"
+            )
+
+    asyncio.run(driver())
+
+
+def test_overlay_stays_when_clicked_on_overlay_content():
+    """Clicking the overlay CONTENT does NOT collapse (user is reading)."""
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test(size=(120, 24)) as pilot:
+            await pilot.pause(0.05)
+            header = app.query_one(Header)
+            header.update_state(DEFAULT_MOCK_STATE)
+            await pilot.pause(0.05)
+
+            app.post_message(Header.SectionToggle(SECTION_MCP))
             await pilot.pause(0.2)
             overlay = app.query_one(HeaderOverlay)
-            sections = overlay.query("Vertical.header-section")
-            assert len(sections) == 3, (
-                f"overlay must contain 3 sections (MCP/Todos/Subagent), "
-                f"got {len(sections)}: {sections}"
+            assert overlay.section == SECTION_MCP
+
+            ev = Click(overlay, 5, 2, 5, 2, 0, False, False, False)
+            overlay.post_message(ev)
+            await pilot.pause(0.2)
+            still_present = app.query_one(HeaderOverlay)
+            assert still_present is not None, (
+                "Clicking overlay content must NOT collapse it"
             )
+
+    asyncio.run(driver())
+
+
+def test_escape_is_noop_when_no_overlay():
+    """Pressing ESC with no overlay open is a silent no-op (no exception)."""
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test(size=(120, 24)) as pilot:
+            await pilot.pause(0.05)
+            header = app.query_one(Header)
+            header.update_state(DEFAULT_MOCK_STATE)
+            await pilot.pause(0.05)
+
+            try:
+                app.query_one(HeaderOverlay)
+                initial_present = True
+            except Exception:
+                initial_present = False
+            assert not initial_present
+
+            await pilot.press("escape")
+            await pilot.pause(0.1)
+            try:
+                app.query_one(HeaderOverlay)
+                still_present = True
+            except Exception:
+                still_present = False
+            assert not still_present, "ESC with no overlay should not create one"
 
     asyncio.run(driver())

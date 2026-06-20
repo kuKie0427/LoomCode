@@ -14,7 +14,7 @@ from textual import messages as textual_messages
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
-from textual.events import MouseScrollDown, MouseScrollUp
+from textual.events import Click, MouseScrollDown, MouseScrollUp
 from textual.reactive import reactive
 
 from loom.agent.llm import LLMClient
@@ -41,15 +41,9 @@ class AgentTUIApp(App):
         layout: vertical;
         background: $background;
     }
-    #header {
-        dock: top;
-        height: 1;
-        background: $panel;
-        color: $text-muted;
-        text-style: dim;
-        padding: 0 2;
-    }
-    #header-overlay {
+    /* Header CSS lives in loom.tui.header.Header.DEFAULT_CSS (single source
+       of truth — see HeaderSectionButton.width: 1fr for click-target grid). */
+    HeaderOverlay {
         dock: top;
         height: auto;
         max-height: 16;
@@ -121,6 +115,7 @@ class AgentTUIApp(App):
         ("ctrl+c", "cancel_stream", "Cancel"),
         ("ctrl+d", "quit", "Quit"),
         ("ctrl+l", "clear_screen", "Clear"),
+        ("escape", "collapse_header", "Collapse header"),
     ]
 
     def __init__(self, resume: bool = False, model: str | None = None):
@@ -278,20 +273,66 @@ class AgentTUIApp(App):
             yield StatusBar(id="status-bar")
             yield Composer(id="composer")
 
-    def on_header_toggle(self, message: Header.Toggle) -> None:
+    def on_header_section_toggle(self, message: Header.SectionToggle) -> None:
+        """Per-section toggle: expand / switch / collapse the overlay.
+
+        Cases:
+          * No overlay open → mount overlay for the clicked section.
+          * Overlay open for SAME section → remove overlay (collapse).
+          * Overlay open for DIFFERENT section → remove old, mount new
+            (switch). Only one overlay is ever visible.
+        """
+        new_section = message.section
         try:
             existing = self.query_one(HeaderOverlay)
+            current_section = existing.section
         except Exception:
             existing = None
-        if existing is not None:
+            current_section = None
+
+        if existing is not None and current_section == new_section:
             existing.remove()
             message.stop()
             return
+
+        if existing is not None:
+            existing.remove()
+
         header = self.query_one(Header)
-        overlay = HeaderOverlay(id="header-overlay")
-        overlay.update_state(header._state)
+        # Per-section ID avoids DuplicateIds when switching (old overlay may
+        # still be in DOM pending async removal).
+        overlay = HeaderOverlay(
+            section=new_section,
+            state=header._state,
+            id=f"header-overlay-{new_section}",
+        )
         self.screen.mount(overlay, before=self.query_one(ChatLog))
         message.stop()
+
+    def action_collapse_header(self) -> None:
+        """ESC binding — collapse the Header overlay if one is open.
+
+        Spec §4.3.2: "ESC collapses". No-op when no overlay is open.
+        """
+        try:
+            self.query_one(HeaderOverlay).remove()
+        except Exception:
+            pass
+
+    def on_click(self, event: Click) -> None:
+        """Click outside the Header line collapses the overlay.
+
+        HeaderSectionButton.on_click calls event.stop() (so section
+        clicks don't reach this handler), and Header.on_click + the
+        HeaderOverlay itself consume their own clicks. So any click
+        that reaches this App-level handler is on something else
+        (chat log, status bar, composer, etc.) — the user's intent
+        is "move focus away from the overlay", so collapse it.
+        """
+        try:
+            self.query_one(HeaderOverlay).remove()
+        except Exception:
+            pass
 
     def on_assistant_turn_start(self, _: AssistantTurnStart) -> None:
         chat_log = self.query_one(ChatLog)

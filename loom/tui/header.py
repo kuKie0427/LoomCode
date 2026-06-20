@@ -1,4 +1,4 @@
-"""TUI Header (summary rail) — dock-top 1-line collapsed + click-to-expand overlay.
+"""TUI Header (summary rail) — dock-top 1-line collapsed + per-section click-to-expand overlay.
 
 Implements ``docs/tui-design-language.md`` §4.3 — the 6th layout region
 that aggregates three subsystems (MCP / Todo / Subagent) into one glanceable
@@ -7,14 +7,24 @@ line. The Header is a long-loop aesthetic: it is exactly 1 line when collapsed
 section (§4.3.1), hides zero-count sections (§4.3.1 hide rule), and toggles
 its overlay panel **instantly** with no animation (§6 — instant replace).
 
+Per-section toggle (deviation from initial 2026-06-19 spec, locked 2026-06-20):
+Each section in the collapsed line is an independently clickable button
+(HeaderSectionButton). Clicking a section's button:
+  * expands its overlay if no overlay is open OR a different section is open
+  * collapses the overlay if the same section is already open (toggle)
+
+Only ONE section overlay is visible at a time (mutual exclusion).
+Collapse also fires on ESC key or click outside the overlay (chat log /
+status bar / composer).
+
 Data flow:
     1. The App injects an initial ``HeaderState`` (see ``DEFAULT_MOCK_STATE``)
        in ``on_mount``. Real backend wiring (MCP server state, todo list,
        subagent count) is deferred to a follow-up feature — for now the
        header is driven by mock data only.
-    2. ``Header.update_state(state)`` re-renders the collapsed line.
-    3. Clicking the collapsed line posts ``Header.Toggle`` which the App
-       handles by mounting/removing a single ``HeaderOverlay`` instance.
+    2. ``Header.update_state(state)`` re-renders each section button.
+    3. Clicking a section button posts ``Header.SectionToggle(section)`` which
+       the App handles by mounting/removing/replacing the ``HeaderOverlay``.
 
 The pure helper functions (``mcp_glyph``, ``todo_glyph``, ``subagent_glyph``)
 are the spec's contract — they are unit-tested without any Textual app
@@ -24,21 +34,31 @@ and locked by eval cases.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.events import Click
 from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Static
 
-_GLYPH_HEALTHY = "●"            # MCP all connected
-_GLYPH_DONE = "✓"               # Todo all done
+# ── Glyph constants (spec §4.3.1) ────────────────────────────────────────────
+
+_GLYPH_HEALTHY = "●"            # MCP all connected / Todo all done
+_GLYPH_DONE = "✓"               # Todo all done (alias; spec uses ✓)
 _GLYPH_WARNING = "◌"            # MCP any error
 _GLYPH_ACTIVE = "◐"             # Todo has active / Subagent has running
 _GLYPH_DISABLED = "○"           # all disabled / empty
-_GLYPH_TRIANGLE_DOWN = "▼"      # expand affordance
+
+# Section identifiers (per-section toggle keys).
+SECTION_MCP = "mcp"
+SECTION_TODO = "todo"
+SECTION_SUBAGENT = "subagent"
+VALID_SECTIONS = (SECTION_MCP, SECTION_TODO, SECTION_SUBAGENT)
+
+
+# ── Data classes (mock) ──────────────────────────────────────────────────────
 
 
 @dataclass
@@ -91,6 +111,9 @@ class HeaderState:
     mcps: list[MCPServer] = field(default_factory=list)
     todos: list[TodoItem] = field(default_factory=list)
     subagents: list[Subagent] = field(default_factory=list)
+
+
+# ── Pure glyph functions (spec contract) ────────────────────────────────────
 
 
 def mcp_glyph(servers: list[MCPServer]) -> tuple[str, int, int]:
@@ -149,6 +172,9 @@ def subagent_glyph(items: list[Subagent]) -> tuple[str | None, int]:
     return (_GLYPH_ACTIVE, count)
 
 
+# ── Rich-text glyph wrappers (for collapsed + overlay) ───────────────────────
+
+
 def _mcp_glyph_rich(glyph: str) -> str:
     if glyph == _GLYPH_HEALTHY:
         return f"[green]{glyph}[/]"
@@ -183,17 +209,134 @@ def _subagent_glyph_rich(glyph: str, state: str | None = None) -> str:
     return f"[dim]{glyph}[/]"
 
 
-class Header(Static):
+# ── Widgets ──────────────────────────────────────────────────────────────────
+
+
+class HeaderSectionButton(Static):
+    """One section's clickable button in the collapsed Header line.
+
+    Each of the 3 sections (MCP / Todo / Subagent) has its own
+    ``HeaderSectionButton``. Buttons are independently clickable:
+    clicking a button posts ``Header.SectionToggle(self._section)`` —
+    the App handles expand/switch/collapse logic for that section.
+
+    Visual: each button is ``width: 1fr`` so the 3 buttons fill the
+    Header's 1-line horizontal track evenly (no dead zones for clicks
+    to fall through to the Header container).
+    """
+
+    can_focus = True
+
+    DEFAULT_CSS = """
+    HeaderSectionButton {
+        width: 1fr;
+        height: 1;
+        background: transparent;
+        padding: 0 1;
+    }
+    HeaderSectionButton:hover {
+        text-style: bold;
+        color: $text;
+    }
+    HeaderSectionButton:focus {
+        background: $boost 5%;
+    }
+    HeaderSectionButton.section-hidden {
+        visibility: hidden;
+    }
+    """
+
+    def __init__(self, section: str, **kwargs: Any) -> None:
+        super().__init__("", **kwargs)
+        self._section: str = section
+        self._state: HeaderState | None = None
+
+    @property
+    def section(self) -> str:
+        """Section identifier (one of VALID_SECTIONS)."""
+        return self._section
+
+    def update_state(self, state: HeaderState) -> None:
+        """Re-render this button from the new aggregate state."""
+        self._state = state
+        rendered = self._render_section()
+        self.set_class(rendered == "", "section-hidden")
+        self.update(rendered)
+
+    def render(self) -> str:
+        return self._render_section()
+
+    def _render_section(self) -> str:
+        """Format this section's collapsed button text.
+
+        Returns ``""`` when the section should be hidden (count = 0),
+        which combined with ``section-hidden`` visibility makes the
+        button invisible AND not clickable. Hide rule per spec §4.3.1.
+        """
+        if self._state is None:
+            return ""
+        if self._section == SECTION_MCP:
+            return self._render_mcp()
+        if self._section == SECTION_TODO:
+            return self._render_todo()
+        if self._section == SECTION_SUBAGENT:
+            return self._render_subagent()
+        return ""
+
+    def _render_mcp(self) -> str:
+        assert self._state is not None
+        glyph, _connected, total = mcp_glyph(self._state.mcps)
+        if total == 0:
+            return ""
+        return f"{_mcp_glyph_rich(glyph)} MCP:{total}/{total}"
+
+    def _render_todo(self) -> str:
+        assert self._state is not None
+        glyph, _active, total = todo_glyph(self._state.todos)
+        if total == 0:
+            return ""
+        return f"{_todo_glyph_rich(glyph)} {total}/{total} todos"
+
+    def _render_subagent(self) -> str:
+        assert self._state is not None
+        glyph, count = subagent_glyph(self._state.subagents)
+        if glyph is None or count == 0:
+            return ""
+        return f"{_subagent_glyph_rich(glyph)} {count} subagent"
+
+    def on_click(self, event: Click) -> None:
+        # Stop propagation so App.on_click doesn't immediately collapse
+        # the overlay we're about to mount.
+        event.stop()
+        # Defensive: if this button is hidden, ignore clicks (visibility
+        # already prevents visual click but DOM events can still fire).
+        if self.has_class("section-hidden"):
+            return
+        self.post_message(Header.SectionToggle(self._section))
+
+
+class Header(Horizontal):
     """1-line collapsed summary rail docked at the top of the TUI.
 
-    Spec §4.3.1: ``dock: top``, ``height: 1``, click target for the whole
-    line. Posts ``Header.Toggle`` on click — the App handles mounting /
-    removing the overlay panel (instant, no animation per spec §6).
+    Spec §4.3.1: ``dock: top``, ``height: 1``, contains 3 clickable
+    ``HeaderSectionButton`` children — one per subsystem (MCP / Todo /
+    Subagent). Each button is independently togglable per the per-section
+    toggle design (see module docstring).
+
+    The container itself consumes clicks that fall in any padding/gap
+    between buttons (``on_click`` event.stop) so they don't bubble to the
+    App's catch-all ``on_click`` and accidentally collapse a freshly
+    mounted overlay.
     """
 
     DEFAULT_CSS = """
     Header {
         height: 1;
+        dock: top;
+        background: $panel;
+        color: $text-muted;
+        text-style: dim;
+        padding: 0 2;
     }
     /* NOTE: spec §4.3.1 calls for a hairline bottom border, but
        Textual's `border-bottom: solid` on a height: 1 widget collapses
@@ -202,76 +345,82 @@ class Header(Static):
        instead. See docs/tui-design-language.md §4.3.1. */
     """
 
-    class Toggle(Message):
-        """Posted when the collapsed line is clicked.
+    class SectionToggle(Message):
+        """Posted when a section button is clicked.
 
-        Bubbles up to the App (default Textual bubble behavior), which is
-        responsible for mounting or removing the ``HeaderOverlay`` panel.
-        No animation, no transition — instant mount/remove per spec §6.
+        The App handles expand / switch / collapse logic based on
+        ``section`` and the current overlay state. No animation, no
+        transition — instant mount/remove per spec §6.
         """
 
-        def __init__(self) -> None:
+        def __init__(self, section: str) -> None:
             super().__init__()
+            self.section: str = section
 
-    def __init__(self, **kwargs) -> None:
-        super().__init__(_GLYPH_TRIANGLE_DOWN, **kwargs)
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
         self._state: HeaderState = HeaderState()
 
+    def compose(self) -> ComposeResult:
+        """Yield the 3 section buttons. Order matches the spec mockup.
+
+        IDs use the ``header-btn-<section>`` naming so tests can query
+        them individually via ``app.query_one(...)``.
+        """
+        yield HeaderSectionButton(SECTION_MCP, id="header-btn-mcp")
+        yield HeaderSectionButton(SECTION_TODO, id="header-btn-todo")
+        yield HeaderSectionButton(SECTION_SUBAGENT, id="header-btn-subagent")
+
     def update_state(self, state: HeaderState) -> None:
-        """Replace the current state and re-render the collapsed line."""
+        """Replace the current state and re-render every section button."""
         self._state = state
-        self.refresh()
-        self.update(self._render_collapsed())
+        for section in VALID_SECTIONS:
+            try:
+                btn = self.query_one(f"#header-btn-{section}", HeaderSectionButton)
+                btn.update_state(state)
+            except Exception:
+                # Buttons not yet mounted (during __init__) — skip.
+                pass
 
     def on_click(self, event: Click) -> None:
+        # Consume clicks on the Header container (padding / dead zones
+        # between buttons if any). Don't bubble to App.on_click — that
+        # handler collapses the overlay on any non-Header click, and we
+        # want clicks within the Header line to be no-ops rather than
+        # collapse.
         event.stop()
-        self.post_message(self.Toggle())
-
-    def render(self) -> str:
-        return self._render_collapsed()
-
-    def _render_collapsed(self) -> str:
-        """Format the collapsed 1-line summary per spec §4.3.1.
-
-        Sections with ``None`` glyph or ``count=0`` are HIDDEN (not
-        rendered as ``0/M`` placeholders). Separator is two spaces.
-        """
-        parts: list[str] = [_GLYPH_TRIANGLE_DOWN]
-
-        mcp_g, _mcp_connected, mcp_total = mcp_glyph(self._state.mcps)
-        if mcp_total > 0:
-            parts.append(
-                f"{_mcp_glyph_rich(mcp_g)} MCP:{mcp_total}/{mcp_total}"
-            )
-
-        todo_g, _todo_active, todo_total = todo_glyph(self._state.todos)
-        if todo_total > 0:
-            parts.append(f"{_todo_glyph_rich(todo_g)} {todo_total}/{todo_total} todos")
-
-        sub_g, sub_count = subagent_glyph(self._state.subagents)
-        if sub_g is not None and sub_count > 0:
-            parts.append(f"{_subagent_glyph_rich(sub_g)} {sub_count} subagent")
-
-        return "  ".join(parts)
 
 
 class HeaderOverlay(Widget):
-    """Expanded panel that shows 3 sections (MCP / Todo / Subagent).
+    """Expanded panel showing ONE section's detail rows.
+
+    Per the per-section toggle design (2026-06-20 revision), the overlay
+    shows only the currently-selected section (MCP / Todo / Subagent).
+    Only one HeaderOverlay is mounted at a time.
 
     Spec §4.3.2: ``height: auto, max-height: 16`` (≈360px in Textual units),
-    nested inside the docked ``#header-overlay`` CSS container. Sections
-    with ``count=0`` are HIDDEN entirely. The overlay is mounted/removed
-    **instantly** by the App (no transition CSS, per spec §6).
+    ``dock: top`` so it sits between the Header and the ChatLog without
+    reflowing them. Sections with ``count = 0`` are not rendered (defensive
+    — the App should not mount an overlay for a hidden section).
 
     Indentation (spec §2 rule 5 + §4.3.2):
-      * Outer column: section headers (``▼ glyph Label:N/M``).
-      * 2-col right: detail rows (per-server / per-todo / per-subagent).
+      * Outer column: section header (``▼ glyph Label:N/M``).
+      * 2-col right: detail rows.
       * No 4th tier.
+
+    Clicks on the overlay are consumed (``on_click`` event.stop) so they
+    don't bubble to the App's catch-all ``on_click`` and dismiss the
+    overlay while the user is reading.
     """
 
     DEFAULT_CSS = """
     HeaderOverlay {
         height: auto;
+        max-height: 16;
+        overflow-y: auto;
+        background: $panel 97%;
+        padding: 1 2;
+        border-bottom: solid $border;
     }
     .header-section {
         height: auto;
@@ -295,88 +444,111 @@ class HeaderOverlay(Widget):
     }
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, section: str, state: HeaderState, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._state: HeaderState = HeaderState()
+        self._section: str = section
+        self._state: HeaderState = state
+
+    @property
+    def section(self) -> str:
+        """The section this overlay is rendering (``"mcp"``/``"todo"``/``"subagent"``)."""
+        return self._section
 
     def update_state(self, state: HeaderState) -> None:
-        """Replace the current state. The overlay's children are built
-        from ``_state`` in ``compose()``, which Textual runs when the
-        widget is mounted. The state must therefore be set BEFORE the
-        widget is mounted (see ``App.on_header_toggle``).
+        """Replace the current state. Children re-render via reactive refresh.
+
+        The overlay's children are built from ``self._state`` in ``compose()``,
+        which Textual runs when the widget is mounted. For a mounted overlay,
+        the state must therefore be set BEFORE mounting (see
+        ``App.on_header_section_toggle``); calling ``update_state`` after
+        mounting will refresh the Static children.
         """
         self._state = state
+        # Force a re-render of the children widgets.
+        for child in self.walk_children(Static):
+            child.refresh()
 
     def compose(self) -> ComposeResult:
-        yield from self._build_sections()
+        if self._section == SECTION_MCP:
+            yield from self._compose_mcp()
+        elif self._section == SECTION_TODO:
+            yield from self._compose_todo()
+        elif self._section == SECTION_SUBAGENT:
+            yield from self._compose_subagent()
+        # If section is unknown, yield nothing (defensive).
 
-    def _build_sections(self):
-        """Yield section widgets for the current state.
-
-        Order matches the collapsed line: MCP → Todos → Subagent. Each
-        section is wrapped in a ``Vertical`` (class=header-section) so
-        the 3 sections can be queried as a group. IDs are not used on
-        per-section containers because Textual requires widget IDs to
-        be unique within a parent.
-        """
-        mcp_g, _, mcp_total = mcp_glyph(self._state.mcps)
-        if mcp_total > 0:
-            with Vertical(classes="header-section"):
-                yield Static(
-                    f"{_GLYPH_TRIANGLE_DOWN} {_mcp_glyph_rich(mcp_g)} MCP:{mcp_total}/{mcp_total}",
-                    classes="header-section-header",
+    def _compose_mcp(self) -> ComposeResult:
+        glyph, _connected, total = mcp_glyph(self._state.mcps)
+        if total == 0:
+            return
+        with Vertical(classes="header-section"):
+            yield Static(
+                f"▼ {_mcp_glyph_rich(glyph)} MCP:{total}/{total}",
+                classes="header-section-header",
+            )
+            for server in self._state.mcps:
+                row_glyph = {
+                    "connected": _GLYPH_HEALTHY,
+                    "error": _GLYPH_WARNING,
+                    "disabled": _GLYPH_DISABLED,
+                }[server.state]
+                row = (
+                    f"{_mcp_glyph_rich(row_glyph)} "
+                    f"[cyan]{server.name}[/]  [text-muted]{server.state}[/]"
                 )
-                for server in self._state.mcps:
-                    row_glyph = {
-                        "connected": _GLYPH_HEALTHY,
-                        "error": _GLYPH_WARNING,
-                        "disabled": _GLYPH_DISABLED,
-                    }[server.state]
-                    row = (
-                        f"{_mcp_glyph_rich(row_glyph)} "
-                        f"[cyan]{server.name}[/]  [text-muted]{server.state}[/]"
-                    )
-                    yield Static(row, classes="header-row row-detail")
+                yield Static(row, classes="header-row row-detail")
 
-        todo_g, _, todo_total = todo_glyph(self._state.todos)
-        if todo_total > 0:
-            with Vertical(classes="header-section"):
-                yield Static(
-                    f"{_GLYPH_TRIANGLE_DOWN} {_todo_glyph_rich(todo_g)} {todo_total}/{todo_total} todos",
-                    classes="header-section-header",
-                )
-                for idx, item in enumerate(self._state.todos, start=1):
-                    row_glyph = {
-                        "done": _GLYPH_DONE,
-                        "active": _GLYPH_ACTIVE,
-                        "pending": _GLYPH_DISABLED,
-                    }[item.state]
-                    row = f"{_todo_glyph_rich(row_glyph, item.state)} {idx}. {item.text}"
-                    classes = "header-row row-detail"
-                    if item.state == "active":
-                        classes += " row-active"
-                    yield Static(row, classes=classes)
+    def _compose_todo(self) -> ComposeResult:
+        glyph, _active, total = todo_glyph(self._state.todos)
+        if total == 0:
+            return
+        with Vertical(classes="header-section"):
+            yield Static(
+                f"▼ {_todo_glyph_rich(glyph)} {total}/{total} todos",
+                classes="header-section-header",
+            )
+            for idx, item in enumerate(self._state.todos, start=1):
+                row_glyph = {
+                    "done": _GLYPH_DONE,
+                    "active": _GLYPH_ACTIVE,
+                    "pending": _GLYPH_DISABLED,
+                }[item.state]
+                row = f"{_todo_glyph_rich(row_glyph, item.state)} {idx}. {item.text}"
+                classes = "header-row row-detail"
+                if item.state == "active":
+                    classes += " row-active"
+                yield Static(row, classes=classes)
 
-        sub_g, sub_count = subagent_glyph(self._state.subagents)
-        if sub_g is not None and sub_count > 0:
-            with Vertical(classes="header-section"):
-                yield Static(
-                    f"{_GLYPH_TRIANGLE_DOWN} {_subagent_glyph_rich(sub_g)} {sub_count} subagent",
-                    classes="header-section-header",
+    def _compose_subagent(self) -> ComposeResult:
+        glyph, count = subagent_glyph(self._state.subagents)
+        if glyph is None or count == 0:
+            return
+        with Vertical(classes="header-section"):
+            yield Static(
+                f"▼ {_subagent_glyph_rich(glyph)} {count} subagent",
+                classes="header-section-header",
+            )
+            for sub in self._state.subagents:
+                row_glyph = {
+                    "running": _GLYPH_ACTIVE,
+                    "done": _GLYPH_DONE,
+                    "error": _GLYPH_WARNING,
+                }[sub.state]
+                row = (
+                    f"{_subagent_glyph_rich(row_glyph, sub.state)} "
+                    f"[cyan]{sub.id}[/]  "
+                    f"[text-muted]· {sub.state}[/]  "
+                    f"[text-muted]· {sub.elapsed}[/]"
                 )
-                for sub in self._state.subagents:
-                    row_glyph = {
-                        "running": _GLYPH_ACTIVE,
-                        "done": _GLYPH_DONE,
-                        "error": _GLYPH_WARNING,
-                    }[sub.state]
-                    row = (
-                        f"{_subagent_glyph_rich(row_glyph, sub.state)} "
-                        f"[cyan]{sub.id}[/]  "
-                        f"[text-muted]· {sub.state}[/]  "
-                        f"[text-muted]· {sub.elapsed}[/]"
-                    )
-                    yield Static(row, classes="header-row row-detail")
+                yield Static(row, classes="header-row row-detail")
+
+    def on_click(self, event: Click) -> None:
+        # Consume clicks within the overlay so App.on_click doesn't
+        # dismiss the overlay while the user is reading.
+        event.stop()
+
+
+# ── Default mock state (used by App.on_mount) ───────────────────────────────
 
 
 DEFAULT_MOCK_STATE: HeaderState = HeaderState(
