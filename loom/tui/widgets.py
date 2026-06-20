@@ -14,15 +14,15 @@ ToolCallCard {
 }
 
 ToolCallCard.tool-running {
-    border: solid yellow;
+    border: solid $warning;
 }
 
 ToolCallCard.tool-completed {
-    border: solid green;
+    border: solid $success;
 }
 
 ToolCallCard.tool-error {
-    border: solid red;
+    border: solid $error;
 }
 """
 

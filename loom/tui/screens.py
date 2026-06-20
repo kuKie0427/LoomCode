@@ -30,7 +30,7 @@ class PermissionScreen(ModalScreen[str]):
     #perm-dialog {
         width: 70%;
         height: auto;
-        border: thick red;
+        border: thick $error;
         padding: 1;
     }
     #perm-buttons {
@@ -49,7 +49,7 @@ class PermissionScreen(ModalScreen[str]):
     def compose(self) -> ComposeResult:
         with Container(id="perm-dialog"):
             yield Static(f"⚠  [b]{self.reason}[/b]", id="perm-reason")
-            yield Static(f"Tool: [cyan]{self.tool_name}[/cyan]")
+            yield Static(f"Tool: [$secondary]{self.tool_name}[/]")
             yield Static(f"Args: {json.dumps(self.args, indent=2)[:300]}")
             with Horizontal(id="perm-buttons"):
                 yield Button("Allow once (a)", id="btn-allow", variant="success")

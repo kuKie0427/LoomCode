@@ -11,6 +11,7 @@ import asyncio
 import os
 import subprocess
 import threading
+import time
 from typing import Literal
 
 from loguru import logger
@@ -20,6 +21,7 @@ from textual.app import App, ComposeResult, ScreenStackError
 from textual.containers import Vertical
 from textual.events import Click, MouseScrollDown, MouseScrollUp
 from textual.reactive import reactive
+from textual.theme import Theme
 
 from loom.agent.llm import LLMClient
 from loom.agent.loop import WORKDIR, _active_config, agent_loop
@@ -51,6 +53,40 @@ _TODO_STATE_FROM_AGENT: dict[str, Literal["pending", "active", "done"]] = {
     "in_progress": "active",
     "completed": "done",
 }
+
+
+# loom-ink: the single canonical color identity. Every hex is ported 1:1 from
+# the visual reference docs/tui-design.html (:root custom properties) so the
+# running app faithfully realizes the documented "ink & sage" aesthetic. This
+# is the ONLY place colors live — widgets reference theme tokens, never hex.
+# $accent-light is a derived sage (lighter than $accent) for the "upper face"
+# of 3D-extruded wordmarks in the WelcomeBanner — see §9.1 for the gradient
+# that drives the opencode-style 3D stencil mark.
+_LOOM_INK_THEME = Theme(
+    name="loom-ink",
+    primary="#5b8a72",
+    secondary="#4a8a8a",
+    accent="#5b8a72",
+    warning="#8a7a3b",
+    error="#8a3b3b",
+    success="#4a8a5b",
+    foreground="#c5cdd8",
+    background="#0c0e12",
+    surface="#0a0d11",
+    panel="#13161c",
+    dark=True,
+    variables={
+        "text-muted": "#5c6570",
+        "text-dim": "#5c6570",
+        "text-faint": "#3a4048",
+        "border": "#1e2328",
+        "hairline": "#1a1e24",
+        "accent-dim": "#2d4539",
+        "accent-light": "#84ad9a",
+    },
+)
+
+
 
 
 class AgentTUIApp(App):
@@ -144,6 +180,7 @@ class AgentTUIApp(App):
         self._cancelled = False
         self._main_loop = None
         self._init_sh_thread: threading.Thread | None = None
+        self._session_start: float = 0.0
 
         # Wire up harness.toml config (mirrors run_repl L193)
         from loom.agent.config import load_config
@@ -204,12 +241,18 @@ class AgentTUIApp(App):
 
     def on_mount(self) -> None:
         """Capture the main event loop for cross-thread async dispatch."""
+        self.register_theme(_LOOM_INK_THEME)
+        self.theme = "loom-ink"
         self._main_loop = asyncio.get_running_loop()
         self.query_one("#composer", Composer).focus()
         status_bar = self.query_one(StatusBar)
         status_bar.ctx_window = self.llm.get_context_window()
         self._sync_status_bar()
         self.query_one(Header).update_state(self._header_state)
+        self.query_one(ChatLog).mount_welcome()
+        self._session_start = time.monotonic()
+        self.set_interval(60.0, self._tick_session_elapsed, name="elapsed-tick")
+        self._detect_git_branch()
 
     def on_key(self, event) -> None:
         pass
@@ -291,6 +334,30 @@ class AgentTUIApp(App):
         status_bar.tools = self.tool_call_count
         status_bar.ctx_tokens = self.ctx_tokens
         status_bar.ctx_window = self.llm.get_context_window()
+
+    def _tick_session_elapsed(self) -> None:
+        try:
+            status_bar = self.query_one(StatusBar)
+        except Exception:
+            return
+        status_bar.elapsed_seconds = int(time.monotonic() - self._session_start)
+
+    def _detect_git_branch(self) -> None:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+                cwd=WORKDIR,
+            )
+            branch = result.stdout.strip() if result.returncode == 0 else ""
+        except Exception:
+            branch = ""
+        try:
+            self.query_one(StatusBar).git_branch = branch
+        except Exception:
+            pass
 
     def watch_user_turn_count(self, _old: int, _new: int) -> None:
         self._sync_status_bar()
