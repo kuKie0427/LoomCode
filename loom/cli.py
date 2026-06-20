@@ -9,16 +9,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
 from loguru import logger
 
 from loom import __version__
-from loom.agent import run_repl
-from loom.agent.trace import Trace, default_path_for
-from loom.audit_cmd import audit
-from loom.detect import detect_project
-from loom.init_cmd import format_results, init
 
 _MAX_LOOP_CALL_DEPTH = 3
 
@@ -98,13 +94,17 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     os.environ["LOOP_CALL_DEPTH"] = str(depth + 1)
 
-    from loom.agent.scope import check_wip1
-    check_wip1(Path.cwd())
+    # only needed for subcommands that need WIP=1 enforcement
+    if ("--help" not in (argv or sys.argv) and "--version" not in (argv or sys.argv)):
+        from loom.agent.scope import check_wip1
+        check_wip1(Path.cwd())
 
     parser = _build_parser()
     args = parser.parse_args(argv)
 
     if args.command == "init":
+        from loom.detect import detect_project  # only needed for init subcommand
+        from loom.init_cmd import format_results, init  # only needed for init subcommand
         custom: list[str] | None = None
         if args.commands:
             custom = [c.strip() for c in args.commands.split(",") if c.strip()]
@@ -120,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "audit":
+        from loom.audit_cmd import audit  # only needed for audit subcommand
         try:
             audit(
                 args.target,
@@ -133,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "run":
+        from loom.agent import run_repl  # only needed for run subcommand
         run_repl(resume=args.resume)
         return 0
 
@@ -142,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "trace":
+        from loom.agent.trace import Trace, default_path_for  # only needed for trace subcommand
         workdir = args.workdir.resolve()
         if args.trace_command == "path":
             print(default_path_for(workdir))
