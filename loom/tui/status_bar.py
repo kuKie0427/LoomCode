@@ -68,7 +68,7 @@ class StatusBar(Static):
             "ctx-danger": "[$error]",
         }[_ctx_color_class(ratio)]
         ctx_str = (
-            f"ctx: {color_open}{bar}[/] "
+            f"[$text-muted]ctx:[/] {color_open}{bar}[/] "
             f"{_format_tokens(self.ctx_tokens)}/{_format_tokens(self.ctx_window)} "
             f"({ratio * 100:.0f}%)"
         )
@@ -77,16 +77,18 @@ class StatusBar(Static):
         # separated by a wider gap. Key hints are dimmed in $text-faint so they
         # read as "ambient" — the eye is pulled to the live stats first.
         stat_parts = [
-            "loom",
-            model,
+            "[$text-faint]loom[/]",
+            f"[$secondary]{model}[/]",
         ]
         if self.git_branch:
-            stat_parts.append(f"[$text-muted]⎇[/] {self.git_branch}")
+            stat_parts.append(
+                f"[$text-faint]⎇[/] [$text-muted]{self.git_branch}[/]"
+            )
         stat_parts.append(f"{self.turns}t·{self.tools}tl")
         stat_parts.append(ctx_str)
 
         elapsed = _format_elapsed(self.elapsed_seconds)
-        key_hints = f"[$text-faint]esc ^l /[/] [dim]{elapsed}[/]"
+        key_hints = f"[$text-faint]esc ^l / {elapsed}[/]"
 
         joined_stats = f" {_SEP} ".join(stat_parts)
         return f" {joined_stats}   {key_hints} "

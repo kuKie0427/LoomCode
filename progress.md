@@ -4219,3 +4219,67 @@ Idempotency check at the top: if a thinking widget is already mounted for the cu
 - `M loom/eval/cases/__init__.py` (+1 line: register module)
 - `M feature_list.json` (+1 entry: f-chore-fix-tui-thought-double-marker)
 - `M progress.md` (this section)
+
+## Session: f-tui-statusbar-visual-hierarchy (2026-06-21)
+
+**Goal:** Add a 5-tier visual hierarchy to the StatusBar via loom-ink tokens, so the 87-char bar reads as a layered composition instead of a single-color strip. Zero new fields, zero new behavior — purely token-based color reassignment per the §8.1 one-theme rule.
+
+**User report:** "StatusBar feels monotonous — same color across the whole bar, only the progress bar and elapsed time change." Five options were proposed (A: pure re-color, B: loop-state indicator, C: dynamic key hints, D: last-action hint, E: ctx bar compression). User picked **A** (pure re-color, zero new fields).
+
+**Changes** (`loom/tui/status_bar.py` `render()` only — 7 line insertions, 5 line replacements):
+
+| Field | Before | After |
+|---|---|---|
+| `loom` wordmark | plain | `[$text-faint]` (almost invisible brand tag) |
+| `model` name | plain | `[$secondary]` (cyan-ish, the "name" anchor — same token as MCP server / subagent id per §8.3) |
+| `⎇` glyph | `[$text-muted]` | `[$text-faint]` (demoted below the name it precedes) |
+| `<branch>` | `[$text-muted]⎇[/] {branch}` (default color) | `[$text-muted]` explicit (slightly brighter so the value is readable) |
+| `Nt·Mtl` counters | plain | default `[$text]` (live counters, main visual weight) |
+| `ctx:` label | plain | `[$text-muted]` (demotes the label below the bar+number) |
+| `bar / percentage` | `[$success]` / `[$warning]` / `[$error]` | unchanged (per §8.3 threshold contract) |
+| `esc ^l / {elapsed}` | `[$text-faint]esc ^l /[/] [dim]{elapsed}[/]` | `[$text-faint]esc ^l / {elapsed}[/]` (one token span, `[dim]` removed for full token compliance) |
+
+§8.1 enforcement: `grep -E '\[(green|yellow|cyan|red|blue|purple|magenta|white|black)\]|\[dim\]' loom/tui/status_bar.py` returns nothing. All color literals are gone.
+
+**Snapshot regression** (7 baselines updated, per Working Rule 10):
+
+Diff was NOT ID-only (rule 10's "trivial" case) — it was a real visual change. The new `[$token]element[/]` token spans cause Rich to split single text segments into multiple `<text>` SVG elements:
+
+- Old: `&#160;loom&#160;·&#160;deepseek-v4-flash&#160;·&#160;` (one segment)
+- New: `loom` + `&#160;·&#160;` + `deepseek-v4-flash` + `&#160;·&#160;` (four segments)
+
+Plus the SVG CSS palette shifted (`r8` `#4a8a5b` → `#4a8a8a` = `$secondary`; `r9` swapped with `r8`) to accommodate the new color. Text content + geometry identical after `terminal-X` hash normalization. Re-baselined via `pytest --snapshot-update` (6 updated, 1 unchanged, 2 already passing).
+
+**Verification:**
+
+```
+$ ./init.sh
+=== Verification Complete (all green) ===
+$ uv run python -m loom.cli eval --fail-under 100
+Eval results: 234/234 passed
+$ uv run pytest tests/test_status_bar.py -v
+13 passed in 5.00s
+$ uv run ruff check .
+All checks passed!
+$ uv run mypy loom/
+Success: no issues found in 84 source files
+```
+
+**Files changed:**
+
+| File | Lines | Notes |
+|---|---|---|
+| `loom/tui/status_bar.py` | +7/-5 | Token spans in `render()`; `[dim]` removed |
+| `tests/__snapshots__/test_tui_header/test_header_collapsed_empty.raw` | +65/-65 | Re-baselined (color-only diff) |
+| `tests/__snapshots__/test_tui_header/test_header_collapsed_populated.raw` | +68/-68 | Re-baselined (color-only diff) |
+| `tests/__snapshots__/test_tui_header/test_header_collapsed_subagent_hidden.raw` | +69/-69 | Re-baselined (color-only diff) |
+| `tests/__snapshots__/test_tui_header/test_header_expanded_mcp.raw` | +71/-70 | Re-baselined (color-only diff) |
+| `tests/__snapshots__/test_tui_header/test_header_expanded_todo.raw` | +71/-71 | Re-baselined (color-only diff) |
+| `tests/__snapshots__/test_tui_header/test_header_expanded_subagent.raw` | +71/-70 | Re-baselined (color-only diff) |
+| `tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw` | +99/-99 | Re-baselined (color-only diff) |
+| `docs/tui-design-language.md` | +13/-1 | §9.3 "Visual hierarchy" bullet added; §9.5 envelope table StatusBar row updated; Appendix B change log entry added |
+| `feature_list.json` | +1 entry | `f-tui-statusbar-visual-hierarchy` (status: done, with evidence) |
+
+**Design contract preserved:** §5 "1-line StatusBar cap" (still 1 line, still 87 chars), §2 rule 2 "quiet by default" (no new motion), §8.1 "one-theme rule" (zero literal color names), §6 motion intent (all transitions still instant). The 93-col narrow-terminal budget is unchanged.
+
+**Not done (intentionally):** Options B/C/D/E from the proposal. User picked A; the other options remain valid future work if "monotonous" feedback recurs. B (loop state indicator) would solve it more directly but introduces a new reactive; A keeps the diff minimal and contract-locked.
