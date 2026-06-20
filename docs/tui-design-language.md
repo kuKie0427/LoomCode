@@ -35,7 +35,7 @@ The harness model has five subsystems. The TUI gives each one a **fixed on-scree
 
 | Aggregate rail | Region | Implementation | Interaction |
 |---|---|---|---|
-| **Header (summary rail)** | 1 line, dock top, collapsed default | **Not yet implemented** — see §4.3 spec | Whole line click target → expand overlay panel |
+| **Header (summary rail)** | 1 line, dock top, collapsed default | `loom/tui/header.py` (Horizontal + 3 `HeaderSectionButton` children) — see §4.3 spec | Per-section click: each `HeaderSectionButton` toggles only that section's overlay (mutual exclusion) |
 
 The Header is **not** a 6th subsystem. It is an **aggregated rail** that surfaces Scope + State + Lifecycle indicators (MCP / todo / subagent) in one glanceable line. See §4.3.
 
@@ -157,7 +157,7 @@ Twelve components in `loom/tui/`. Each has a fixed position, fixed height, and a
 | 3 | `StatusBar` | `app.py:71-76`, `status_bar.py:38-79` | inside `#chrome`, top | `height: 1` | read-only; reactive to `turns` / `tools` / `ctx_tokens` / `ctx_window` |
 | 4 | `Composer` | `app.py:77-93`, `composer.py:6-46` | inside `#chrome`, bottom | `height: auto, max-height: 8, min-height: 3` | focused input; Enter submits; `/` triggers slash command |
 | 5 | `#chrome` (Vertical wrapper) | `app.py:60-70` | `dock: bottom` | `height: auto` | `:focus-within` background boost (3%) |
-| 6 | `Header` (summary rail) | **TBD — not yet implemented** | `dock: top` (above ChatLog) | `height: 1` collapsed, variable expanded | see §4.3 |
+| 6 | `Header` (summary rail) | `loom/tui/header.py:319-365` | `dock: top` (above ChatLog) | `height: 1` (Horizontal with 3 `HeaderSectionButton` children) | Each section button click expands only that section; see §4.3 |
 | 7 | `TurnLabel` | `chat_log.py:110-125` | first child of each turn, inside ChatLog | `height: 1` | read-only; color-coded by role |
 | 8 | `UserMessage` / `AssistantMessage` | `chat_log.py:128-157` | child of `TurnLabel` (same turn) | `height: auto` | read-only markdown; `padding: 0 2` |
 | 9 | `ThinkingMarker` | `chat_log.py:209-273` | child of assistant turn, before thinking body | `height: 1` | click toggles `ThinkingDisplay` visibility |
@@ -168,7 +168,7 @@ Twelve components in `loom/tui/`. Each has a fixed position, fixed height, and a
 | 14 | `PermissionScreen` | `screens.py:13-74` | full-screen ModalScreen | `width: 70%, height: auto` | 3 buttons: Allow once / Allow always / Deny; ESC = deny |
 | 15 | `SystemNote` | `chat_log.py:179-188` | sibling of TurnLabel in ChatLog | `height: auto` | read-only italic dim |
 
-Components 1–14 are currently implemented (except #6 Header). Component 15 (`SystemNote`) is implemented but not in the original spec; it lives in the State region as a sibling of `TurnLabel`.
+All 15 components are currently implemented. `SystemNote` is not in the original spec; it lives in the State region as a sibling of `TurnLabel`. `Header` was added 2026-06-19 and refactored to per-section toggle 2026-06-20.
 
 ---
 
@@ -180,21 +180,29 @@ Added 2026-06-19 to close §7's "no header region" open decision. The Header is 
 
 **Geometry:**
 - `dock: top`, `height: 1` line
+- A `Horizontal` container with 3 child widgets (`HeaderSectionButton`, one per subsystem)
+- Each button has `width: 1fr` so the 3 buttons fill the 1-line horizontal track evenly (no dead zones between buttons)
 - Background: slightly elevated from ChatLog (e.g. `$panel`)
 - Bottom border: hairline (`$border`)
-- Default-on (no toggle to hide)
+- Default-on (no toggle to hide the entire Header)
 
-**Content (left-to-right, sections separated by `&nbsp;&nbsp;`):**
+**Per-section buttons — each is its own click target:**
+
+The collapsed line is NOT a single click target. Each section (MCP / Todos / Subagent) is its own independently clickable `HeaderSectionButton` widget. The 3 buttons sit side-by-side in spec order:
 
 ```
-▼ ● MCP:N/M   ◐ N/M todos   ◐ N subagent
+[ ● MCP:3/3 ]    [ ◐ 5/5 todos ]    [ ◐ 1 subagent ]
+ ↑ clickable     ↑ clickable         ↑ clickable
 ```
 
-(The `▼` glyph is a click affordance indicating "click to expand".)
+Button widget IDs (for tests / DOM query):
+- `#header-btn-mcp`
+- `#header-btn-todo`
+- `#header-btn-subagent`
 
-**Glyph semantics — aggregate indicator reflects worst state:**
+**Glyph semantics — aggregate indicator reflects worst state (per button):**
 
-| Section | Glyph | Meaning |
+| Button | Glyph | Meaning |
 |---|---|---|
 | MCP | `●` green | all servers healthy |
 | MCP | `◌` yellow | any server error |
@@ -205,45 +213,100 @@ Added 2026-06-19 to close §7's "no header region" open decision. The Header is 
 | Subagent | `◐` yellow | has running |
 | Subagent | (hidden) | count = 0 |
 
-**Hide rule — zero state:** If any section's count is zero (MCP=0, todo=0, subagent=0), that section **disappears** from the collapsed line. Empty sections do not occupy visual space. Subagent count = 0 hides the entire subagent section (no `0 subagent` placeholder).
+**Hide rule — zero state:** If any section's count is zero (MCP=0, todo=0, subagent=0), that button gets the `section-hidden` CSS class (`visibility: hidden`). The button is not rendered, not clickable, and does not occupy visual space. Subagent count = 0 hides the entire subagent button (no `0 subagent` placeholder).
 
-### §4.3.2 Expanded state — overlay panel
+**No `▼` prefix glyph.** In the original 2026-06-19 spec, a `▼` glyph was used to indicate "click to expand". In the 2026-06-20 per-section redesign, each button IS its own click affordance — no extra glyph is needed. The button text (glyph + label + count) is the affordance.
 
-Click anywhere on the collapsed line → expand. ESC collapses. Click outside the panel also collapses (deferred to v2).
+### §4.3.2 Expanded state — per-section overlay panel
 
-**Geometry:**
-- Panel sits **below** the 1-line Header, overlays the **top** of the ChatLog
-- ChatLog geometry is **unchanged** — visually obscured (`opacity: 0.20`) but not reflowed
-- Scroll position in ChatLog is **preserved** across collapse/expand
-- `max-height: 360px` (or viewport-height / 3); `overflow-y: auto` if content exceeds
-- Background: `rgba($panel, 0.97)` — nearly opaque, slight transparency hints at the chat behind
+**Design (2026-06-20 revision):** Each section has its own overlay. Only ONE overlay is visible at a time (mutual exclusion). The overlay shows only the clicked section — not all three sections together.
 
-**Three sections (same order as collapsed line):**
+#### Per-section toggle behavior (3 cases)
 
-1. **MCP** — section header `▼ ● MCP:N/M`, then 2-col indented rows: `<glyph> <name> <state>` per server.
-2. **Todos** — section header `▼ ◐ N/M todos`, then 2-col indented rows: `<glyph> N. <item text>` per todo. Active item highlighted with accent color + bold weight.
-3. **Subagent** — section header `▼ ◐ N subagent`, then 2-col indented rows: `<glyph> <id> · <state> · <elapsed>` per subagent. **Summary only** — full output lives in ChatLog.
+When a `HeaderSectionButton` is clicked, the App handler `on_header_section_toggle` does exactly one of:
 
-**Indent levels — maximum 3:**
+1. **No overlay open** → mount an overlay for the clicked section (expand).
+2. **Overlay open for the SAME section** → remove the overlay (collapse / toggle off).
+3. **Overlay open for a DIFFERENT section** → remove the old overlay, mount a new one for the clicked section (switch).
 
-- Outer column: section headers (`▼` icon + glyph + label)
-- 2-col right: detail rows (MCP names, todo items, subagent IDs)
+This is the **3-way toggle state machine**:
+
+```
+        click A    click A   click B     click C
+collapsed ──→ [A] ──→ collapsed ──→ [B] ──→ [C]
+       expand    collapse   switch    switch
+                  (toggle)   (A → B)   (B → C)
+```
+
+#### Collapse mechanisms
+
+Three independent ways to collapse the overlay:
+
+1. **ESC key** — `("escape", "collapse_header", "Collapse header")` binding. Invokes `App.action_collapse_header()` which removes the overlay if one exists. Silent no-op when no overlay is open. The previous spec version said "ESC collapses" but the implementation was deferred; this is now wired (per spec §4.3.2).
+2. **Click the same section button again** — toggle off (§4.3.2 case 2).
+3. **Click anywhere outside the overlay** — `App.on_click` handler removes the overlay on any click event that is NOT on a `HeaderSectionButton`, the `Header` container, or the `HeaderOverlay` itself. The click is consumed (via `event.stop()`) at the Header/HeaderOverlay level so `App.on_click` only fires for outside clicks (chat log, status bar, composer, etc.).
+
+**Click on the overlay CONTENT itself does NOT collapse** — the overlay consumes its own click events (`HeaderOverlay.on_click` calls `event.stop()`). The user is reading; accidental clicks on rows shouldn't dismiss the panel. This is consistent with the "no auto-load" anti-pattern (§5): no collapse without explicit user intent.
+
+#### Overlay geometry (per section)
+
+- The overlay sits **below** the 1-line Header, above the ChatLog
+- `dock: top`, `height: auto`, `max-height: 16` (≈360px in Textual units)
+- `overflow-y: auto` if the section's detail rows exceed `max-height`
+- ChatLog geometry is **unchanged** — the overlay overlays the top of the ChatLog visually but does not reflow it
+- Scroll position in ChatLog is **preserved** across collapse / expand / switch
+- Background: `$panel 97%` — nearly opaque, slight transparency hints at the chat behind
+- Bottom border: `solid $border` for visual separation from the ChatLog
+
+#### Per-section content
+
+The overlay renders **only the clicked section** (mutual exclusion — no mixing of MCP + Todos in one overlay):
+
+1. **MCP overlay** — section header `● MCP:N/M` (or `◌` / `○` per worst-state glyph), then 2-col indented rows: `<glyph> <name> <state>` per server. Section header on outer column, detail rows indented 2 cols right.
+2. **Todos overlay** — section header `◐ N/M todos` (or `✓` / `○` per glyph), then 2-col indented rows: `<glyph> N. <item text>` per todo. Active item highlighted with accent color + bold weight (per the spec's "row-active" convention from state-7 mockup).
+3. **Subagent overlay** — section header `◐ N subagent`, then 2-col indented rows: `<glyph> <id> · <state> · <elapsed>` per subagent. **Summary only** — full output lives in ChatLog.
+
+#### Per-section overlay IDs
+
+Each overlay instance is mounted with a per-section ID to avoid `DuplicateIds` errors when switching (the old overlay may still be in the DOM pending async removal):
+- `header-overlay-mcp`
+- `header-overlay-todo`
+- `header-overlay-subagent`
+
+#### Indent levels — maximum 3 (per §2 rule 5)
+
+- Outer column: section header (`<glyph> <Label>:N/M`)
+- 2-col right: detail rows (`<glyph> <name>` / `<glyph> N. <text>` / `<glyph> <id> · <state>`)
 - No fourth tier. This matches the ChatLog's two-level indentation convention.
 
-**Subagent row click behavior:** Clicking a subagent ID dismisses the overlay and **scrolls the ChatLog to that subagent's existing marker**. (Markers exist because subagent tool calls are already inline in the chat.)
+#### Subagent row click behavior (subagent overlay only)
 
-**Animation:** **None.** Click = instant toggle. No slide, no fade. See §6.
+Clicking a subagent ID inside the Subagent overlay dismisses the overlay and **scrolls the ChatLog to that subagent's existing marker**. (Markers exist because subagent tool calls are already inline in the chat.) This applies only when the Subagent overlay is the active one.
+
+#### Animation
+
+**None.** Click = instant mount / remove / switch. No slide, no fade. See §6.
+
+#### Why per-section + mutual exclusion
+
+The original 2026-06-19 spec assumed a single overlay showing all 3 sections simultaneously. The 2026-06-20 revision switched to per-section toggles after the user reported the UX problem of "one click expands all three" with no way to inspect just one subsystem. The mutual exclusion invariant (only 1 overlay visible) prevents UI crowding over long sessions and matches the long-loop aesthetic (§2 rule 2 — quiet by default; only one region of motion at a time).
 
 ### §4.3.3 Why this honors the long-loop aesthetic
 
 - **Collapsed line is the glance density ceiling** (§2 rule 2). Even idle, it shows the session's load shape in one line — but it never grows taller when collapsed.
-- **Header is exactly 1 line in collapsed state** (§2 rule 1). It never grows regardless of how many MCPs or todos exist.
-- **Index + topic memory pattern applied to layout** (§5). The collapsed line is the bounded always-on index; the expanded panel is the on-demand topic. The index never grows; the topic loads only when the user asks.
+- **Header is exactly 1 line in collapsed state** (§2 rule 1). It never grows regardless of how many MCPs or todos exist. The 3 buttons share this single line (each `width: 1fr`).
+- **Index + topic memory pattern applied to layout** (§5). The collapsed line is the bounded always-on index; each per-section overlay is the on-demand topic. The index never grows; the topic loads only when the user asks.
 - **Aggregate indicators, not exhaustive lists** (§5 anti-pattern). The collapsed line shows worst-state glyph + count, not every MCP/todo/subagent. The user sees the load at a glance.
+- **Per-section toggle + mutual exclusion** (§4.3.2). Only ONE overlay is visible at a time, preventing UI crowding in long sessions. Each section gets its own bounded topic space; switching is instant (§6).
 
 ### §4.3.4 Implementation status
 
-**Not yet implemented.** The Textual Header widget would consume this sub-section as its spec. Data sources (MCP server state, todo list, subagent count) are currently not exposed by the agent loop — see `progress.md` follow-up notes.
+**Implemented** in Textual (`loom/tui/header.py`, `loom/tui/app.py`):
+
+- **Initial implementation** (2026-06-19, commit `61cda27`): Header as a `Static` line with a single click-to-toggle overlay showing all 3 sections.
+- **Per-section redesign** (2026-06-20, commit `0fc00b0`): Header as a `Horizontal` container with 3 `HeaderSectionButton` children; each section has its own per-section overlay (mutual exclusion); ESC + click-outside + click-same-section collapse mechanisms.
+- **Mock data only** — `HeaderState` / `MCPServer` / `TodoItem` / `Subagent` are populated by `DEFAULT_MOCK_STATE` in `on_mount`. Real backend wiring of MCP server state, todo list results, and subagent count is **deferred** to a follow-up feature (the agent_loop must expose these signals to the TUI).
+- **Test coverage**: 35 pytest tests in `tests/test_tui_header.py` + 14 eval cases in `loom/eval/cases/tui_header.py`. Snapshot baselines in `tests/__snapshots__/test_tui_header/`.
 
 ---
 
@@ -295,9 +358,9 @@ Layout consequences drawn from harness gotchas. Each anti-pattern is named so a 
 
 > Always-on index must be bounded. On-demand topic detail must be loadable but never auto-loaded.
 
-**Layout consequence:** StatusBar is the index (bounded 1 line). Header collapsed line is the aggregate index for sub-systems (bounded 1 line). Expanded Header panel is the topic. Modal bodies are deep-dive topics. None of the topics auto-load.
+**Layout consequence:** StatusBar is the index (bounded 1 line). The collapsed Header is the aggregate index for sub-systems (bounded 1 line, with 3 section buttons sharing the row). Each per-section overlay (`header-overlay-{mcp,todo,subagent}`) is its own bounded topic — only one is visible at a time (mutual exclusion, §4.3.2). Modal bodies are deep-dive topics. None of the topics auto-load.
 
-**Enforcement:** No component opens a modal, overlay, or detail view without explicit user action (click, keypress). The expanded Header panel never auto-opens on errors.
+**Enforcement:** No component opens a modal, overlay, or detail view without explicit user action (click, keypress). The expanded Header overlay never auto-opens on errors. Even when an MCP server enters error state, the `◌` glyph change in the collapsed button is sufficient signal — the user clicks to investigate.
 
 ### No exhaustive lists in collapsed chrome
 
@@ -323,7 +386,7 @@ Layout consequences drawn from harness gotchas. Each anti-pattern is named so a 
 | ThinkingMarker `⠋ spinner` → `◦ thought · Ns` | `set_complete()` updates text in one frame | `chat_log.py:268-272` |
 | StreamingOverlay → AssistantMessage finalize | `update()` swap on turn end | `chat_log.py:574-585` |
 | CollapsibleToolOutput toggle | `display = not display` (instant show/hide) | `chat_log.py:295-296` |
-| Header collapsed ↔ expanded | Overlay panel mount/remove (no slide) | §4.3 (TBD) |
+| Header section button click → overlay expand / switch / collapse | `screen.mount(overlay)` + `existing.remove()` (no slide) | `app.py:on_header_section_toggle` (§4.3.2) |
 | Modal push/pop | `ModalScreen` replace (no fade) | built-in Textual |
 | Scroll position change | `scroll_to(y=..., animate=False)` | `app.py:198` (mouse wheel path) |
 
@@ -409,3 +472,11 @@ Deliberately left undefined. Each item has a default behavior until a future ref
 - **2026-06-19** — Original creation (221 lines, §0–§7). Lost from working tree.
 - **2026-06-19** — Header (§4.3) added (318 lines). Closed §7's "no header region" decision.
 - **2026-06-20** — Reconstructed from `docs/tui-design.html` (HTML mockup committed in `c2c9949`) + `progress.md` session descriptions. Header region kept, anti-patterns expanded with explicit enforcement notes, motion intent table added.
+- **2026-06-20** — **§4.3 redesign aligned with code** (after commit `0fc00b0`). The 2026-06-19 §4.3 assumed a single overlay showing all 3 sections together, but the implementation (driven by the user's UX report) uses per-section toggles with mutual exclusion. Updated:
+  - §4 component contract: Header entry now lists `loom/tui/header.py:319-365` and notes "Horizontal with 3 HeaderSectionButton children" (was "TBD — not yet implemented")
+  - §4.3.1 Default state — collapsed: rewritten to describe the 3 independently clickable `HeaderSectionButton` widgets (`#header-btn-{mcp,todo,subagent}` IDs, `width: 1fr` each, `section-hidden` class on hide); removed the `▼` prefix glyph (each button is its own affordance)
+  - §4.3.2 Expanded state — per-section overlay panel: rewritten to describe the 3-way toggle state machine (no-overlay / same / different), the 3 collapse mechanisms (ESC, click-same-section, click-outside), the mutual exclusion invariant, per-section overlay IDs (`header-overlay-{section}`), and "click on overlay content does NOT collapse"
+  - §4.3.3 Why this honors the long-loop aesthetic: added a bullet on "Per-section toggle + mutual exclusion"
+  - §4.3.4 Implementation status: updated from "Not yet implemented" to "Implemented (mock data only)" with commit references
+  - §5 "Index + topic memory pattern" anti-pattern: clarified the Header overlay is now per-section (each is its own bounded topic)
+- **HTML mockup status**: `docs/tui-design.html` still shows the original 2026-06-19 single-overlay design (states 6/7). It is **out of sync** with the new spec; a follow-up may update the mockup to show per-section toggles (states 6/7 → per-section states per mockup). The HTML is a visual reference, not a contract; the prose spec is authoritative.
