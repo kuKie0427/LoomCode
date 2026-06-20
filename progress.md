@@ -3477,3 +3477,61 @@ One minor adjustment: `test_subagent_row_click_posts_subagent_row_clicked_messag
 - `d57df45 fix: revert accidental trailing empty lines in loom/agent/loop.py` (cleanup — the chore commit inadvertently included 2 trailing blank lines from a manual gitignore test; reverted in a separate commit to keep history transparent per AGENTS.md "no amending without explicit request")
 
 **Not added to feature_list.json** — chores of this size don't warrant a feature entry (precedent: f985553 was folded into f-tui-header-summary-rail evidence rather than getting its own entry).
+
+## Session: §7 layout decisions closed + f-tui-statusbar-drop-scroll-hint
+
+**Started:** 2026-06-20 (dialogue-driven, user request "§7 design doc 决策，先对话再得出方案")
+
+**Process:** Conversational close of the §7 "open layout decisions". Each decision resolved through Q&A with the user rather than unilateral choice.
+
+### Decisions reached
+
+| §7 item | Decision | Rationale |
+|---|---|---|
+| Two-pane (left panel) | **No** | User chose (d) "overlay click is enough". Emergent need: inline ChatLog event markers (see below) instead of a persistent panel. |
+| Zen mode | **No** | User: "目前不需要". Header + StatusBar are glance anchors; no distraction-free use case. |
+| Narrow-terminal minimums | **Usable ≥ 93 cols** | Empirically measured. StatusBar is the only break point; dropped scroll hint to lower the threshold 119 → 93. |
+| Click-outside-to-collapse (stale doc) | **Closed: Yes** | Was already implemented in 0fc00b0; doc said "Default: No". Corrected. |
+
+### Empirical measurement (Q3)
+
+Ran the App at 60/70/80/90/100/120 cols via `app.run_test(size=(W, 24))` and inspected each region's render width:
+
+- **Header**: 3 `width: 1fr` buttons split evenly; short labels fit to 60 cols. No break. (A measurement artifact showed `size.width=0` for `1fr` buttons in headless `run_test`, but SVG export via `export_screenshot` confirmed correct layout: `● MCP:12/12   ◐ 5/5 todos   ◐ 2 subagent`.)
+- **ChatLog / Composer**: scale linearly, soft-wrap, no horizontal break.
+- **StatusBar**: the ONLY bottleneck. Fixed-format, non-wrapping. Content length: 85 (idle) / 93 (mid-session) / **119** (with scroll hint after overflow).
+
+Temp measurement scripts (`measure_narrow.py`, `measure_narrow_full.py`, `snap_header.py`) were deleted after use — working tree clean.
+
+### Implementation (f-tui-statusbar-drop-scroll-hint)
+
+**File 1 — `loom/tui/status_bar.py`** (-9 lines):
+- Removed the `hint` block (`chat_log.max_scroll_y > 0` → `" | scroll with mouse wheel"`) from `render()`
+- Removed now-unused `from loom.tui.chat_log import ChatLog` import
+- Max StatusBar width: 119 → 93 cols
+
+**File 2 — `tests/test_tui_manual_scroll.py`** (replaced 1 test):
+- `test_status_bar_hint_mentions_mouse_wheel` → `test_status_bar_has_no_scroll_hint_when_overflowing` (asserts the hint is GONE even when chat log overflows). Not a "deleted failing test" — it's the inverse-behavior lock for the intentional removal.
+
+**File 3 — `loom/eval/cases/tui_app.py`** (+1 eval case):
+- `TuiStatusBarHasNoScrollHint` (`tui-status-bar-no-scroll-hint`) — static `inspect.getsource(StatusBar.render)` check that the render method contains no `mouse wheel` / `scroll with` string.
+
+**File 4 — `docs/tui-design-language.md`** (§7 rewrite):
+- §7 retitled "Open layout decisions" → "Layout decisions"; intro changed from "deliberately left undefined" to "all items Closed as of 2026-06-20"
+- Narrow-terminal: full measurement table + Closed
+- Zen mode: added as Closed (rejected)
+- Two-pane: added as Closed (rejected for inline timeline)
+- Click-outside-to-collapse: stale "Default: No" → "Decision (2026-06-20): Yes, implemented in 0fc00b0"
+- §0 bullet 3 + Appendix B changelog updated
+
+### Verification
+
+| Gate | Result |
+|---|---|
+| `uv run python -m loom.cli eval --fail-under 100` | 219/219 (was 218, +1) |
+| `uv run pytest tests/test_tui_manual_scroll.py -v` | 8/8 (1 test replaced, net 0) |
+| `./init.sh` | "Verification Complete (all green)" — 428 pytest (net 0), 9 snapshots, 0 ruff, 0 mypy (76 files) |
+
+### Emergent follow-up (NOT done this session)
+
+`f-tui-inline-event-markers` — Q1 dialogue surfaced that subagent start/end + todo updates only update the Header overlay state, with NO marker in the ChatLog timeline. User wants these events visible inline in the conversation. Proposed but not yet built — candidate for next session.

@@ -198,3 +198,34 @@ class TuiLaunchesInTestMode(EvalCase):
             name=self.name, passed=True,
             detail="AgentTUIApp starts and accepts input via pilot",
         )
+
+
+class TuiStatusBarHasNoScrollHint(EvalCase):
+    name = "tui-status-bar-no-scroll-hint"
+    description = (
+        "StatusBar.render() does not emit a 'scroll with mouse wheel' hint"
+        " — dropped in f-tui-statusbar-drop-scroll-hint to keep the bar"
+        " usable on narrow terminals (max width 93 cols instead of 119)"
+    )
+
+    def run(self) -> EvalResult:
+        import inspect
+
+        from loom.tui.status_bar import StatusBar
+
+        source = inspect.getsource(StatusBar.render)
+        if "mouse wheel" in source or "scroll with" in source:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=(
+                    "StatusBar.render still contains a scroll hint string —"
+                    " the bar will overflow narrow terminals"
+                ),
+            )
+        return EvalResult(
+            name=self.name, passed=True,
+            detail=(
+                "StatusBar.render has no scroll hint — bar stays compact"
+                " (≤ 93 cols)"
+            ),
+        )

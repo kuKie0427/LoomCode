@@ -10,7 +10,7 @@ The harness 5-subsystem model (Instructions / State / Verification / Scope / Lif
 
 1. **Layout invariants are testable.** Future features can consume this doc as a spec and add snapshot / behavioral tests that lock the rules.
 2. **Refactors don't drift.** A new component knows where it belongs, what padding is canonical, and which aesthetic rule it must obey.
-3. **Decisions are reversible.** When §7's "open layout decisions" need to be closed, this doc records why the current choice was made.
+3. **Decisions are reversible.** §7 records why each layout choice was made; reopening one requires flipping its Status and documenting why.
 
 **Scope of this version (first pass):**
 
@@ -405,9 +405,9 @@ Layout consequences drawn from harness gotchas. Each anti-pattern is named so a 
 
 ---
 
-## §7 Open layout decisions
+## §7 Layout decisions
 
-Deliberately left undefined. Each item has a default behavior until a future refactor closes the decision.
+Each item records the decision and its rationale. As of 2026-06-20 all items are **Closed** — none remain open. Reopening one requires changing its Status back and recording why.
 
 ### Two-pane mode (left panel)
 
@@ -429,9 +429,24 @@ Deliberately left undefined. Each item has a default behavior until a future ref
 
 **Question:** What is the minimum terminal width where the layout remains usable?
 
-**Default:** Untested below 80 cols. The 2-col margin + Composer + StatusBar text are the tightest constraints.
+**Decision (2026-06-20):** **Usable ≥ 93 cols; degrades gracefully below.** Measured all four regions across 60–120 cols:
 
-**Why deferred:** No current user complaint. If a constraint emerges (e.g. a mobile/embedded use case), this becomes a hard layout decision (truncate StatusBar? remove Composer soft-wrap? stack Header above StatusBar instead of dock-top?).
+| Region | Behavior under narrow width |
+|---|---|
+| Header | 3 `width: 1fr` buttons split evenly; short labels (`● MCP:3/3`) fit down to 60 cols. No break. |
+| ChatLog | `1fr`, markdown soft-wraps; `overflow-x: hidden`. No horizontal break at any width. |
+| Composer | `TextArea`, soft-wraps. No break. |
+| StatusBar | **The only bottleneck.** Fixed-format, non-wrapping. Right-clips when content exceeds width. |
+
+The StatusBar was the only region that broke. Its content length was:
+
+- 85 cols at session start (0 turns/tools)
+- 93 cols mid-session (multi-digit turns/tools)
+- **119 cols** once the chat log overflowed (the extra `| scroll with mouse wheel` hint)
+
+**Fix applied (`f-tui-statusbar-drop-scroll-hint`):** dropped the scroll hint. Mouse-wheel scrolling is the default, intuitive behavior; the hint mostly added width. Max StatusBar width is now **93 cols** (was 119). Below 93 the bar right-clips (loses the ctx token count first, then the percentage) — non-fatal, the chat log + composer stay fully usable.
+
+**Status:** Closed. No responsive/multi-tier StatusBar planned unless a < 80-col use case emerges.
 
 ### Header default-on vs default-off
 
@@ -440,6 +455,22 @@ Deliberately left undefined. Each item has a default behavior until a future ref
 **Decision (2026-06-19):** **Default-on.** The glance density it provides is part of the long-loop aesthetic. Hiding it forces the user to remember it exists.
 
 **Status:** Closed.
+
+### Zen mode (hide Header + StatusBar)
+
+**Question:** Should there be a `/zen` (or similar) command that hides Header + StatusBar for a distraction-free view?
+
+**Decision (2026-06-20):** **No.** Header + StatusBar are the long-loop glance anchors. The user confirmed no distraction-free use case. The composer + chat log are already the minimum; a Zen mode would add a mode without a clear need.
+
+**Status:** Closed.
+
+### Two-pane mode (persistent left panel)
+
+**Question:** Should there be a persistent left pane (file tree, todo list, session history) alongside the ChatLog?
+
+**Decision (2026-06-20):** **No.** The user prefers the full-width ChatLog. The "I keep wanting to glance at todos / subagents" need is met instead by **inline ChatLog event markers** (subagent start/end + todo-update markers rendered in the conversation timeline — see `f-tui-inline-event-markers`), not by a persistent panel that eats the 2-col eye-rest margin and breaks on narrow terminals.
+
+**Status:** Closed (in favor of inline timeline).
 
 ### Header overlay auto-expand on errors
 
@@ -453,7 +484,12 @@ Deliberately left undefined. Each item has a default behavior until a future ref
 
 **Question:** Should clicking outside the expanded Header overlay collapse it?
 
-**Default:** No. Only ESC collapses (and clicking the header line itself toggles). Click-outside-to-collapse would intercept normal clicks on the chat log while the overlay is up.
+**Decision (2026-06-20):** **Yes** — implemented in `f-tui-header-per-section-toggle` (commit `0fc00b0`). Clicking anywhere outside the overlay (chat log / status bar / composer) collapses it; clicking *on* the overlay content does NOT collapse (the user is reading). This is `App.on_click`'s catch-all collapse handler. ESC also collapses; clicking the same section button toggles.
+
+The earlier "Default: No" rationale assumed the overlay dimmed the ChatLog (`opacity: 0.20`) so click-outside would steal clicks meant for scrolling. The per-section toggle design dropped the dimming, so the conflict no longer exists.
+
+**Status:** Closed.
+
 
 **Why deferred:** Conflict with the `opacity: 0.20` on ChatLog — clicks on the dimmed chat would also dismiss the overlay, which is hostile to "I want to scroll while the overlay is up." (Although scrolling is preserved across collapse/expand, click-outside-to-collapse would prevent reading the chat while overlay is open.)
 
@@ -480,3 +516,4 @@ Deliberately left undefined. Each item has a default behavior until a future ref
   - §4.3.4 Implementation status: updated from "Not yet implemented" to "Implemented (mock data only)" with commit references
   - §5 "Index + topic memory pattern" anti-pattern: clarified the Header overlay is now per-section (each is its own bounded topic)
 - **HTML mockup status**: `docs/tui-design.html` still shows the original 2026-06-19 single-overlay design (states 6/7). It is **out of sync** with the new spec; a follow-up may update the mockup to show per-section toggles (states 6/7 → per-section states per mockup). The HTML is a visual reference, not a contract; the prose spec is authoritative.
+- **2026-06-20** — **§7 open decisions closed** (dialogue with user). Narrow-terminal minimums measured (StatusBar is the only break point; usable ≥ 93 cols after dropping the scroll hint in `f-tui-statusbar-drop-scroll-hint`). Zen mode rejected (no distraction-free use case). Two-pane rejected in favor of inline ChatLog event markers (`f-tui-inline-event-markers`, planned). Click-outside-to-collapse corrected from stale "Default: No" to "Closed: Yes" (was already implemented in `0fc00b0`). All §7 items now have a Status; none remain open.

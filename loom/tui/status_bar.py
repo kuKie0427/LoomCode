@@ -3,8 +3,6 @@ from __future__ import annotations
 from textual.reactive import reactive
 from textual.widgets import Static
 
-from loom.tui.chat_log import ChatLog
-
 _BAR_WIDTH = 10
 _BAR_FULL = "█"
 _BAR_EMPTY = "░"
@@ -65,15 +63,7 @@ class StatusBar(Static):
             f"({ratio * 100:.0f}%)"
         )
 
-        hint = ""
-        try:
-            chat_log = app.query_one(ChatLog)
-            if chat_log.max_scroll_y > 0:
-                hint = " | scroll with mouse wheel"
-        except Exception:
-            pass
-
         return (
             f" loom | model: {model} | turns: {self.turns} | "
-            f"tools: {self.tools} | {ctx_str}{hint} "
+            f"tools: {self.tools} | {ctx_str} "
         )

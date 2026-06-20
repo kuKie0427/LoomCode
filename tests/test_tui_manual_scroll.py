@@ -117,7 +117,10 @@ def test_scrollbar_size_is_visible():
     )
 
 
-def test_status_bar_hint_mentions_mouse_wheel():
+def test_status_bar_has_no_scroll_hint_when_overflowing():
+    """StatusBar must NOT show a 'scroll with mouse wheel' hint even when the
+    chat log overflows — the hint was dropped (f-tui-statusbar-drop-scroll-hint)
+    to keep the bar usable on narrow terminals (≥ 93 cols instead of ≥ 119)."""
     async def driver():
         app = AgentTUIApp()
         async with app.run_test(size=(80, 20)) as pilot:
@@ -126,8 +129,11 @@ def test_status_bar_hint_mentions_mouse_wheel():
             await _seed_overflow(app)
             await pilot.pause(0.3)
             text = status_bar.render()
-            assert "mouse wheel" in text, (
-                f"Status bar must mention mouse wheel as scroll method; got: {text!r}"
+            assert "mouse wheel" not in text, (
+                f"Status bar must NOT show a mouse-wheel scroll hint; got: {text!r}"
+            )
+            assert "scroll" not in text, (
+                f"Status bar must not mention scrolling at all; got: {text!r}"
             )
     asyncio.run(driver())
 
