@@ -14,8 +14,10 @@ The harness 5-subsystem model (Instructions / State / Verification / Scope / Lif
 
 **Scope of this version (first pass):**
 
-- **In scope:** spatial structure, hierarchy, regions, motion intent, component contracts.
-- **Out of scope:** exact color values, typography rendering, animation easing curves. Those live in `docs/tui-design.html` (visual reference) and in Textual's theme tokens (`$background`, `$accent`, etc.).
+- **In scope:** spatial structure, hierarchy, regions, motion intent, component contracts, **and (as of 2026-06-21) the canonical color system — see §8.**
+- **Out of scope:** typography rendering and animation easing curves. Those live in `docs/tui-design.html` (visual reference).
+
+> **Color note (2026-06-21):** Earlier versions of this doc declared exact color values out of scope and deferred them to "Textual's theme tokens." That was a gap, not a decision — the running app used Textual's *stock* theme, so the documented `docs/tui-design.html` palette (sage accent, ink background) was never realized on screen. §8 closes this: a single canonical `loom-ink` Textual theme now ports the HTML palette 1:1, and color is in scope here.
 
 **Companion artifact:** `docs/tui-design.html` — 7-state visual reference. Each state cites a section of this doc via `<span class="cite">§N — rule</span>`. If a §-citation in the HTML disagrees with this prose, **this prose wins** and the HTML must be updated.
 
@@ -167,8 +169,10 @@ Twelve components in `loom/tui/`. Each has a fixed position, fixed height, and a
 | 13 | `ToolCallModal` | `chat_log.py:307-363` | full-screen ModalScreen | `width: 80%, height: 80%` | deep-dive view; ESC closes |
 | 14 | `PermissionScreen` | `screens.py:13-74` | full-screen ModalScreen | `width: 70%, height: auto` | 3 buttons: Allow once / Allow always / Deny; ESC = deny |
 | 15 | `SystemNote` | `chat_log.py:179-188` | sibling of TurnLabel in ChatLog | `height: auto` | read-only italic dim |
+| 16 | `WelcomeBanner` | `chat_log.py` | first child of empty ChatLog, before any turn | `width: 1fr`, content-align center | Static splash: weave motif + `loom` + slogan + command hints; dismissed on first user message, re-shown after `/clear`; never animates (§2 rule 2) |
+| 17 | `TurnSeparator` | `chat_log.py` | sibling of TurnLabel, before each user turn | `height: 1`, color `$border` | Hairline `─` divider in the content column; no third indent tier (§2 rule 5) |
 
-All 15 components are currently implemented. `SystemNote` is not in the original spec; it lives in the State region as a sibling of `TurnLabel`. `Header` was added 2026-06-19 and refactored to per-section toggle 2026-06-20.
+All 17 components are currently implemented. `SystemNote` is not in the original spec; it lives in the State region as a sibling of `TurnLabel`. `Header` was added 2026-06-19 and refactored to per-section toggle 2026-06-20. `WelcomeBanner` and `TurnSeparator` added 2026-06-21 as low-motion decoration within the loom-ink palette.
 
 ---
 
@@ -495,7 +499,161 @@ The earlier "Default: No" rationale assumed the overlay dimmed the ChatLog (`opa
 
 ---
 
-## Appendix A — Source materials
+## §8 Color system — the `loom-ink` theme
+
+Added 2026-06-21. The TUI now realizes the `docs/tui-design.html` palette through **one** canonical Textual theme, `loom-ink`, registered in `loom/tui/app.py` and set active in `on_mount`. This is the single source of truth for color: every hex value is ported 1:1 from the HTML mockup's `:root` custom properties.
+
+### §8.1 The one-theme rule
+
+> All color lives in `_LOOM_INK_THEME` (`loom/tui/app.py`). Widgets reference Textual theme tokens (`$accent`, `$success`, `$text-muted`, …). No widget hard-codes a hex value or a literal Rich color name (`[green]`, `solid red`, etc.).
+
+**Why:** Before this, two parallel color systems coexisted — theme tokens in some widgets, hard-coded Rich markup (`[green]`/`[yellow]`/`[cyan]`/`[red]`) in `header.py` and `status_bar.py`, and literal `solid yellow/green/red` borders in `widgets.py`. They did not track each other, so "green" meant three different shades depending on the widget, and none matched the documented palette. One theme = one logic = one look.
+
+**Enforcement:** No `[green]`/`[yellow]`/`[cyan]`/`[red]`/`[blue]`/`[purple]` Rich tags and no literal `solid <colorname>` / `thick <colorname>` borders anywhere in `loom/tui/`. Use the token form (`[$success]`, `border: thick $error`). A grep for literal color names in `loom/tui/` should return only prose in docstrings.
+
+### §8.2 Token → hex map (ported from `docs/tui-design.html`)
+
+| Textual token | Hex | Mockup var | Role |
+|---|---|---|---|
+| `$background` | `#0c0e12` | `--bg` | Base canvas (ChatLog, Screen) |
+| `$surface` | `#0a0d11` | `--bg-mock` | User message + tool-output ground |
+| `$panel` | `#13161c` | `--bg-panel` | Header + overlays |
+| `$primary` / `$accent` | `#5b8a72` | `--accent` | **Signature sage** — labels, running markers, focus |
+| `$secondary` | `#4a8a8a` | `--cyan` | Names / ids (MCP server, subagent id) |
+| `$foreground` (`$text`) | `#c5cdd8` | `--text` | Body text |
+| `$success` | `#4a8a5b` | `--green` | Done states, ctx-ok bar |
+| `$warning` | `#8a7a3b` | `--yellow` | Active / running / slow-thinking, ctx-warn |
+| `$error` | `#8a3b3b` | `--red` | Error states, ctx-danger, PermissionScreen border |
+| `$text-muted` | `#5c6570` | `--text-dim` | Secondary text, system notes, idle glyphs |
+| `$text-faint` | `#3a4048` | `--text-muted` | Faintest tier (reserved) |
+| `$border` | `#1e2328` | `--border` | Standard hairline border |
+| `$hairline` | `#1a1e24` | `--hairline` | Faintest separator (reserved) |
+
+`$warning` / `$error` may render with a sub-1% hue shift on screen — Textual nudges theme colors into the terminal's ANSI gamut. The source hex above is authoritative.
+
+### §8.3 Glyph → state → token contract
+
+Every status marker maps to exactly one glyph and one token. This is the audited contract (see `chat_log.py`, `header.py`):
+
+| Subsystem | State | Glyph | Token |
+|---|---|---|---|
+| Tool call | running | `⊙` | `$accent` |
+| Tool call | done | `⊙` | `$success` |
+| Tool call | error | `⊗` | `$error` |
+| Subagent | running | `◐` | `$accent` |
+| Subagent | done | `◑` | `$success` |
+| Subagent | error | `⊗` | `$error` |
+| Thinking | active | `⠋` (spinner) | `$text-muted` |
+| Thinking | slow (>10s) | `⠋` | `$warning` |
+| Thinking | done | `◦` | `$text-muted` |
+| Header MCP | healthy | `●` | `$success` |
+| Header MCP | error | `◌` | `$warning` |
+| Header MCP | disabled | `○` | `$text-muted` |
+| Header Todo | active | `◐` | `$warning` |
+| Header Todo | all done | `✓` | `$success` |
+| Header Todo | empty/pending | `○` | `$text-muted` |
+| Header Subagent | has running | `◐` | `$warning` |
+
+**Rule:** `$accent` (sage) means "live, in this conversation" (running inline markers). `$warning` (amber) means "pending/active aggregate" (header rollups, slow thinking). `$success` means "completed". `$error` means "failed". `$text-muted` means "idle/dim". A new marker must pick from this set, not invent a color.
+
+### §8.4 Why this honors the long-loop aesthetic
+
+- **Quiet by default (§2 rule 2):** The palette is deliberately low-saturation (ink background, desaturated semantics). Over a 3-hour session, a muted screen fatigues the eye far less than Textual's stock high-saturation defaults.
+- **Aggregate-glyph color is meaning, not decoration (§5):** A single `◌` turning amber in the collapsed Header is the entire error signal — no color is spent on decoration, so a color change always means a state change.
+- **One theme, instant (§6):** The theme is set once in `on_mount`; there is no per-frame color computation, no theme animation. Color is a held still value like everything else in the long-loop surface.
+
+---
+
+## §9 Decorative elements (added 2026-06-21)
+
+After the loom-ink theme landed, four regions still felt visually empty. This section declares the low-motion decoration added to fill that gap — all **within** the locked color and motion rules. Nothing here introduces a new color, an animation, a new indent tier, or breaks §5's "color change = state change" invariant.
+
+### §9.1 `WelcomeBanner` (idle splash)
+
+Mounted in the ChatLog only when empty (start of session, after `/clear`). Composition (revised 2026-06-21, #5):
+
+```
+  ▀▀▀ █▀▀▀█ █▀▀▀█ █▀▀█▀▀█   ← top face (▀ in $accent-light)
+  ███ █   █ █   █ █  █  █   ← body (█ in $accent)
+  ███ █ ▀ █ █ ▀ █ █  █  █   ← body + stencil cutout (▀ in $accent-light)
+  ███ █   █ █   █ █  █  █   ← body
+  ▄▄▄ █▄▄▄█ █▄▄▄█ █▄▄█▄▄█   ← bottom face (▄ in $accent-dim)
+
+  weaving intent into action
+
+  /help · /model · /clear · /resume
+```
+
+The **3D extruded stencil wordmark** is the primary brand element — modeled directly on the opencode reference image (the actual rendered logo, not the simplified `logo.ts` constants). A three-tone sage gradient produces the "3D block sitting on a surface" effect:
+
+- **Row 0** (the "upper face" of the 3D block): `▀` cells in **`$accent-light`** (a derived lighter sage, registered as a new theme variable specifically for this use). Reads as the lit top edge of an extruded block.
+- **Rows 1–3** (the "body" / front face): `█` cells in **`$accent`** sage. The `o` has a 1-cell `▀` stencil cutout in row 2 (the cutout is filled with the lighter color, mimicking the filled-square hole in opencode's `o`).
+- **Row 4** (the "lower face" / shadow): `▄` cells in **`$accent-dim`** (darker sage), but `█` cells stay in `$accent` (matching the body color so the corners don't look dirty). The per-char split is implemented by `_colorize_bottom()`.
+
+Letter widths: `l`=3 cells (chunky bar), `o`=5, `o`=5, `m`=7. With 1-col separators and 2-col leading padding: **25 cols × 5 rows**.
+
+The 3-tone gradient (`$accent-light` → `$accent` → `$accent-dim`) is a deliberate palette expansion over the 2-tone attempt (#4). The middle tone needed contrast on **both** sides — too subtle and the 3D extrusion reads as flat, too aggressive and it breaks the brand sage. `$accent-light` (#84ad9a, ~30% lighter than `$accent`) is the lowest-contrast choice that still reads as "lit face" in normal terminal palettes.
+
+> **Iteration history:**
+> - **2026-06-21 #1** — Unicode weave motif (5 warps × 5 wefts with shuttle). Crude in monospace.
+> - **2026-06-21 #2** — `◆` shuttle glyph + italic `loom` wordmark. Still not "artistic processing".
+> - **2026-06-21 #3** — 3D block-letter `loom` in opencode's `logo.ts` cell-based style (`█▀▀█` / `█__█` / `▀▀▀▀` with `__` interior). Captured the 3D vocabulary but missed the two-tone color band — read as flat.
+> - **2026-06-21 #4** — Two-tone 3D extrusion ($accent + $accent-dim). Matched the opencode reference image but contrast was too subtle (both colors are sage), letters were thin (l=2 cells, m humps barely visible), no stencil cutouts in 'o'.
+> - **2026-06-21 #5 (current)** — Three-tone 3D extrusion ($accent-light + $accent + $accent-dim). Added `$accent-light` to the theme. Letters chunkier (l=3 cells). Real stencil cutouts in 'o'.
+
+**Why this honors the long-loop aesthetic:**
+- **§2 rule 2 (quiet by default):** Pure still image. No spinner, no animation, no pulse. The "loop is alive" signal is carried by the composer cursor + the running-tool marker in the StatusBar — the welcome banner carries no live state.
+- **§2 rule 1 (bounded re-layout):** The banner is a single Static child of the ChatLog. It does not change the region geometry (height: auto) and disappears the moment a user types.
+- **§5 anti-pattern "no pending placeholder":** The banner is not a placeholder. It is a permanent splash for the genuinely empty state, not a "waiting for agent…" hint.
+- **§8 (color contract):** The wordmark uses three sage tokens (`$accent-light` / `$accent` / `$accent-dim`); the slogan `$text-muted`; the command hints `$text-faint`. `$accent-light` is the only new theme variable added in this revision; it lives in `_LOOM_INK_THEME` (`loom/tui/app.py`) as the single source of truth.
+
+### §9.2 `TurnSeparator` (hairline between turns)
+
+A single `─` row in `$border`, mounted before each user turn label. Re-uses the content column's `0 2` padding so it aligns with the labels below.
+
+**Why this honors the long-loop aesthetic:**
+- **§2 rule 5 (indentation encodes nesting, max 2 tiers):** The separator sits on the outer column with `TurnLabel` — it is decoration on the existing tier, not a new tier.
+- **§3 (hairline convention):** A `$border` divider is the same color as existing hairline borders (`HeaderOverlay` bottom, `PermissionScreen` outline). It is consistent with the §3 hairline vocabulary, not a new visual primitive.
+
+### §9.3 StatusBar enrichment (within 93-col budget)
+
+StatusBar carries both **stats** (left) and **key hints** (right) on a single line — the opencode bottom-dock pattern. Composition:
+
+```
+ loom · model · ⎇ main · 0t·0tl · ctx: ░░░░░░░░░░ 0/1.0M (0%)   esc ^l / 0:00
+└────── stats (left) ──────┘                                └─ hints + elapsed (right) ─┘
+```
+
+- **Git branch** (`⎇ <name>`, dimmed): cached once at mount via `git rev-parse --abbrev-ref HEAD` with a 2s timeout; absent if not a git repo or the call fails. One subprocess call per session — zero per-frame cost.
+- **Session elapsed** (`H:MM:SS` / `M:SS`): a `reactive[int]` bumped by a single `set_interval(60.0, ...)`. Updates the displayed time once per minute, not per frame. Moved to the right side in 2026-06-21 so the live stats read first.
+- **Key hints** (`esc ^l /`, dimmed): modeled on opencode's bottom dock (which carries `esc interrupt · ctrl+t variants · tab agents · ctrl+p commands`). The compact form is a deliberate constraint — three hints fit in the 93-col budget, more would not. Rendered in `$text-faint` so the eye is pulled to the live stats first.
+- **Separator change** (`|` → `·`): the `|` was visually heavy next to the new section; `·` is a typographic middle dot that reads as a separator without dominating.
+- **Turns/tools merged** (`0t·0tl` instead of `0t · 0 tools`): the verbose label was redundant; the suffix `-tl` distinguishes tools from turns.
+
+**Why this honors the long-loop aesthetic:**
+- **§5 "1-line StatusBar cap" (hard constraint):** Width is still 1 line. Compact-mode labels (`0t`, `0 tools`, `deepseek-v4-flash` without a `model:` prefix) keep the rendered length at **87 chars** in the empty state, under the §7 93-col narrow-terminal budget. Below 93, the bar right-clips per §7 (loses the ctx token count first, then the percentage) — same graceful degradation as before.
+- **§2 rule 2 (quiet by default):** Elapsed ticks once per minute, not per second. The number is informational, not live state — the eye does not track it.
+
+### §9.4 Header rail hairline divider
+
+Each `HeaderSectionButton` carries `border-left: solid $border` to draw a hairline between sections. The first button gets the `first` CSS class to suppress its left edge; the `.section-hidden` variant suppresses its border too (so a hidden section doesn't leave a stray `│`).
+
+**Why this honors the long-loop aesthetic:**
+- **§4.3.1 (collapsed line, height: 1):** Hairline is a border attribute, not a layout change. Height stays 1.
+- **§2 rule 1 (bounded re-layout):** No extra widgets added; the divider is a border on the existing buttons.
+
+### §9.5 The decoration envelope
+
+Together, the four additions are deliberately **palette-locked and motion-locked**:
+
+| Decoration | Color tokens used | Motion | Layout |
+|---|---|---|---|
+| WelcomeBanner | `$accent` motif, `$text` wordmark, `$text-muted` slogan, `$text-faint` hints | none | Static; lives in ChatLog's empty state only |
+| TurnSeparator | `$border` | none | height: 1, content-column padding |
+| StatusBar enrichment | `$text-muted` (branch glyph) | 1-min tick | height: 1 unchanged |
+| Header hairline | `$border` | none | border-left attribute, no widget added |
+
+If a future change wants a new decoration, it must pick from this envelope (palette tokens from §8, no animation, no new indent tier, no widget that lives in a locked region without a contract update).
 
 - `docs/tui-design.html` (1443 lines, 64KB) — 7-state visual reference with §-annotations.
 - `progress.md` § "docs/tui-design-language.md created (2026-06-19)" — original §0–§7 structure + scope decisions.
@@ -517,3 +675,9 @@ The earlier "Default: No" rationale assumed the overlay dimmed the ChatLog (`opa
   - §5 "Index + topic memory pattern" anti-pattern: clarified the Header overlay is now per-section (each is its own bounded topic)
 - **HTML mockup status**: `docs/tui-design.html` still shows the original 2026-06-19 single-overlay design (states 6/7). It is **out of sync** with the new spec; a follow-up may update the mockup to show per-section toggles (states 6/7 → per-section states per mockup). The HTML is a visual reference, not a contract; the prose spec is authoritative.
 - **2026-06-20** — **§7 open decisions closed** (dialogue with user). Narrow-terminal minimums measured (StatusBar is the only break point; usable ≥ 93 cols after dropping the scroll hint in `f-tui-statusbar-drop-scroll-hint`). Zen mode rejected (no distraction-free use case). Two-pane rejected in favor of inline ChatLog event markers (`f-tui-inline-event-markers`, planned). Click-outside-to-collapse corrected from stale "Default: No" to "Closed: Yes" (was already implemented in `0fc00b0`). All §7 items now have a Status; none remain open.
+- **2026-06-21** — **§8 color system added; `loom-ink` theme implemented.** Closed the gap where the documented `docs/tui-design.html` palette was never realized (the app used Textual's stock theme). Changes: registered `_LOOM_INK_THEME` in `loom/tui/app.py` (HTML palette ported 1:1, active in `on_mount`); replaced all hard-coded Rich color tags with theme tokens in `header.py` / `status_bar.py` / `screens.py`; replaced literal `solid yellow/green/red` borders with `$warning`/`$success`/`$error` in `widgets.py`; PermissionScreen border `thick red` → `thick $error`. §0 scope updated (color now in scope). Verified: `./init.sh` green (453 pytest, 0 ruff, 0 mypy), eval 234/234, 9 TUI snapshot baselines re-recorded (diff confirmed color-only per Working Rule 10 — text/geometry identical after hash normalization). No layout / sizing / scroll / motion / behavior changes.
+- **2026-06-21** — **§9 decorative elements added** (WelcomeBanner, TurnSeparator, StatusBar enrichment, Header hairline divider). Four-region visual enrichment within the locked loom-ink palette and §2 motion rules. New components: `WelcomeBanner` (idle splash rendering the loom mark in Unicode line glyphs, no animation, dismissed on first user message / re-shown after `/clear`) in `chat_log.py`; `TurnSeparator` (hairline `─` row in `$border`, mounted before each user turn, no new indent tier) in `chat_log.py`; `AssistantMessage` gained `border-left: outer $accent-dim` (vertical accent rule for assistant turns). StatusBar gained `git_branch` (cached once via `git rev-parse --abbrev-ref HEAD`, 2s timeout) and `elapsed_seconds` (1-min `set_interval`); separator `|` → `·`; compact labels (`0t`, `0 tools`, no `model:` prefix) keep rendered length at 87 chars (≤ 93-col §7 budget). Header buttons gained `border-left: solid $border` with `.first` and `.section-hidden` classes suppressing edges. Verified: `./init.sh` green (453 pytest, 0 ruff, 0 mypy), eval 234/234, 7 TUI snapshot baselines re-recorded (diff confirmed expected decoration-only changes — added welcome motif, added hairline borders, format change in status bar; no text/structural regression). 2 status_bar test assertions updated to the new compact format. No behavior changes.
+- **2026-06-21** — **§9.1 WelcomeBanner refined + §9.3 StatusBar gained key hints.** Dropped the Unicode weave motif from `WelcomeBanner` after the user noted the ASCII rendering read as crude in monospace (the box-drawing characters don't reproduce `docs/loom-mark.svg`'s 25-unit construction grid faithfully). New composition per `docs/loom-logo-shots` §L9.3: italic `loom` wordmark + single `◆` shuttle glyph (echoes the SVG without re-drawing the weave) + slogan + command hints. The reference design (opencode's TUI) carries brand identity through the title bar text + bottom dock key hints, not through an ASCII mark in the chat area; this aligns with that decision. `StatusBar` gained an `esc ^l /` key-hint cluster on the right side (modeled on opencode's bottom dock `esc interrupt · ctrl+t variants · tab agents · ctrl+p commands`), rendered in `$text-faint` so the live stats read first. To fit the §7 93-col budget: turns/tools merged into `0t·0tl` (drop redundant `0 tools` label), elapsed moved to the right (after key hints). New rendered length: **90 chars** (was 87 before adding hints). Changes: `loom/tui/chat_log.py` (`WelcomeBanner` body replaced; `_WEAVE_MOTIF` constant removed); `loom/tui/status_bar.py` (key_hints added; elapsed repositioned; turns/tools merged). Verified: `./init.sh` green (453 pytest, 0 ruff, 0 mypy), eval 234/234, 7 TUI snapshot baselines re-recorded (diff confirmed expected changes — welcome region lost 3 lines of ASCII motif, gained 1 line of `◆`; status bar gained key hints; no text/structural regression). No behavior changes.
+- **2026-06-21** — **§9.1 WelcomeBanner: 3D block-letter `loom` wordmark** (opencode cell-based style). After the user noted the single `◆` glyph + plain italic text still didn't feel like "artistic processing" of the brand, replaced with a full 3D block-letter `loom` wordmark modeled on opencode's actual logo source (`packages/tui/src/util/presentation.ts:1-4`, `packages/tui/src/logo.ts:6-9`). The character grid (`█▀▀█` / `█__█` / `▀▀▀▀`) is opencode's cell vocabulary; the `__` interior renders as thin sage lines in monospace, producing the outlined letterform that opencode's cell renderer achieves via bg fill. Letter widths: `l`=2, `o`=4, `o`=4, `m`=6, with 1-col separators (total 19 cols × 3 rows). Single source of change: `loom/tui/chat_log.py` (`WelcomeBanner` body uses `_LOOM_WORDMARK` class attribute). Verified: `./init.sh` green (453 pytest, 0 ruff, 0 mypy), eval 234/234, 7 TUI snapshot baselines re-recorded (diff confirmed expected change — `◆` + italic `loom` text replaced by 3-row block-letter wordmark; slogan + commands unchanged; no text/structural regression). No behavior changes.
+- **2026-06-21** — **§9.1 WelcomeBanner: full 3D two-tone extrusion** (matches opencode reference image). The user shared a screenshot of opencode's actual rendered logo, which has a defining two-tone 3D extrusion: top half lighter (the "upper face" of an extruded block), bottom half darker (the "lower face" / shadow). The previous #3 attempt had the right character grid (`█▀▀█` / `█__█` / `▀▀▀▀`) but only one color — read as flat. New design: 5 rows tall, with `▀` cells in `$accent` (row 0, upper face) and `▄` cells in `$accent-dim` (row 4, shadow). `█` cells stay in `$accent` across all rows so the side edges don't look dirty. Implemented via per-char markup in `_style_bottom()` since row 4 needs mixed colors. Letter widths grew: `l`=2, `o`=5 (was 4), `m`=7, with 1-col separators (total 24 cols × 5 rows). Single source of change: `loom/tui/chat_log.py` (`WelcomeBanner` body uses `_LOOM_WORDMARK_TOP` + `_LOOM_WORDMARK_BOTTOM` + `_style_bottom`). Verified: `./init.sh` green (453 pytest, 0 ruff, 0 mypy), eval 234/234, 7 TUI snapshot baselines re-recorded (diff confirmed expected change — 3-row wordmark replaced by 5-row with split-color row 4; slogan + commands unchanged; no text/structural regression). No behavior changes.
+- **2026-06-21** — **§9.1 WelcomeBanner: three-tone 3D extrusion + stencil cutouts.** The user shared a screenshot of the two-tone version and asked for further visual refinement, granting permission to use visual judgment. Issues with the #4 attempt: (1) 3D extrusion too subtle because `$accent` and `$accent-dim` are both sage — needed a brighter top; (2) `l` was 2 cells wide with weird "lips" extending right, making it read as a 'C' shape rather than a vertical bar; (3) `o` was empty inside, missing opencode's filled-square stencil cutout; (4) `m` humps were barely visible. Fix: added new theme variable `$accent-light` (#84ad9a, ~30% lighter than `$accent`) to `_LOOM_INK_THEME` in `loom/tui/app.py` for the 3D "lit top face"; restructured the wordmark with chunkier letters (`l`=3 cells, solid bar with `▀` top and `▄` bottom faces — no more "lips"); added 1-cell `▀` stencil cutouts in each `o` (row 2, in `$accent-light`) to mimic opencode's filled-square hole. Three-tone gradient is `$accent-light` → `$accent` → `$accent-dim` (top → body → bottom). Wordmark grew to 25 cols × 5 rows. Per-row colorize helpers (`_colorize_top`, `_colorize_body`, `_colorize_bottom`) split markup by char since each row needs mixed colors. Verified: `./init.sh` green (453 pytest, 0 ruff, 0 mypy), eval 234/234, 7 TUI snapshot baselines re-recorded (diff confirmed expected change — wider wordmark with stencil cutouts, per-char colored rows; slogan + commands unchanged; no text/structural regression). No behavior changes.
