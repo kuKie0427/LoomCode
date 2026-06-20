@@ -660,7 +660,7 @@
   <header class="doc-header">
     <h1>loom TUI — Layout Design Language</h1>
     <p class="subtitle">A static design reference for the spatial structure, hierarchy, and motion intent of loom's terminal user interface. Each mockup visualizes a rule from the source document.</p>
-    <p class="meta">source: docs/tui-design-language.md &nbsp;·&nbsp; 7 states &nbsp;·&nbsp; self-contained reference artifact</p>
+    <p class="meta">source: docs/tui-design-language.md &nbsp;·&nbsp; 8 states &nbsp;·&nbsp; self-contained reference artifact</p>
   </header>
 
   <!-- ═══════════════════════════════════════════════════════════════
@@ -689,11 +689,15 @@
     </div>
     <div class="index-item">
       <span class="num">06</span>
-      <span class="label">Header Collapsed</span>
+      <span class="label">Header — 3 Buttons</span>
     </div>
     <div class="index-item">
       <span class="num">07</span>
-      <span class="label">Header Expanded</span>
+      <span class="label">Header — MCP Expanded</span>
+    </div>
+    <div class="index-item">
+      <span class="num">08</span>
+      <span class="label">Header — Switched to Todos</span>
     </div>
   </nav>
 
@@ -1170,9 +1174,9 @@ test_context.py::test_microcompact_todo_unchanged SKIPPED
   <section class="section" id="state-6">
     <div class="section-head">
       <span class="section-num">06</span>
-      <h2 class="section-title">Header — Collapsed</h2>
+      <h2 class="section-title">Header — 3 Buttons (Collapsed)</h2>
     </div>
-    <p class="section-desc">The default 1-line summary rail docked at the top. Aggregates MCPs, todos, and subagents in a single glanceable row. The whole line is the click target to expand.</p>
+    <p class="section-desc">The default 1-line summary rail docked at the top. Each section (MCP / Todos / Subagent) is its own independently clickable button. Clicking a button toggles only that section's overlay (mutual exclusion — see State 7 & 8). The MCP button is shown with hover styling (text accent + bold) to demonstrate click affordance.</p>
 
     <div class="mockup-row wide">
       <div>
@@ -1185,9 +1189,20 @@ test_context.py::test_microcompact_todo_unchanged SKIPPED
           </div>
           <div class="terminal-body" style="height: 420px; position: relative;">
 
-            <!-- Header (1 line, collapsed) -->
-            <div style="position: absolute; top: 0; left: 0; right: 0; height: 1.55em; line-height: 1.55em; padding: 0 12px; background: var(--bg-panel); border-bottom: 1px solid var(--border); font-size: 0.75rem; color: var(--text-dim); z-index: 3; cursor: pointer;">
-              ▼ <span style="color: var(--green);">●</span> MCP:3/3 &nbsp;&nbsp; <span style="color: var(--yellow);">◐</span> 2/5 todos &nbsp;&nbsp; <span style="color: var(--yellow);">◐</span> 1 subagent
+            <!-- Header (1 line, 3 independently clickable buttons) -->
+            <div style="position: absolute; top: 0; left: 0; right: 0; height: 1.55em; line-height: 1.55em; padding: 0; background: var(--bg-panel); border-bottom: 1px solid var(--border); font-size: 0.75rem; color: var(--text-dim); z-index: 3; display: flex;">
+              <!-- MCP button (independently clickable, shown in hover state) -->
+              <div style="flex: 1; padding: 0 12px; cursor: pointer; border-right: 1px solid var(--border); color: var(--text); font-weight: 500;">
+                <span style="color: var(--yellow);">◌</span> MCP:3/3
+              </div>
+              <!-- Todo button (independently clickable) -->
+              <div style="flex: 1; padding: 0 12px; cursor: pointer; border-right: 1px solid var(--border);">
+                <span style="color: var(--yellow);">◐</span> 5/5 todos
+              </div>
+              <!-- Subagent button (independently clickable) -->
+              <div style="flex: 1; padding: 0 12px; cursor: pointer;">
+                <span style="color: var(--yellow);">◐</span> 1 subagent
+              </div>
             </div>
 
             <div class="tui-chat" style="position: absolute; top: 1.55em; left: 0; right: 0; bottom: 66px; overflow: hidden;">
@@ -1268,22 +1283,32 @@ test_context.py::test_microcompact_todo_unchanged SKIPPED
         </div>
         <div class="annotation">
           <span class="cite">§5 — Memory pattern applied to layout</span>
-          <p>Collapsed line is the bounded always-on index; expanded panel is the on-demand topic. The index never grows; the topic loads only when the user asks.</p>
-          <span class="rule-tag">index + topic</span>
+          <p>Collapsed Header is the bounded always-on index (3 sub-buttons sharing 1 line). Each per-section overlay is its own bounded on-demand topic. The index never grows; the topic loads only when the user asks.</p>
+          <span class="rule-tag">index + per-section topic</span>
+        </div>
+        <div class="annotation">
+          <span class="cite">§4.3 — Per-section buttons (3 click targets)</span>
+          <p>Each of the 3 buttons is an independent click target. The collapsed line is NOT a single click target — clicking the MCP button only expands MCP (see State 7). Buttons have hover styling (text accent + font-weight: 500) to signal clickability.</p>
+          <span class="rule-tag">3 buttons · independent</span>
+        </div>
+        <div class="annotation">
+          <span class="cite">§4.3 — No ▼ prefix glyph</span>
+          <p>The original 2026-06-19 spec used a ▼ glyph as a "click to expand" affordance. In the 2026-06-20 redesign, each button IS its own affordance — the glyph + label + count is the click target itself, no extra glyph needed.</p>
+          <span class="rule-tag">no extra glyph</span>
         </div>
       </div>
     </div>
   </section>
 
   <!-- ═══════════════════════════════════════════════════════════════
-       STATE 7 — HEADER EXPANDED
+       STATE 7 — HEADER EXPANDED (MCP overlay)
        ═══════════════════════════════════════════════════════════════ -->
   <section class="section" id="state-7">
     <div class="section-head">
       <span class="section-num">07</span>
-      <h2 class="section-title">Header — Expanded (on click)</h2>
+      <h2 class="section-title">Header — MCP Expanded</h2>
     </div>
-    <p class="section-desc">After clicking the 1-line Header, an overlay panel expands below it, showing MCP status, todo list, and subagent details. The ChatLog is visually obscured but its geometry is unchanged.</p>
+    <p class="section-desc">After clicking the MCP button in the collapsed Header, only the MCP section's overlay panel expands. The Todo and Subagent buttons stay in collapsed state — mutual exclusion (only ONE overlay visible at a time). The MCP button shows an "active" state (accent border-bottom + background highlight) to signal which section is open.</p>
 
     <div class="mockup-row wide">
       <div>
@@ -1292,40 +1317,35 @@ test_context.py::test_microcompact_todo_unchanged SKIPPED
             <span class="terminal-dot"></span>
             <span class="terminal-dot"></span>
             <span class="terminal-dot"></span>
-            <span class="title">loom — deepseek-v4 — header expanded</span>
+            <span class="title">loom — deepseek-v4 — header mcp</span>
           </div>
           <div class="terminal-body" style="height: 480px; position: relative;">
 
-            <!-- Header (1 line, expanded) -->
-            <div style="position: absolute; top: 0; left: 0; right: 0; height: 1.55em; line-height: 1.55em; padding: 0 12px; background: var(--bg-panel); border-bottom: 1px solid var(--border); font-size: 0.75rem; color: var(--text-dim); z-index: 12; cursor: pointer;">
-              ▼ <span style="color: var(--green);">●</span> MCP:3/3 &nbsp;&nbsp; <span style="color: var(--yellow);">◐</span> 2/5 todos &nbsp;&nbsp; <span style="color: var(--yellow);">◐</span> 1 subagent
+            <!-- Header (1 line, MCP button in active state) -->
+            <div style="position: absolute; top: 0; left: 0; right: 0; height: 1.55em; line-height: 1.55em; padding: 0; background: var(--bg-panel); border-bottom: 1px solid var(--border); font-size: 0.75rem; color: var(--text-dim); z-index: 12; display: flex;">
+              <!-- MCP button (ACTIVE — its overlay is visible) -->
+              <div style="flex: 1; padding: 0 12px; cursor: pointer; border-right: 1px solid var(--border); background: var(--bg-mock-alt); border-bottom: 2px solid var(--accent); color: var(--text); font-weight: 500;">
+                <span style="color: var(--yellow);">◌</span> MCP:3/3
+              </div>
+              <!-- Todo button (collapsed) -->
+              <div style="flex: 1; padding: 0 12px; cursor: pointer; border-right: 1px solid var(--border);">
+                <span style="color: var(--yellow);">◐</span> 5/5 todos
+              </div>
+              <!-- Subagent button (collapsed) -->
+              <div style="flex: 1; padding: 0 12px; cursor: pointer;">
+                <span style="color: var(--yellow);">◐</span> 1 subagent
+              </div>
             </div>
 
-            <!-- Expanded overlay panel -->
+            <!-- MCP overlay panel (only MCP section, per mutual exclusion) -->
             <div style="position: absolute; top: 1.55em; left: 0; right: 0; background: rgba(15, 18, 22, 0.97); border-bottom: 1px solid var(--border); padding: 8px 12px; z-index: 11; font-size: 0.75rem; line-height: 1.7; max-height: 360px; overflow-y: auto;">
 
-              <!-- MCP section -->
-              <div style="color: var(--text-dim); margin-bottom: 6px;">▼ <span style="color: var(--green);">●</span> MCP:3/3</div>
+              <!-- MCP section header -->
+              <div style="color: var(--text-dim); margin-bottom: 6px;"><span style="color: var(--yellow);">◌</span> MCP:3/3</div>
               <div style="padding-left: 1.6em; margin-bottom: 10px;">
                 <div style="display: flex; gap: 12px;"><span style="color: var(--green);">●</span> <span style="color: var(--cyan); min-width: 3em;">db</span> <span style="color: var(--text-dim); margin-left: auto;">connected</span></div>
                 <div style="display: flex; gap: 12px;"><span style="color: var(--green);">●</span> <span style="color: var(--cyan); min-width: 3em;">fs</span> <span style="color: var(--text-dim); margin-left: auto;">connected</span></div>
                 <div style="display: flex; gap: 12px;"><span style="color: var(--yellow);">◌</span> <span style="color: var(--cyan); min-width: 3em;">gh</span> <span style="color: var(--red); margin-left: auto;">error: token expired</span></div>
-              </div>
-
-              <!-- Todos section -->
-              <div style="color: var(--text-dim); margin-bottom: 6px;">▼ <span style="color: var(--yellow);">◐</span> 2/5 todos</div>
-              <div style="padding-left: 1.6em; margin-bottom: 10px;">
-                <div style="color: var(--text-dim);"><span style="color: var(--green);">✓</span> 1. Read context.py <span style="float: right; color: var(--text-muted);">done</span></div>
-                <div style="color: var(--accent); font-weight: 500;"><span style="color: var(--yellow);">◐</span> 2. Fix microcompact preservation <span style="float: right; color: var(--accent);">active</span></div>
-                <div style="color: var(--text-muted);"><span style="color: var(--text-muted);">○</span> 3. Add regression test</div>
-                <div style="color: var(--text-muted);"><span style="color: var(--text-muted);">○</span> 4. Update progress.md</div>
-                <div style="color: var(--text-muted);"><span style="color: var(--text-muted);">○</span> 5. Commit</div>
-              </div>
-
-              <!-- Subagent section -->
-              <div style="color: var(--text-dim); margin-bottom: 6px;">▼ <span style="color: var(--yellow);">◐</span> 1 subagent</div>
-              <div style="padding-left: 1.6em;">
-                <div style="display: flex; gap: 12px;"><span style="color: var(--yellow);">◐</span> <span style="color: var(--cyan);">extract-001</span> <span style="color: var(--text-dim);">· running</span> <span style="color: var(--text-muted); margin-left: auto;">· 4s</span></div>
               </div>
             </div>
 
@@ -1360,34 +1380,149 @@ test_context.py::test_microcompact_todo_unchanged SKIPPED
 
       <div class="annotations">
         <div class="annotation">
+          <span class="cite">§4.3 — Per-section overlay (MCP only)</span>
+          <p>Clicking the MCP button expands ONLY the MCP overlay. Todo and Subagent buttons stay in collapsed state — mutual exclusion invariant. Each overlay shows exactly one section's detail rows.</p>
+          <span class="rule-tag">mutual exclusion</span>
+        </div>
+        <div class="annotation">
+          <span class="cite">§4.3 — Active button indicator</span>
+          <p>The MCP button shows an "active" state: bg highlight + 2px accent border-bottom + bold text. This signals which section's overlay is currently open. Clicking the same button again collapses (see State 6 for the collapse-to-collapsed behavior).</p>
+          <span class="rule-tag">2px accent border</span>
+        </div>
+        <div class="annotation">
           <span class="cite">§4.3 — Expanded state: overlay, not resize</span>
-          <p>ChatLog geometry is unchanged. The expanded panel overlays the top of the ChatLog — visually obscured only, not reflowed. Scroll position is preserved when collapsed.</p>
+          <p>ChatLog geometry is unchanged. The expanded panel overlays the top of the ChatLog — visually obscured only, not reflowed. Scroll position is preserved when collapsed/switched.</p>
           <span class="rule-tag">overlay · not resize</span>
         </div>
         <div class="annotation">
+          <span class="cite">§4.3 — Per-section overlay IDs</span>
+          <p>The overlay is mounted with id <code>header-overlay-mcp</code> (and similarly <code>header-overlay-todo</code>, <code>header-overlay-subagent</code>) to avoid DuplicateIds when switching (the old overlay may still be in the DOM pending async removal).</p>
+          <span class="rule-tag">per-section ID</span>
+        </div>
+        <div class="annotation">
           <span class="cite">§4.3 — Three indent levels maximum</span>
-          <p>Outer column: section header (▼ icon). 2-col right: rows (MCP names, todo items, subagent IDs). No fourth tier. This matches the ChatLog's two-level indentation convention.</p>
+          <p>Outer column: section header (glyph + label:N/M). 2-col right: detail rows (`&lt;glyph&gt; &lt;name&gt;`). No fourth tier. This matches the ChatLog's two-level indentation convention.</p>
           <span class="rule-tag">3 levels max</span>
         </div>
         <div class="annotation">
-          <span class="cite">§4.3 — Subagent rows are summary only</span>
-          <p>ID + state + elapsed. Full output lives in the ChatLog. Clicking a subagent ID dismisses the overlay and scrolls to its existing marker.</p>
-          <span class="rule-tag">summary only</span>
+          <span class="cite">§6 — Instant replace</span>
+          <p>No animation, no slide. Click = instant toggle (mount/remove). ESC collapses. The overlay never appears without explicit user action — no auto-expand on errors.</p>
+          <span class="rule-tag">instant toggle</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       STATE 8 — HEADER SWITCHED TO TODOS (mutual exclusion demo)
+       ═══════════════════════════════════════════════════════════════ -->
+  <section class="section" id="state-8">
+    <div class="section-head">
+      <span class="section-num">08</span>
+      <h2 class="section-title">Header — Switched to Todos</h2>
+    </div>
+    <p class="section-desc">After clicking the Todo button while the MCP overlay is open, the MCP overlay is removed and the Todo overlay is mounted (mutual exclusion). The Todo button is now in the active state; the MCP and Subagent buttons are back to collapsed. This demonstrates the "switch" case of the 3-way toggle state machine: click different → switch.</p>
+
+    <div class="mockup-row wide">
+      <div>
+        <div class="terminal">
+          <div class="terminal-titlebar">
+            <span class="terminal-dot"></span>
+            <span class="terminal-dot"></span>
+            <span class="terminal-dot"></span>
+            <span class="title">loom — deepseek-v4 — header todos</span>
+          </div>
+          <div class="terminal-body" style="height: 480px; position: relative;">
+
+            <!-- Header (1 line, Todo button in active state) -->
+            <div style="position: absolute; top: 0; left: 0; right: 0; height: 1.55em; line-height: 1.55em; padding: 0; background: var(--bg-panel); border-bottom: 1px solid var(--border); font-size: 0.75rem; color: var(--text-dim); z-index: 12; display: flex;">
+              <!-- MCP button (collapsed — was active in State 7) -->
+              <div style="flex: 1; padding: 0 12px; cursor: pointer; border-right: 1px solid var(--border);">
+                <span style="color: var(--yellow);">◌</span> MCP:3/3
+              </div>
+              <!-- Todo button (ACTIVE — its overlay is now visible) -->
+              <div style="flex: 1; padding: 0 12px; cursor: pointer; border-right: 1px solid var(--border); background: var(--bg-mock-alt); border-bottom: 2px solid var(--accent); color: var(--text); font-weight: 500;">
+                <span style="color: var(--yellow);">◐</span> 5/5 todos
+              </div>
+              <!-- Subagent button (collapsed) -->
+              <div style="flex: 1; padding: 0 12px; cursor: pointer;">
+                <span style="color: var(--yellow);">◐</span> 1 subagent
+              </div>
+            </div>
+
+            <!-- Todo overlay panel (only Todo section, per mutual exclusion) -->
+            <div style="position: absolute; top: 1.55em; left: 0; right: 0; background: rgba(15, 18, 22, 0.97); border-bottom: 1px solid var(--border); padding: 8px 12px; z-index: 11; font-size: 0.75rem; line-height: 1.7; max-height: 360px; overflow-y: auto;">
+
+              <!-- Todo section header -->
+              <div style="color: var(--text-dim); margin-bottom: 6px;"><span style="color: var(--yellow);">◐</span> 5/5 todos</div>
+              <div style="padding-left: 1.6em; margin-bottom: 10px;">
+                <div style="color: var(--text-dim);"><span style="color: var(--green);">✓</span> 1. Read context.py <span style="float: right; color: var(--text-muted);">done</span></div>
+                <div style="color: var(--accent); font-weight: 500;"><span style="color: var(--yellow);">◐</span> 2. Fix microcompact preservation <span style="float: right; color: var(--accent);">active</span></div>
+                <div style="color: var(--text-muted);"><span style="color: var(--text-muted);">○</span> 3. Add regression test</div>
+                <div style="color: var(--text-muted);"><span style="color: var(--text-muted);">○</span> 4. Update progress.md</div>
+                <div style="color: var(--text-muted);"><span style="color: var(--text-muted);">○</span> 5. Commit</div>
+              </div>
+            </div>
+
+            <!-- ChatLog (dimmed behind overlay) -->
+            <div class="tui-chat" style="position: absolute; top: 1.55em; left: 0; right: 0; bottom: 66px; overflow: hidden; opacity: 0.20; pointer-events: none;">
+
+              <div class="m-turn-label user">▎ you</div>
+              <div class="m-msg user-msg">I need to refactor the context compression in <span class="m-code">context.py</span>. The current <span class="m-code">microcompact</span> drops tool results from old rounds but doesn't preserve the <span class="m-code">todo_write</span> state.</div>
+
+              <div class="m-turn-label assistant">▎ assistant</div>
+              <div class="m-thinking-marker complete">◦ thought · 4s</div>
+              <div class="m-msg assistant-msg">I'll fix the <span class="m-code">microcompact</span> preservation logic. The issue is in <span class="m-code">context.py:45</span>.</div>
+              <div class="m-tool-marker done">⊙ bash · done</div>
+              <div class="m-tool-output">test_context.py::test_microcompact_preserves_todo_write PASSED</div>
+              <div class="m-system-note">· autocompact skipped — 12.4k / 200k tokens (6%)</div>
+
+            </div>
+
+            <!-- #chrome -->
+            <div class="tui-chrome">
+              <div class="tui-status">
+                loop | model: deepseek-v4 | turns: 2 | tools: 1 | ctx: ██░░░░░░░░ 12.4k/200k (6%)
+              </div>
+              <div class="tui-composer" style="min-height: 40px; display: flex; align-items: flex-start; padding: 5px 12px;">
+                <span class="cursor"></span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <div class="annotations">
+        <div class="annotation">
+          <span class="cite">§4.3 — Switch case (3-way toggle)</span>
+          <p>Clicking the Todo button while MCP overlay was open triggers the "switch" case: existing MCP overlay removed, Todo overlay mounted. The Todo button is now active; MCP returned to collapsed state.</p>
+          <span class="rule-tag">switch (no overlap)</span>
         </div>
         <div class="annotation">
-          <span class="cite">§2 rule 5 — Indentation encodes nesting</span>
-          <p>Overlay follows the same convention as inline elements. Section headers at outer column, detail rows indented 2 cols right. Visual hierarchy by position, not color alone.</p>
-          <span class="rule-tag">same indent rule</span>
+          <span class="cite">§4.3 — Mutual exclusion invariant</span>
+          <p>At most ONE HeaderOverlay is mounted at any time. This prevents UI crowding in long sessions and matches §2 rule 2 (quiet by default — only one region of motion at a time).</p>
+          <span class="rule-tag">at most 1 overlay</span>
         </div>
         <div class="annotation">
-          <span class="cite">§5 — Memory pattern: on-demand topic detail</span>
-          <p>Expanded panel is the topic; the index stays bounded. The collapsed line never grows; the topic detail is loaded only when the user clicks to expand.</p>
-          <span class="rule-tag">on-demand topic</span>
+          <span class="cite">§4.3 — ChatLog scroll position preserved</span>
+          <p>When switching sections, the ChatLog geometry and scroll position are preserved. The overlay swaps content but doesn't reflow the chat behind.</p>
+          <span class="rule-tag">scroll preserved</span>
         </div>
         <div class="annotation">
           <span class="cite">§6 — Instant replace</span>
-          <p>No animation, no slide. Click = instant toggle. ESC collapses. The overlay never appears without explicit user action — no auto-expand on errors.</p>
-          <span class="rule-tag">instant toggle</span>
+          <p>No animation, no slide, no crossfade. Switching from MCP → Todo overlay is one frame: old removed, new mounted. Per spec §6, all transitions are instant.</p>
+          <span class="rule-tag">instant swap</span>
+        </div>
+        <div class="annotation">
+          <span class="cite">§5 — No auto-load</span>
+          <p>The switch is only triggered by an explicit user click. No auto-expand on errors. No auto-switch when state changes (e.g., a todo being marked active does NOT auto-open the Todo overlay).</p>
+          <span class="rule-tag">no auto-load</span>
+        </div>
+        <div class="annotation">
+          <span class="cite">§4.3 — 3 collapse mechanisms</span>
+          <p>Beyond clicking the same button (toggle off), the overlay also collapses on: (a) ESC key — <code>("escape", "collapse_header")</code> BINDING; (b) click outside the overlay — chat log / status bar / composer (App.on_click handler).</p>
+          <span class="rule-tag">ESC + click-outside</span>
         </div>
       </div>
     </div>
