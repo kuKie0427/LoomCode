@@ -5,9 +5,12 @@ Callbacks use post_message to safely cross from the worker thread
 into the main Textual event loop.
 """
 
+from __future__ import annotations
+
 import asyncio
 import os
 import subprocess
+import threading
 from typing import Literal
 
 from loguru import logger
@@ -140,6 +143,7 @@ class AgentTUIApp(App):
         self.history: list = []
         self._cancelled = False
         self._main_loop = None
+        self._init_sh_thread: threading.Thread | None = None
 
         # Wire up harness.toml config (mirrors run_repl L193)
         from loom.agent.config import load_config
@@ -609,34 +613,52 @@ class AgentTUIApp(App):
         asyncio.create_task(chat_log.clear_content())
 
     async def action_quit(self) -> None:
-        """Override default quit to fire SessionEnd + run init.sh first."""
-        from loom.agent.loop import _active_config, hooks
+        """Override default quit: fire-and-forget init.sh, exit immediately."""
+        from loom.agent.loop import _active_config, hooks, schedule_init_sh_on_session_end
 
         hooks.trigger_hooks("SessionEnd", self.history, self.tool_call_count)
 
         if _active_config.run_init_sh_on_session_end:
-            init_sh = WORKDIR / "init.sh"
-            if init_sh.is_file():
-                try:
-                    proc = subprocess.run(
-                        [str(init_sh)],
-                        cwd=WORKDIR,
-                        capture_output=True,
-                        text=True,
-                        timeout=120,
-                    )
-                    if proc.returncode != 0:
-                        logger.warning(
-                            "init.sh exited {} on SessionEnd: {}\n{}",
-                            proc.returncode,
-                            proc.stdout[:200],
-                            proc.stderr[:200],
-                        )
-                except subprocess.TimeoutExpired:
-                    logger.warning("init.sh timed out on SessionEnd")
-            else:
-                logger.debug("init.sh not found, skip")
+            def on_done(result, err):
+                self.call_from_thread(self._on_init_sh_complete, result, err)
+            self._init_sh_thread = schedule_init_sh_on_session_end(
+                WORKDIR, _active_config,
+                on_complete=on_done,
+                timeout=120.0,
+            )
 
         hooks._asker = hooks._default_asker
-
         self.exit()
+
+    def _on_init_sh_complete(
+        self,
+        result: subprocess.CompletedProcess | None,
+        err: str,
+    ) -> None:
+        """Banner displayed when the fire-and-forget init.sh thread finishes.
+
+        Called via call_from_thread from the helper's worker thread so it's
+        safe to touch the ChatLog here (we're on the main loop).
+        """
+        if err == "file not found" or err == "stopped":
+            return  # silent
+        try:
+            chat_log = self.query_one(ChatLog)
+        except Exception:
+            return
+        if err == "timed out":
+            chat_log.append_system_note("[init.sh: TIMEOUT > 120s]")
+        elif result is not None and result.returncode == 0:
+            chat_log.append_system_note("[init.sh: pass (exit 0)]")
+        else:
+            rc = getattr(result, "returncode", -1) if result else -1
+            tail = ""
+            if result is not None:
+                stderr_tail = (result.stderr or "")[-200:]
+                if stderr_tail:
+                    tail = f" {stderr_tail}"
+                else:
+                    stdout_tail = (result.stdout or "")[-200:]
+                    if stdout_tail:
+                        tail = f" {stdout_tail}"
+            chat_log.append_system_note(f"[init.sh: FAIL exit={rc}]{tail}")

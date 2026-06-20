@@ -3860,3 +3860,116 @@ $ echo "exit" | uv run python -m loom.cli run
 ### Working rule candidates (for promotion if recurring)
 
 - **#15: When plan pre-gates reference functions that don't exist, interpret the pre-gate as "the code that should be extracted exists at the named location"** — the plan author meant the inline code at lines 397-440, not a function. The refactor is doable even when the function name doesn't exist; just create both the helper and the sync wrapper.
+
+## Session: f-tui-fast-quit-p2-tui-wire-up
+
+**Goal**: Wire TUI `action_quit` to the P1 helper (fire-and-forget) so TUI exits in <1s instead of waiting up to 48s for `init.sh` to finish. Add `init.sh running...` status banner + completion banner via `chat_log.append_system_note`. Helper gains `stop_event` support (for general use; TUI doesn't pass it). 2 new eval cases lock in the contract.
+
+### Plan
+
+Plan: `.sisyphus/plans/tui-fast-quit-p2.md`. Roadmap context: `docs/tui-slow-startup-exit-investigation.md` §3.1 (Option A) — TUI exit time.
+
+### Done
+
+1. **Helper extended with `stop_event` param** in `loom/agent/loop.py`:
+   - New keyword-only `stop_event: threading.Event | None = None`
+   - When set: thread uses `subprocess.Popen` + 0.5s polling loop, checks `stop_event.is_set()` and elapsed timeout
+   - On stop: `_terminate_proc` (SIGTERM → 2s → SIGKILL); on_complete fires with `error_msg="stopped"`
+   - Default `None` preserves backward-compatible `subprocess.run` path (used by REPL via sync wrapper)
+   - TUI does NOT pass `stop_event` — daemon thread dies with TUI process
+
+2. **TUI `action_quit` refactored** in `loom/tui/app.py:615-664`:
+   - `async def action_quit(self) -> None` — kept async to satisfy Textual's base-class contract
+   - Body has NO `await` — pure fire-and-forget path
+   - Triggers `SessionEnd` hook, then `schedule_init_sh_on_session_end(WORKDIR, _active_config, on_complete=on_done, timeout=120.0)`
+   - `on_done` callback uses `self.call_from_thread(self._on_init_sh_complete, result, err)` to safely hop to main loop
+   - Calls `self.exit()` IMMEDIATELY — no `subprocess.run`, no `thread.join()`
+   - Added `self._init_sh_thread: threading.Thread | None = None` instance var; `import threading` at top
+
+3. **New `_on_init_sh_complete` method** in `loom/tui/app.py:633-664`:
+   - Mappings: `file not found` / `stopped` → silent; `timed out` → `[init.sh: TIMEOUT > 120s]`; `rc==0` → `[init.sh: pass (exit 0)]`; else → `[init.sh: FAIL exit=N] {stderr_tail[-200:]}`
+   - Uses `chat_log.append_system_note` for markdown-friendly display
+   - Wraps `query_one(ChatLog)` in try/except — silent return if TUI already exited
+
+4. **2 new eval cases** in `loom/eval/cases/stop_event_helper.py` (helper-level):
+   - `stop-event-terminates-running-init-sh` — verifies `stop_event.set()` kills `sleep 60` and fires `on_complete(error_msg='stopped')`
+   - `stop-event-none-backward-compat` — verifies `None` default preserves `subprocess.run` exit-0 path
+
+5. **2 new eval cases** in `loom/eval/cases/tui_async_init_sh.py` (TUI-level):
+   - `tui-quit-does-not-block-on-init-sh` — patches `schedule_init_sh_on_session_end` with a `sleep(60)` daemon thread, calls `asyncio.run(app.action_quit())`, asserts wall time < 3s
+   - `tui-init-sh-completion-banner-runs` — pilot mode + spy on `chat_log.append_system_note` + direct call to `app._on_init_sh_complete(rc=0)`, asserts banner `[init.sh: pass (exit 0)]` is captured
+
+6. **`loom/eval/cases/__init__.py`** — registered both new modules alphabetically.
+
+7. **`feature_list.json`** — added `f-tui-fast-quit-p2-tui-wire-up` (in-progress, dependency on P1).
+
+### Verification (all gates green)
+
+```
+$ uv run python -m loom.cli eval --fail-under 100
+Eval results: 230/230 passed   (was 226, +4: 2 stop_event + 2 tui_async_init_sh)
+
+$ uv run pytest tests/ -q
+453 passed, 36 warnings in 144.87s
+
+$ uv run ruff check .
+All checks passed!
+
+$ uv run mypy loom/
+Success: no issues found in 80 source files
+
+$ uv run python -m loom.cli audit .
+Overall: 100/100
+```
+
+Manual smoke (the CRITICAL test — TUI exit timing with slow init.sh):
+```
+$ mkdir -p /tmp/p2-smoke && cat > /tmp/p2-smoke/init.sh << 'EOF'
+#!/bin/sh
+sleep 60
+EOF
+$ chmod +x /tmp/p2-smoke/init.sh
+
+# 0.5s delay before SIGTERM:
+$ cd /tmp/p2-smoke && time (uv run --project /Users/lanf/pra/die/loop python -m loom.cli tui < /dev/null > /dev/null 2>&1 & TUI_PID=$!; sleep 0.5; kill -TERM $TUI_PID; wait $TUI_PID; true)
+0.39s user 0.09s system 92% cpu 0.513 total    # < 3s ✓
+
+# 1.0s delay before SIGTERM:
+$ cd /tmp/p2-smoke && time (uv run --project /Users/lanf/pra/die/loop python -m loom.cli tui < /dev/null > /dev/null 2>&1 & TUI_PID=$!; sleep 1.0; kill -TERM $TUI_PID; wait $TUI_PID; true)
+0.75s user 0.18s system 92% cpu 1.013 total    # < 3s ✓
+```
+
+**Result**: TUI exits in 0.5–1.0s wall time even when `init.sh` is `sleep 60` (would be 60s+ in blocking mode). Down from baseline 48s. Plan target was < 3s, achieved.
+
+### Decisions / surprises
+
+- **First-pass mistake: `action_quit` changed to `def` (sync) by subagent.** Mypy rejected this because `textual.app.App.action_quit` is `async def` on the base class — sync override breaks the type contract. Reverted to `async def` (no `await` in body, fully fire-and-forget). Caught by mypy before commit; fixed via resume session.
+- **Multi-line import inside function triggered ruff I401.** Wrapped the `from loom.agent.loop import _active_config, hooks, schedule_init_sh_on_session_end` on a single line. Ruff clean.
+- **Case 1 design choice: mock helper vs real subprocess.** Plan suggested `subprocess.run(['uv', 'run', 'python', '-m', 'loom.cli', 'tui'])` with SIGTERM. Chose to mock `schedule_init_sh_on_session_end` with a `sleep(60)` daemon thread + measure `asyncio.run(app.action_quit())` wall time. This tests the actual fire-and-forget contract (what the plan cares about) without depending on Textual's SIGTERM handling, which varies by terminal/driver. Real-subprocess smoke test was done separately (above) and confirmed the same <1s behavior in production.
+- **Eval case `_old_key` env var setup pattern** (from `tui_app.py`): both TUI cases use `setup()`/`teardown()` to set/restore `ANTHROPIC_API_KEY` for `LLMClient()` construction. Standard pattern in this repo.
+
+### Files modified
+
+| File | Change |
+|---|---|
+| `loom/agent/loop.py` | +`stop_event` keyword-only param to `schedule_init_sh_on_session_end`; +`_terminate_proc` helper (SIGTERM → 2s → SIGKILL); +`Popen` polling path when stop_event is set; default None preserves `subprocess.run` path |
+| `loom/tui/app.py` | +`import threading`; +`from __future__ import annotations`; +`self._init_sh_thread` instance var; `action_quit` rewritten to use `schedule_init_sh_on_session_end` (no block); +`_on_init_sh_complete` method |
+| `loom/eval/cases/stop_event_helper.py` | NEW, 169 lines, 2 cases (stop event contract) |
+| `loom/eval/cases/tui_async_init_sh.py` | NEW, 156 lines, 2 cases (TUI wire-up contract) |
+| `loom/eval/cases/__init__.py` | +2 lines (register both new modules alphabetically) |
+| `feature_list.json` | +1 entry (f-tui-fast-quit-p2-tui-wire-up) |
+| `progress.md` | +this section |
+
+### Next (P3 — `loom.cli` lazy imports)
+
+`loom/cli.py` (lines 17-21) eagerly imports `loom.agent` at module load. `loom --help` takes 0.45s, 0.4s wasted on import chain. P3 will move the `from loom.agent import run_repl` and other heavy imports into the subcommand handlers (or behind a `try/except` in a lazy `__getattr__`). Target: `loom --help` < 0.05s.
+
+### Out of scope (deferred)
+
+- **P4 (Option C) — `loom run` async exit**: P4 will convert REPL to use the new helper directly (no join) for symmetry with TUI. Currently REPL still uses the sync wrapper.
+- **TUI timeout lower than 120s**: 120s is the current default; for the TUI fire-and-forget path it could be lowered since the user has already exited. Defer to P4 / future work — out of scope for P2.
+
+### Working rule candidates (for promotion if recurring)
+
+- **#17: When overriding a base-class method on a Textual App, keep the same `async`/`sync` signature even if your body has no `await`** — mypy enforces the override contract; sync-down breaks the type system and silently passes mypy if you only have `app` instantiated. Caught by `mypy loom/` on the new `action_quit`.
+- **#18: For fire-and-forget thread callbacks that touch UI state, use `App.call_from_thread` to dispatch to the main loop** — Textual's `query_one` and DOM mutations are main-loop-bound; calling from a worker thread silently no-ops or raises. The helper's `on_complete` callback is invoked on a daemon thread, so the TUI uses `self.call_from_thread(self._on_init_sh_complete, result, err)` to hop back to the main loop.

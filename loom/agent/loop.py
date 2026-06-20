@@ -361,6 +361,7 @@ def schedule_init_sh_on_session_end(
     *,
     on_complete: Callable[[subprocess.CompletedProcess | None, str], None] | None = None,
     on_failure_log: Callable[[int, str, str], None] | None = None,
+    stop_event: threading.Event | None = None,
     timeout: float = 120.0,
 ) -> threading.Thread:
     """Fire-and-forget run of init.sh on session end.
@@ -373,9 +374,17 @@ def schedule_init_sh_on_session_end(
     exit. P1 only provides the helper + sync wrapper; behavior change to
     REPL/TUI is deferred.
 
+    stop_event: optional threading.Event. When provided, the runner uses
+      subprocess.Popen and polls the event every 0.5s. If the event is set,
+      the subprocess is terminated (SIGTERM → timeout 2s → SIGKILL) and
+      on_complete fires with error_msg="stopped". Default None preserves
+      backward-compatible subprocess.run behavior.
+
     on_complete(result, error_msg): called when the thread finishes.
-      result = CompletedProcess on success, None on file-not-found or timeout.
-      error_msg = "" on success, "file not found" / "timed out" / "exception: ..." otherwise.
+      result = CompletedProcess on success, None on file-not-found, timeout,
+        or stop.
+      error_msg = "" on success, "file not found" / "timed out" /
+        "stopped" / "exception: ..." otherwise.
 
     on_failure_log(returncode, stdout_tail, stderr_tail): called ONLY on
       failure (returncode != 0) with the last 200 chars of each stream.
@@ -391,12 +400,40 @@ def schedule_init_sh_on_session_end(
             if not init_sh.is_file():
                 error_msg = "file not found"
                 return
-            try:
-                result = subprocess.run(
-                    [str(init_sh)], cwd=workdir, capture_output=True,
-                    text=True, timeout=timeout,
+
+            if stop_event is not None:
+                proc = subprocess.Popen(
+                    [str(init_sh)], cwd=workdir,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True,
                 )
-                if result.returncode != 0 and on_failure_log is not None:
+                t_start = time.monotonic()
+                try:
+                    while True:
+                        if stop_event.is_set():
+                            _terminate_proc(proc)
+                            error_msg = "stopped"
+                            break
+
+                        if time.monotonic() - t_start >= timeout:
+                            _terminate_proc(proc)
+                            error_msg = "timed out"
+                            break
+
+                        ret = proc.poll()
+                        if ret is not None:
+                            stdout, stderr = proc.communicate()
+                            result = subprocess.CompletedProcess(
+                                proc.args, ret, stdout or "", stderr or "",
+                            )
+                            break
+
+                        stop_event.wait(0.5)
+                except Exception as exc:
+                    _terminate_proc(proc)
+                    error_msg = f"exception: {exc}"
+
+                if result is not None and result.returncode != 0 and on_failure_log is not None:
                     try:
                         on_failure_log(
                             result.returncode,
@@ -405,8 +442,23 @@ def schedule_init_sh_on_session_end(
                         )
                     except Exception as exc:
                         logger.warning("on_failure_log callback raised; ignoring: {}", exc)
-            except subprocess.TimeoutExpired:
-                error_msg = "timed out"
+            else:
+                try:
+                    result = subprocess.run(
+                        [str(init_sh)], cwd=workdir, capture_output=True,
+                        text=True, timeout=timeout,
+                    )
+                    if result.returncode != 0 and on_failure_log is not None:
+                        try:
+                            on_failure_log(
+                                result.returncode,
+                                (result.stdout or "")[-200:],
+                                (result.stderr or "")[-200:],
+                            )
+                        except Exception as exc:
+                            logger.warning("on_failure_log callback raised; ignoring: {}", exc)
+                except subprocess.TimeoutExpired:
+                    error_msg = "timed out"
         except Exception as exc:
             error_msg = f"exception: {exc}"
         finally:
@@ -419,6 +471,21 @@ def schedule_init_sh_on_session_end(
     thread = threading.Thread(target=_runner, daemon=True)
     thread.start()
     return thread
+
+
+def _terminate_proc(proc: subprocess.Popen) -> None:
+    try:
+        proc.terminate()
+    except ProcessLookupError:
+        return  # Already exited
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        proc.wait()
 
 
 def run_init_sh_on_session_end(

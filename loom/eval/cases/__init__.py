@@ -26,9 +26,11 @@ from loom.eval.cases import (
     resume_benchmark,  # noqa: F401
     scope_wip1,  # noqa: F401
     session_hooks,  # noqa: F401
+    stop_event_helper,  # noqa: F401
     telemetry_sink,  # noqa: F401
     tui_app,  # noqa: F401
     tui_assistant_message_start,  # noqa: F401
+    tui_async_init_sh,  # noqa: F401
     tui_collapsible,  # noqa: F401
     tui_header,  # noqa: F401
     tui_inline_markers,  # noqa: F401
