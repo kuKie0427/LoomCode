@@ -160,7 +160,7 @@ def subagent_glyph(items: list[Subagent]) -> tuple[str | None, int]:
 
     Spec §4.3.1: Subagent count = 0 hides the **entire** section
     (no ``0 subagent`` placeholder). When count > 0, the glyph is ``◐``
-    (yellow) — has-running or any non-empty state.
+    ($warning) — has-running or any non-empty state.
     """
     count = len(items)
     if count == 0:
@@ -177,36 +177,36 @@ def subagent_glyph(items: list[Subagent]) -> tuple[str | None, int]:
 
 def _mcp_glyph_rich(glyph: str) -> str:
     if glyph == _GLYPH_HEALTHY:
-        return f"[green]{glyph}[/]"
+        return f"[$success]{glyph}[/]"
     if glyph == _GLYPH_WARNING:
-        return f"[yellow]{glyph}[/]"
-    return f"[dim]{glyph}[/]"
+        return f"[$warning]{glyph}[/]"
+    return f"[$text-muted]{glyph}[/]"
 
 
 def _todo_glyph_rich(glyph: str, state: str | None = None) -> str:
     if state == "done":
-        return f"[green]{glyph}[/]"
+        return f"[$success]{glyph}[/]"
     if state == "active":
-        return f"[yellow]{glyph}[/]"
+        return f"[$warning]{glyph}[/]"
     if state == "pending":
-        return f"[text-muted]{glyph}[/]"
+        return f"[$text-muted]{glyph}[/]"
     if glyph == _GLYPH_DONE:
-        return f"[green]{glyph}[/]"
+        return f"[$success]{glyph}[/]"
     if glyph == _GLYPH_ACTIVE:
-        return f"[yellow]{glyph}[/]"
-    return f"[dim]{glyph}[/]"
+        return f"[$warning]{glyph}[/]"
+    return f"[$text-muted]{glyph}[/]"
 
 
 def _subagent_glyph_rich(glyph: str, state: str | None = None) -> str:
     if state == "error":
-        return f"[yellow]{glyph}[/]"
+        return f"[$warning]{glyph}[/]"
     if state == "done":
-        return f"[green]{glyph}[/]"
+        return f"[$success]{glyph}[/]"
     if state == "running":
-        return f"[yellow]{glyph}[/]"
+        return f"[$warning]{glyph}[/]"
     if glyph == _GLYPH_ACTIVE:
-        return f"[yellow]{glyph}[/]"
-    return f"[dim]{glyph}[/]"
+        return f"[$warning]{glyph}[/]"
+    return f"[$text-muted]{glyph}[/]"
 
 
 # ── Widgets ──────────────────────────────────────────────────────────────────
@@ -272,6 +272,10 @@ class HeaderSectionButton(Static):
         height: 1;
         background: transparent;
         padding: 0 1;
+        border-left: solid $border;
+    }
+    HeaderSectionButton.first {
+        border-left: none;
     }
     HeaderSectionButton:hover {
         text-style: bold;
@@ -282,6 +286,7 @@ class HeaderSectionButton(Static):
     }
     HeaderSectionButton.section-hidden {
         visibility: hidden;
+        border-left: none;
     }
     """
 
@@ -420,7 +425,7 @@ class Header(Horizontal):
         IDs use the ``header-btn-<section>`` naming so tests can query
         them individually via ``app.query_one(...)``.
         """
-        yield HeaderSectionButton(SECTION_MCP, id="header-btn-mcp")
+        yield HeaderSectionButton(SECTION_MCP, id="header-btn-mcp", classes="first")
         yield HeaderSectionButton(SECTION_TODO, id="header-btn-todo")
         yield HeaderSectionButton(SECTION_SUBAGENT, id="header-btn-subagent")
 
@@ -547,7 +552,7 @@ class HeaderOverlay(Widget):
                 }[server.state]
                 row = (
                     f"{_mcp_glyph_rich(row_glyph)} "
-                    f"[cyan]{server.name}[/]  [text-muted]{server.state}[/]"
+                    f"[$secondary]{server.name}[/]  [$text-muted]{server.state}[/]"
                 )
                 yield Static(row, classes="header-row row-detail")
 
@@ -589,9 +594,9 @@ class HeaderOverlay(Widget):
                 }[sub.state]
                 row = (
                     f"{_subagent_glyph_rich(row_glyph, sub.state)} "
-                    f"[cyan]{sub.id}[/]  "
-                    f"[text-muted]· {sub.state}[/]  "
-                    f"[text-muted]· {sub.elapsed}[/]"
+                    f"[$secondary]{sub.id}[/]  "
+                    f"[$text-muted]· {sub.state}[/]  "
+                    f"[$text-muted]· {sub.elapsed}[/]"
                 )
                 yield SubagentRow(sub.id, row, classes="header-row row-detail")
 
