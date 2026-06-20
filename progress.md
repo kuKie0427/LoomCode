@@ -3436,3 +3436,44 @@ Side benefit: the previous run_task code was 21 lines of timing + UUID + try/fin
 Git status confirmed: only in-scope files modified. `./init.sh` ran cleanly on first run after the refactor (428/428, no flaky failures this time — the wheel-event flake from the previous session did not appear). `uv run mypy loom/` clean (76 source files, no `# type: ignore` added).
 
 One minor adjustment: `test_subagent_row_click_posts_subagent_row_clicked_message` originally asserted `ev.stopped is False`, but Textual's `Click` event doesn't expose `.stopped` as an attribute — switched to capturing `ev.stop()` calls (matches the pattern used elsewhere in the file).
+
+## Chore: anchor .gitignore `agent/` pattern to repo root (d43d34a + d57df45)
+
+**Started:** 2026-06-20 (immediately after f-tui-subagent-click-jump, per user request)
+
+**Goal:** Fix the gitignore bug flagged during f-tui-subagent-click-jump post-delivery: the pattern `agent/` (introduced in f985553 to exclude the Sisyphus runtime directory at repo root) is too broad — without a leading slash it matches `loom/agent/` too, causing misleading "ignored" warnings that block `git add` on loom's core agent module.
+
+**Implementation:**
+
+```diff
+-# Sisyphus / opencode runtime artifacts (skills registry, lockfile)
++# Sisyphus / opencode runtime artifacts (skills registry, lockfile).
++# Leading slash anchors the pattern to repo root so it doesn't
++# accidentally match nested directories like loom/agent/.
+ .agents/
+-agent/
++/agent/
+ skills-lock.json
+```
+
+`pyproject.toml` `[tool.ruff].extend-exclude` does NOT need a fix — ruff's pattern matcher doesn't suffer the same bug (it already lints `loom/agent/` correctly without the `/` prefix).
+
+**Verification:**
+
+| Check | Before fix | After fix |
+|---|---|---|
+| `git check-ignore -v loom/agent/loop.py` | empty (not ignored) but `git add` warns | empty, no warning |
+| `git check-ignore -v agent/skills` | ignored (matches `agent/`) | ignored (matches `/agent/`) |
+| `git check-ignore -v loom/agent/skills` | ignored (matched `agent/`) | NOT ignored |
+| `echo "" >> loom/agent/loop.py && git add` | warning + refuses | stages cleanly |
+| `uv run ruff check .` | All checks passed | All checks passed |
+| `uv run mypy loom/` | Success (76 files) | Success (76 files) |
+| `uv run pytest` | 428 passed | 428 passed |
+| `uv run python -m loom.cli eval --fail-under 100` | 218/218 | 218/218 |
+
+**Files changed (2 commits):**
+
+- `d43d34a chore: anchor .gitignore 'agent/' pattern to repo root` (the actual fix)
+- `d57df45 fix: revert accidental trailing empty lines in loom/agent/loop.py` (cleanup — the chore commit inadvertently included 2 trailing blank lines from a manual gitignore test; reverted in a separate commit to keep history transparent per AGENTS.md "no amending without explicit request")
+
+**Not added to feature_list.json** — chores of this size don't warrant a feature entry (precedent: f985553 was folded into f-tui-header-summary-rail evidence rather than getting its own entry).
