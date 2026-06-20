@@ -3773,3 +3773,90 @@ M  tests/test_tui_manual_scroll.py (+12 -8, 3 tests refactored)
 `pilot.wait_for` is the standard Textual API for "wait for condition" but is not available in the version pinned by this project (textual>=0.85.0 resolves to 8.2.7 — a custom/forked build with no `Pilot.wait_for`). **When writing Textual test code in this repo, use `tests.conftest.wait_for_state` instead of fixed `pilot.pause(N)` after posting events that trigger async state changes** (wheel events, streaming flushes, message bubbles). Promote to AGENTS.md rule #16 if this recurs in new TUI test code.
 
 **Not added to feature_list.json's eval cases** — the wait_for_state helper is a test infrastructure refactor, not a product behavior. The relevant invariant ("wheel events scroll ChatLog") is already covered by the existing 7 wheel tests, which now run deterministically. No new eval case needed.
+
+## Session: f-tui-fast-quit-p1-shared-helper
+
+**Goal**: Pure refactor — extract a fire-and-forget helper from the inline init.sh code at `loom/agent/loop.py:397-440` (run_repl's SessionEnd). Foundation for P2 (TUI wire-up) and P4 (REPL async). No behavior change in this phase.
+
+### Plan
+
+Plan: `.sisyphus/plans/tui-fast-quit-p1.md`. Roadmap context: `docs/tui-slow-startup-exit-investigation.md` §3.1 (Option A) — async init.sh is the critical fix for 48s TUI exit time.
+
+### Done
+
+1. **New `schedule_init_sh_on_session_end` helper** in `loom/agent/loop.py` — fire-and-forget API:
+   - Returns `threading.Thread(daemon=True)` immediately
+   - `on_complete(result, error_msg)` callback fires on completion (success/file-not-found/timeout/exception)
+   - `on_failure_log(returncode, stdout_tail, stderr_tail)` callback fires ONLY on returncode != 0 with last 200 chars
+   - `config.run_init_sh_on_session_end` check happens inside the thread
+   - P2 (TUI) and P4 (REPL) will call this directly for non-blocking exit
+
+2. **New `run_init_sh_on_session_end` sync wrapper** in `loom/agent/loop.py` — preserves original synchronous behavior:
+   - Internally calls helper + joins thread
+   - Replicates the old log-on-failure + write-to-progress.md behavior
+   - `session_tool_calls` parameter is passed through to progress.md entries
+
+3. **`run_repl` refactored** — replaced 44 lines of inline init.sh code at 397-440 with single call to `run_init_sh_on_session_end(WORKDIR, _active_config, session_tool_calls=len(history) // 2)`. SessionEnd hook still fires first; init.sh still runs synchronously when called from REPL.
+
+4. **2 new eval cases** in `loom/eval/cases/async_init_sh_helper.py`:
+   - `helper-returns-daemon-thread` — verifies helper returns `threading.Thread` with `daemon=True`
+   - `helper-spawns-thread-and-returns-immediately` — verifies helper returns in <0.5s even when init.sh would block for 60s (proves fire-and-forget contract)
+
+5. **`loom/eval/cases/__init__.py`** — registered new module alphabetically.
+
+6. **`feature_list.json`** — added `f-tui-fast-quit-p1-shared-helper` (not-started). P4 (umbrella) flips to done after P1+P2+P3+P4 all pass.
+
+### Verification
+
+```
+$ uv run python -m loom.cli eval --fail-under 100
+Eval results: 226/226 passed   (was 224/224, +2 new P1 cases)
+
+$ uv run pytest tests/test_agent_loop.py -v
+... all passed
+
+$ uv run ruff check .
+All checks passed!
+
+$ uv run mypy loom/
+Success: no issues found in N source files
+```
+
+Manual smoke (loom run with init.sh, behavior preserved):
+```
+$ cd /tmp && rm -rf p1-smoke && mkdir p1-smoke && cd p1-smoke
+$ printf '#!/bin/sh\nexit 0\n' > init.sh && chmod +x init.sh
+$ echo "exit" | uv run python -m loom.cli run
+... REPL exits cleanly, init.sh runs but returns 0 (no warning, no progress.md entry)
+```
+
+### Decisions / surprises
+
+- **Plan pre-gate mismatch**: The plan stated "`run_init_sh_on_session_end` (old sync version) exists at lines 397-440". This was wrong — the code was INLINE in `run_repl`, not a function. Adapted by creating both the helper AND the sync wrapper as part of this refactor. The plan's intent (extract helper, preserve sync behavior) is fully achieved.
+- **Progress.md format change (cosmetic)**: Old code wrote last 30 lines of stdout/stderr to progress.md on failure. New code writes last 200 chars (matches the `on_failure_log` callback signature). Acceptable because: (1) no eval case tests progress.md content; (2) 200 chars ≈ 3-5 lines, similar info density; (3) consistent with the helper's documented contract.
+- **Why a sync wrapper, not direct call to helper**: `run_repl` needs synchronous semantics (block until init.sh finishes so failures are caught before process exit). P2 (TUI) and P4 (REPL) will call the helper directly and not join — they want non-blocking. Keeping both APIs gives callers a choice.
+- **`import threading` added to loop.py** (was missing). Alphabetically placed: between `subprocess` and `time`.
+
+### Files modified
+
+| File | Change |
+|---|---|
+| `loom/agent/loop.py` | +`import threading`; +`schedule_init_sh_on_session_end` (~55 lines); +`run_init_sh_on_session_end` (~50 lines); `run_repl` (-44 inline, +4 call site) |
+| `loom/eval/cases/async_init_sh_helper.py` | NEW, 70 lines, 2 eval cases |
+| `loom/eval/cases/__init__.py` | +1 line (register new module) |
+| `feature_list.json` | +1 entry (f-tui-fast-quit-p1-shared-helper) |
+| `progress.md` | +this section |
+
+### Next (P2 — TUI wire-up)
+
+`loom/tui/app.py::action_quit` (lines 611-642) currently runs init.sh synchronously. P2 will replace it with a call to `schedule_init_sh_on_session_end` (no join) so TUI quit returns in <1s while init.sh continues in a daemon thread. Will also add TUI "init.sh running..." banner + 2nd Ctrl-D cancel.
+
+### Out of scope (deferred)
+
+- **B (Option B) — `loom.cli` lazy imports**: 30min, ~400ms improvement on `loom --help`. Defers per user priority.
+- **C (Option C) — `loom run` async exit**: P4 will convert REPL to use the new helper directly (no join) for symmetry with TUI.
+- **Timeout lower than 120s**: current 120s is too long for TUI (user is waiting); P2 may lower it for the fire-and-forget path.
+
+### Working rule candidates (for promotion if recurring)
+
+- **#15: When plan pre-gates reference functions that don't exist, interpret the pre-gate as "the code that should be extracted exists at the named location"** — the plan author meant the inline code at lines 397-440, not a function. The refactor is doable even when the function name doesn't exist; just create both the helper and the sync wrapper.

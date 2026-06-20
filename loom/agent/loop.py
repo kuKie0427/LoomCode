@@ -1,6 +1,7 @@
 import concurrent.futures
 import os
 import subprocess
+import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -354,6 +355,126 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
         clear_active_callbacks()
 
 
+def schedule_init_sh_on_session_end(
+    workdir: Path,
+    config: HarnessConfig,
+    *,
+    on_complete: Callable[[subprocess.CompletedProcess | None, str], None] | None = None,
+    on_failure_log: Callable[[int, str, str], None] | None = None,
+    timeout: float = 120.0,
+) -> threading.Thread:
+    """Fire-and-forget run of init.sh on session end.
+
+    Schedules a daemon thread that runs ``init.sh`` (if present) with the
+    given timeout. Returns the Thread immediately. The thread is daemon,
+    so it dies when the Python process exits.
+
+    P2 (TUI) and P4 (REPL) wire-up use this helper directly for non-blocking
+    exit. P1 only provides the helper + sync wrapper; behavior change to
+    REPL/TUI is deferred.
+
+    on_complete(result, error_msg): called when the thread finishes.
+      result = CompletedProcess on success, None on file-not-found or timeout.
+      error_msg = "" on success, "file not found" / "timed out" / "exception: ..." otherwise.
+
+    on_failure_log(returncode, stdout_tail, stderr_tail): called ONLY on
+      failure (returncode != 0) with the last 200 chars of each stream.
+      None = no logging. Caller can write to progress.md etc.
+    """
+    def _runner() -> None:
+        result: subprocess.CompletedProcess | None = None
+        error_msg: str = ""
+        try:
+            if not config.run_init_sh_on_session_end:
+                return  # config says no
+            init_sh = workdir / "init.sh"
+            if not init_sh.is_file():
+                error_msg = "file not found"
+                return
+            try:
+                result = subprocess.run(
+                    [str(init_sh)], cwd=workdir, capture_output=True,
+                    text=True, timeout=timeout,
+                )
+                if result.returncode != 0 and on_failure_log is not None:
+                    try:
+                        on_failure_log(
+                            result.returncode,
+                            (result.stdout or "")[-200:],
+                            (result.stderr or "")[-200:],
+                        )
+                    except Exception as exc:
+                        logger.warning("on_failure_log callback raised; ignoring: {}", exc)
+            except subprocess.TimeoutExpired:
+                error_msg = "timed out"
+        except Exception as exc:
+            error_msg = f"exception: {exc}"
+        finally:
+            if on_complete is not None:
+                try:
+                    on_complete(result, error_msg)
+                except Exception as exc:
+                    logger.warning("on_complete callback raised; ignoring: {}", exc)
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    return thread
+
+
+def run_init_sh_on_session_end(
+    workdir: Path,
+    config: HarnessConfig,
+    *,
+    timeout: float = 120.0,
+    session_tool_calls: int = 0,
+) -> None:
+    """Synchronous run of init.sh on session end. Blocks until complete.
+
+    Legacy sync API. Internally delegates to ``schedule_init_sh_on_session_end``
+    and joins the thread, preserving the original synchronous behavior of
+    log-on-failure + write-to-progress.md.
+    """
+    def _on_failure_log(returncode: int, stdout_tail: str, stderr_tail: str) -> None:
+        logger.warning(
+            "init.sh exited {} on SessionEnd: {}\n{}",
+            returncode, stdout_tail, stderr_tail,
+        )
+        try:
+            from datetime import datetime
+            progress_path = workdir / "progress.md"
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+            with progress_path.open("a", encoding="utf-8") as f:
+                f.write(f"\n## SessionEnd auto-record ({ts})\n")
+                f.write(f"- status: FAILED (exit {returncode})\n")
+                f.write(f"- last stdout: {stdout_tail}\n")
+                f.write(f"- last stderr: {stderr_tail}\n")
+                f.write(f"- session tool calls: ~{session_tool_calls}\n")
+        except Exception as exc:
+            logger.warning("Failed to write progress.md: {}", exc)
+
+    def _on_complete(result: subprocess.CompletedProcess | None, error_msg: str) -> None:
+        if error_msg == "timed out":
+            logger.warning("init.sh timed out on SessionEnd")
+            try:
+                from datetime import datetime
+                progress_path = workdir / "progress.md"
+                ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+                with progress_path.open("a", encoding="utf-8") as f:
+                    f.write(f"\n## SessionEnd auto-record ({ts})\n")
+                    f.write("- status: TIMEOUT (init.sh >120s)\n")
+                    f.write(f"- session tool calls: ~{session_tool_calls}\n")
+            except Exception as exc:
+                logger.warning("Failed to write progress.md: {}", exc)
+
+    thread = schedule_init_sh_on_session_end(
+        workdir, config,
+        on_complete=_on_complete,
+        on_failure_log=_on_failure_log,
+        timeout=timeout,
+    )
+    thread.join()
+
+
 def run_repl(resume: bool = False) -> None:
     apply_config(load_config(WORKDIR))
 
@@ -395,47 +516,7 @@ def run_repl(resume: bool = False) -> None:
                         print(block.text)
             print()
     hooks.trigger_hooks("SessionEnd", history, 0)
-
-    if _active_config.run_init_sh_on_session_end:
-        init_sh = WORKDIR / "init.sh"
-        if init_sh.is_file():
-            try:
-                proc = subprocess.run(
-                    [str(init_sh)], cwd=WORKDIR, capture_output=True,
-                    text=True, timeout=120,
-                )
-                if proc.returncode != 0:
-                    logger.warning(
-                        "init.sh exited {} on SessionEnd: {}\n{}",
-                        proc.returncode, proc.stdout[:200], proc.stderr[:200],
-                    )
-                    try:
-                        from datetime import datetime
-                        combined = (proc.stdout or "") + (proc.stderr or "")
-                        tail_lines = combined.splitlines()[-30:]
-                        progress_path = WORKDIR / "progress.md"
-                        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-                        with progress_path.open("a", encoding="utf-8") as f:
-                            f.write(f"\n## SessionEnd auto-record ({ts})\n")
-                            f.write(f"- status: FAILED (exit {proc.returncode})\n")
-                            f.write("- last 30 lines:\n")
-                            for ln in tail_lines:
-                                f.write(f"  {ln}\n")
-                            f.write(f"- session tool calls: ~{len(history) // 2}\n")
-                    except Exception as exc:
-                        logger.warning("Failed to write progress.md: {}", exc)
-            except subprocess.TimeoutExpired:
-                logger.warning("init.sh timed out on SessionEnd")
-                try:
-                    from datetime import datetime
-                    progress_path = WORKDIR / "progress.md"
-                    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-                    with progress_path.open("a", encoding="utf-8") as f:
-                        f.write(f"\n## SessionEnd auto-record ({ts})\n")
-                        f.write("- status: TIMEOUT (init.sh >120s)\n")
-                        f.write(f"- session tool calls: ~{len(history) // 2}\n")
-                except Exception as exc:
-                    logger.warning("Failed to write progress.md: {}", exc)
-        else:
-            logger.debug("init.sh not found, skip")
+    run_init_sh_on_session_end(
+        WORKDIR, _active_config, session_tool_calls=len(history) // 2,
+    )
 

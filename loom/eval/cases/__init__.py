@@ -1,4 +1,5 @@
 from loom.eval.cases import (
+    async_init_sh_helper,  # noqa: F401
     async_streaming,  # noqa: F401
     audit,  # noqa: F401
     audit_self_test,  # noqa: F401
