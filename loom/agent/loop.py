@@ -438,5 +438,3 @@ def run_repl(resume: bool = False) -> None:
         else:
             logger.debug("init.sh not found, skip")
 
-
-
