@@ -611,8 +611,15 @@
       "status": "done",
       "verification": "./init.sh && uv run python -m loom.cli eval --fail-under 100",
       "evidence": "All 6 fixes verified: LOW-1 (Literal['done','error'] type hint), LOW-2 (… truncation indicator for descriptions >60 chars), LOW-3 (tui-app-wires-todo-update-emit-todo-note eval case), LOW-4 (asyncio.run replaces deprecated asyncio.get_event_loop), LOW-5 (old widget removed on add_subagent_marker same-id reuse), MEDIUM-2 (SubagentMarker.description public property replaces _description access). ./init.sh → 453 pytest passed (was 446, +7 new tests), 224/224 eval cases (was 223, +1 new case), ruff + mypy clean. Deviation: plan suggested asyncio.create_task(existing.remove()) but mypy rejected AwaitRemove (Textual's awaitable wrapper) — used _remove_async helper mirroring existing _mount_async pattern."
+    },
+    {
+      "id": "f-tui-test-flake-wait-for-state",
+      "name": "TUI test reliability: wait_for_state helper + App.on_event ScreenStackError defense",
+      "description": "Fix pre-existing test flake in wheel-scroll tests (test_status_bar.py × 4 + test_tui_manual_scroll.py × 3) where `assert chat_log.scroll_y < baseline` raced with a fixed `await pilot.pause(0.1)`. Replace the fixed pause with a poll-until-true helper. Also fix a related production robustness issue surfaced by the change: `AgentTUIApp.on_event` did not defend against `ScreenStackError` when `super().on_event(event)` called `self.screen._forward_event(event)` after the screen stack had been torn down (race during message-pump teardown). The flake manifested as `assert 115 < 115` under system load.",
+      "dependencies": ["f-tui-mouse-wheel-scroll"],
+      "status": "done",
+      "verification": "./init.sh && uv run python -m loom.cli eval --fail-under 100 (3 consecutive runs)",
+      "evidence": "uv run pytest -q → 453 passed (3 consecutive runs: 85-91s each, no flakes); uv run python -m loom.cli eval --fail-under 100 → 224/224 passed (3 consecutive runs, ~5min each, no flakes); uv run python -m loom.cli audit . → 100/100, all 6 dimensions 5/5; ./init.sh → 'Verification Complete (all green)'; uv run ruff check . → clean; uv run mypy loom/ → clean. Implementation: (1) tests/conftest.py — added `async def wait_for_state(pilot, predicate, *, timeout=2.0, interval=0.02, message='') -> None` that polls until the predicate is truthy or raises AssertionError with the final predicate value; (2) tests/test_status_bar.py — replaced 4 fixed `pilot.pause(0.1)` / `pilot.pause(0.2)` calls after wheel events with `wait_for_state(predicate=lambda: chat_log.scroll_y < baseline, timeout=2.0)`; (3) tests/test_tui_manual_scroll.py — same for 3 tests (up, down, bubble-from-markdown); (4) loom/tui/app.py — added defensive `try/except ScreenStackError: return` around `super().on_event(event)` and `from textual.app import ScreenStackError`. Note: the project pin textual>=0.85.0 resolved to 8.2.7 (a custom/forked build) which has no `Pilot.wait_for` API; `wait_for_state` is a self-contained substitute that mirrors the same predicate-based wait semantic. NOT a behavior change in any user-facing code path — the wheel test assertions are still 'chat_log scrolled by the wheel event' but now wait for the actual outcome instead of a guessed delay. The App.on_event defense is a one-line production change that swallows the screen-stale race during teardown; the event is dropped (no action) because there is no screen to act on it."
     }
-  ]
-}
   ]
 }

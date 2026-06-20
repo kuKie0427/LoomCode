@@ -1,11 +1,59 @@
 """Shared pytest fixtures for the loom project."""
 
+from __future__ import annotations
+
+import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from anthropic import Anthropic
 from anthropic.types import MessageParam, TextBlock, ToolResultBlockParam
+
+StatePredicate = Callable[[], bool]
+
+
+async def wait_for_state(
+    pilot: Any,
+    predicate: StatePredicate,
+    *,
+    timeout: float = 2.0,
+    interval: float = 0.02,
+    message: str = "",
+) -> None:
+    """Poll ``predicate()`` until it returns truthy, or raise on timeout.
+
+    Replaces fixed ``await pilot.pause(0.1)`` calls after posting events,
+    which race against Textual's async event dispatch (e.g. the 50ms flush
+    timer in ``ChatLog.append_streaming_text``) and produce flaky test
+    failures when the system is slow.
+
+    Args:
+        pilot: Active ``Pilot`` from ``app.run_test()`` — its ``pause`` is
+            called between polls so the event loop keeps running.
+        predicate: Zero-arg callable evaluated every ``interval`` seconds.
+        timeout: Maximum seconds to wait before giving up.
+        interval: Seconds between polls. Default 20ms — small enough that
+            legitimate state changes are observed within a few iterations.
+        message: Optional hint appended to the timeout assertion message.
+
+    Raises:
+        AssertionError: predicate never became truthy within ``timeout``.
+            The message includes the final predicate value for diagnosis.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        await pilot.pause(interval)
+    final = predicate()
+    suffix = f" — {message}" if message else ""
+    raise AssertionError(
+        f"wait_for_state timeout after {timeout}s{suffix}; "
+        f"predicate() = {final!r}"
+    )
 
 
 @pytest.fixture

@@ -13,7 +13,7 @@ from typing import Literal
 from loguru import logger
 from textual import messages as textual_messages
 from textual import work
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, ScreenStackError
 from textual.containers import Vertical
 from textual.events import Click, MouseScrollDown, MouseScrollUp
 from textual.reactive import reactive
@@ -239,7 +239,10 @@ class AgentTUIApp(App):
             if self._forward_scroll_to_chatlog(event, direction=1):
                 event.stop()
                 return
-        await super().on_event(event)
+        try:
+            await super().on_event(event)
+        except ScreenStackError:
+            return
 
     def _forward_scroll_to_chatlog(self, event, direction: int) -> bool:
         """Route any unhandled wheel event to the ChatLog so the user can

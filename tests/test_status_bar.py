@@ -18,6 +18,7 @@ from textual.events import MouseScrollDown, MouseScrollUp
 from loom.tui.app import AgentTUIApp
 from loom.tui.chat_log import ChatLog
 from loom.tui.status_bar import StatusBar, _format_tokens, _progress_bar
+from tests.conftest import wait_for_state
 
 
 def test_format_tokens_compact():
@@ -150,14 +151,18 @@ def test_app_level_wheel_event_scrolls_chatlog():
             baseline = chat_log.scroll_y
             ev = MouseScrollUp(app.screen, 0, 0, 0, -3, 0, False, False, False)
             app.post_message(ev)
-            await pilot.pause(0.1)
-            assert chat_log.scroll_y < baseline
+            await wait_for_state(
+                pilot, lambda: chat_log.scroll_y < baseline, timeout=2.0,
+                message="wheel up did not decrease chat_log.scroll_y",
+            )
 
             up_y = chat_log.scroll_y
             ev2 = MouseScrollDown(app.screen, 0, 0, 0, 3, 0, False, False, False)
             app.post_message(ev2)
-            await pilot.pause(0.1)
-            assert chat_log.scroll_y > up_y
+            await wait_for_state(
+                pilot, lambda: chat_log.scroll_y > up_y, timeout=2.0,
+                message="wheel down did not increase chat_log.scroll_y",
+            )
 
     asyncio.run(driver())
 
@@ -198,17 +203,20 @@ def test_wheel_event_posted_to_composer_scrolls_chatlog():
             assert baseline > 0
             ev = MouseScrollUp(composer, 0, 0, 0, -3, 0, False, False, False)
             composer.post_message(ev)
-            await pilot.pause(0.1)
-            assert chat_log.scroll_y < baseline, (
-                "Wheel event over Composer must scroll ChatLog, not Composer "
-                f"(scroll_y={chat_log.scroll_y} baseline={baseline})"
+            await wait_for_state(
+                pilot, lambda: chat_log.scroll_y < baseline, timeout=2.0,
+                message=(
+                    "Wheel event over Composer must scroll ChatLog, not Composer"
+                ),
             )
 
             up_y = chat_log.scroll_y
             ev2 = MouseScrollDown(composer, 0, 0, 0, 3, 0, False, False, False)
             composer.post_message(ev2)
-            await pilot.pause(0.1)
-            assert chat_log.scroll_y > up_y
+            await wait_for_state(
+                pilot, lambda: chat_log.scroll_y > up_y, timeout=2.0,
+                message="wheel down over Composer did not scroll ChatLog",
+            )
 
     asyncio.run(driver())
 
@@ -259,9 +267,9 @@ def test_app_on_event_intercepts_wheel_before_screen_forward():
 
             ev = MouseScrollUp(app.screen, 0, 0, 0, -3, 0, False, False, False)
             await app.on_event(ev)
-            await pilot.pause(0.2)
-            assert chat_log.scroll_y < baseline, (
-                f"App.on_event did not intercept wheel: scroll_y={chat_log.scroll_y} baseline={baseline}"
+            await wait_for_state(
+                pilot, lambda: chat_log.scroll_y < baseline, timeout=2.0,
+                message="App.on_event did not intercept wheel",
             )
 
     asyncio.run(driver())
@@ -339,10 +347,9 @@ def test_wheel_event_with_cursor_over_composer_uses_app_on_event():
                 screen_x=cx, screen_y=cy,
             )
             await app.on_event(ev)
-            await pilot.pause(0.2)
-            assert chat_log.scroll_y < baseline, (
-                "App.on_event must intercept wheel regardless of cursor "
-                f"position: scroll_y={chat_log.scroll_y} baseline={baseline}"
+            await wait_for_state(
+                pilot, lambda: chat_log.scroll_y < baseline, timeout=2.0,
+                message="App.on_event must intercept wheel regardless of cursor",
             )
 
     asyncio.run(driver())

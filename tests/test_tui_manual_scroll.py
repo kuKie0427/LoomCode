@@ -14,6 +14,7 @@ from textual.events import MouseScrollDown, MouseScrollUp
 
 from loom.tui.app import AgentTUIApp
 from loom.tui.chat_log import ChatLog, UserMessage
+from tests.conftest import wait_for_state
 
 
 async def _seed_overflow(app: AgentTUIApp) -> ChatLog:
@@ -40,8 +41,10 @@ def test_mouse_wheel_on_chatlog_scrolls_up():
             baseline = chat_log.scroll_y
             ev = MouseScrollUp(chat_log, 40, 10, 0, -3, 0, False, False, False)
             chat_log.post_message(ev)
-            await pilot.pause(0.1)
-            assert chat_log.scroll_y < baseline
+            await wait_for_state(
+                pilot, lambda: chat_log.scroll_y < baseline, timeout=2.0,
+                message="mouse wheel up on chatlog did not decrease scroll_y",
+            )
     asyncio.run(driver())
 
 
@@ -55,8 +58,10 @@ def test_mouse_wheel_on_chatlog_scrolls_down():
             await pilot.pause(0.05)
             ev = MouseScrollDown(chat_log, 40, 10, 0, 3, 0, False, False, False)
             chat_log.post_message(ev)
-            await pilot.pause(0.1)
-            assert chat_log.scroll_y > 0
+            await wait_for_state(
+                pilot, lambda: chat_log.scroll_y > 0, timeout=2.0,
+                message="mouse wheel down on chatlog did not increase scroll_y",
+            )
     asyncio.run(driver())
 
 
@@ -70,10 +75,9 @@ def test_mouse_wheel_bubbles_from_child_markdown_to_chatlog():
             baseline = chat_log.scroll_y
             ev = MouseScrollUp(user_msg, 40, 10, 0, -3, 0, False, False, False)
             user_msg.post_message(ev)
-            await pilot.pause(0.1)
-            assert chat_log.scroll_y < baseline, (
-                f"Wheel event on UserMessage did not bubble to ChatLog. "
-                f"scroll_y={chat_log.scroll_y} baseline={baseline}"
+            await wait_for_state(
+                pilot, lambda: chat_log.scroll_y < baseline, timeout=2.0,
+                message="Wheel event on UserMessage did not bubble to ChatLog",
             )
     asyncio.run(driver())
 
