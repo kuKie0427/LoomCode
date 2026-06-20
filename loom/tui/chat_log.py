@@ -510,6 +510,8 @@ class ChatLog(VerticalScroll):
         self.scroll_end()
 
     def show_thinking_spinner(self) -> None:
+        if self._thinking_widget is not None and not self._thinking_widget._complete:
+            return
         if self._thinking_display is not None:
             self._thinking_display.display = False
         self._dismiss_thinking_widget()

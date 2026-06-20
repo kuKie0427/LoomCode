@@ -39,5 +39,6 @@ from loom.eval.cases import (
     tui_inline_markers,  # noqa: F401
     tui_permission,  # noqa: F401
     tui_thinking_callback,  # noqa: F401
+    tui_thought_no_double_marker,  # noqa: F401
     user_hooks,  # noqa: F401
 )

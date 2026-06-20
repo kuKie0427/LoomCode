@@ -4169,3 +4169,53 @@ trace_path.add_argument("--workdir", type=Path, default=Path("."), help="Project
 - `A loom/eval/cases/trace_path.py` (77 lines: module docstring + 1 case)
 - `M feature_list.json` (+1 entry: f-chore-fix-loom-trace-path-bug)
 - `M progress.md` (this section)
+
+---
+
+## Chore: fix TUI extra "◦ thought · 0s" marker on every turn (2026-06-21)
+
+**User report (2026-06-21)**: Every conversation turn in the TUI shows TWO "◦ thought" markers — the first at "0s" (extra, incorrect) and the second at the real elapsed time. Expected: one marker per turn.
+
+**Root cause** (loom/tui/chat_log.py:512-522): per `f-tui-thinking-per-llm-call`, the TUI wires BOTH `on_message_start` and `on_assistant_message_start` callbacks to `AssistantTurnStart`, so `on_assistant_turn_start` runs twice within the same turn (one per callback). Each call to `show_thinking_spinner()` then:
+
+1. Dismisses the just-mounted thinking widget → renders "◦ thought · 0s" (since ~0ms elapsed)
+2. Mounts a fresh thinking widget (spinner)
+3. ... LLM call happens, streams deltas ...
+4. Turn ends → `_finalize_streaming` → dismiss widget 2 → "◦ thought · Xs"
+
+Net: TWO "◦ thought" lines per turn, the first always at 0s.
+
+**Why this wasn't caught earlier**: the `AgentTUIAppWiresAssistantMessageStart` eval case (loom/eval/cases/tui_assistant_message_start.py) verifies the **wiring** (both callbacks post AssistantTurnStart) but not the **rendering effect** (whether dismiss+remount happens).
+
+**Fix** (loom/tui/chat_log.py:512-514, +2 lines):
+```python
+def show_thinking_spinner(self) -> None:
+    if self._thinking_widget is not None and not self._thinking_widget._complete:
+        return
+    if self._thinking_display is not None:
+        self._thinking_display.display = False
+    ...
+```
+
+Idempotency check at the top: if a thinking widget is already mounted for the current turn (not yet dismissed), skip dismiss+remount. The existing widget's timer continues running; the final "◦ thought · Xs" line comes from `_finalize_streaming` at turn end.
+
+**Why this doesn't break `AgentTUIAppWiresAssistantMessageStart`**: the eval case checks that the TUI's `run_agent_turn` source contains BOTH callback names + `AssistantTurnStart`. The fix doesn't change the wiring — it only changes the behavior of the handler. The handler still runs twice per turn, but now the second call is a no-op (the thinking widget is already mounted from the first call).
+
+**Cross-turn safety**: `_finalize_streaming` at turn end calls `_dismiss_thinking_widget` which sets `self._thinking_widget = None`. So between turns, the check `self._thinking_widget is not None` is False → no early-return → normal flow. New turn's first AssistantTurnStart correctly mounts a fresh widget.
+
+**Regression guard** (loom/eval/cases/tui_thought_no_double_marker.py — new, 1 case):
+- `tui-thinking-spinner-no-double-mount-within-turn`: posts 2 AssistantTurnStart messages in the same turn, spies on `_mount_thinking_widget`, asserts call count == 1. Locks the contract.
+
+**Verification:**
+- New eval case in-process: `passed=True, detail='2 AssistantTurnStart posts → 1 _mount_thinking_widget call'`
+- All 4 existing `tui_assistant_message_start` eval cases: still pass (wiring unchanged)
+- Full eval: 233/234 (1 pre-existing flake: `cli-help` 553ms under system load, unrelated)
+- ruff: clean
+- mypy: clean (84 source files, +1 from P4's 83)
+
+**Files changed:**
+- `M loom/tui/chat_log.py` (+2 lines: idempotency check)
+- `A loom/eval/cases/tui_thought_no_double_marker.py` (94 lines: 1 case + module docstring)
+- `M loom/eval/cases/__init__.py` (+1 line: register module)
+- `M feature_list.json` (+1 entry: f-chore-fix-tui-thought-double-marker)
+- `M progress.md` (this section)
