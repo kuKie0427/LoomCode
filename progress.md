@@ -4065,3 +4065,68 @@ $ uv run python -m loom.cli trace show --limit 3
 
 - **#19: For CLI subcommand handlers, lazy-import heavy subcommand-specific dependencies inside the handler block** — `loom --help` doesn't need `run_repl`, `audit`, or `init`; eager top-level imports force the user to pay import cost for every flag including no-op ones (`--help`/`--version`). The 8.7x speedup of this one refactor is a strong ROI signal for similar CLI shapes.
 - **#20: When the plan says "do not lazy X" but X is the bottleneck for the gate metric, surface the conflict in the deviation section, don't silently violate the plan** — the alternative was a 600ms `--help` (failing the <200ms gate). The deviation here is documented in both the plan file (line 106-107) and this progress section, so the trade-off is auditable.
+
+---
+
+## Session: f-tui-fast-quit-p4-run-repl-symmetric (2026-06-21)
+
+### Done
+
+`f-tui-fast-quit-p4-run-repl-symmetric` flipped to `done`. Umbrella `f-tui-fast-quit` flipped to `done` — all 4 sub-phases complete.
+
+### What changed
+
+The REPL's `SessionEnd` path was refactored from a blocking join on `run_init_sh_on_session_end` to a fire-and-forget `schedule_init_sh_on_session_end` call, matching the TUI behavior from P2. A new `_log_init_sh_failure_to_progress_md` helper writes failure diagnostics to `progress.md` from the daemon thread (best-effort). The sync `run_init_sh_on_session_end` wrapper and `hooks.trigger_hooks("SessionEnd", ...)` path are preserved for eval mocks.
+
+Two existing eval cases were relaxed for the fire-and-forget contract: daemon threads are killed during `Py_Finalize()`, so subprocess side-effects (marker files, stderr warnings) are best-effort, not guaranteed. Tests now accept either completion or graceful skip.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `loom/agent/loop.py` | +23, -2 — added `_log_init_sh_failure_to_progress_md` helper; refactored `run_repl` SessionEnd from blocking `run_init_sh_on_session_end` to fire-and-forget `schedule_init_sh_on_session_end`; preserved `hooks.trigger_hooks` sync + `run_init_sh_on_session_end` wrapper |
+| `loom/eval/cases/run_repl_async_init_sh.py` | NEW, +82 — `LoomRunQuitDoesNotBlockOnInitSh` case |
+| `loom/eval/cases/__init__.py` | +1 — register new module |
+| `loom/eval/cases/init_sh_session_end.py` | +42, -16 — adjusted 2 pre-existing cases for fire-and-forget contract (best-effort marker, progress.md-based failure logging) |
+| `feature_list.json` | +21, -0 — new P4 entry + umbrella entry with evidence |
+
+### Verification
+
+All gates passed:
+
+```
+$ ./init.sh
+Verification Complete (all green)
+
+$ uv run python -m loom.cli eval --fail-under 100
+232/232 passed (was 231/231, +1 new case: loom-run-quit-does-not-block-on-init-sh at 462ms)
+
+$ uv run pytest -q
+453 passed, 36 warnings in 48.63s
+
+$ uv run python -m loom.cli audit .
+Overall: 100/100 (all 6 dimensions 5/5)
+
+$ uv run ruff check .
+All checks passed!
+
+$ uv run mypy loom/
+Success: no issues found in 82 source files
+```
+
+### Manual smoke
+
+```bash
+$ time (echo exit | uv run python -m loom.cli run)
+uv run python -m loom.cli run  0.16s user 0.02s system 37% cpu 0.486 total
+```
+
+0.486s real (vs baseline 48s) — ~100x speedup, target <1s ✅
+
+### Umbrella flip
+
+`f-tui-fast-quit` status `not-started → done`. Evidence references all 4 sub-phase commits: P1 ead93bd (`schedule_init_sh_on_session_end` helper), P2 169fc29 (TUI fire-and-forget), P3 bb6756e (CLI lazy imports), P4 (pending — `run_repl` symmetric fire-and-forget). Final manual smoke measured 0.486s `loom run` exit vs 48s baseline.
+
+### Working rule candidates (for promotion if recurring)
+
+- **#21 (rule 11 in AGENTS.md applies)**: When refactoring from sync to fire-and-forget execution model, every eval case that asserts side-effects (marker files, stderr warnings) of the synchronous execution MUST be relaxed to "best-effort" assertions — daemon threads are killed during `Py_Finalize()` and their subprocesses become orphans. Update the test name's description to reflect this.

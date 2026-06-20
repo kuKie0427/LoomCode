@@ -473,6 +473,26 @@ def schedule_init_sh_on_session_end(
     return thread
 
 
+def _log_init_sh_failure_to_progress_md(
+    returncode: int, stdout_tail: str, stderr_tail: str
+) -> None:
+    """Append a SessionEnd failure note to progress.md (best-effort).
+
+    Used by run_repl when schedule_init_sh_on_session_end's daemon thread
+    reports init.sh exited non-zero. Best-effort: swallows all exceptions.
+    """
+    try:
+        from datetime import datetime
+        progress_path = WORKDIR / "progress.md"
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+        with progress_path.open("a", encoding="utf-8") as f:
+            f.write(f"\n## SessionEnd auto-record ({ts})\n")
+            f.write(f"- status: FAILED (exit {returncode})\n")
+            f.write(f"- last 200 chars stderr: {stderr_tail[-200:]}\n")
+    except Exception as exc:
+        logger.warning("Failed to write progress.md: {}", exc)
+
+
 def _terminate_proc(proc: subprocess.Popen) -> None:
     try:
         proc.terminate()
@@ -583,7 +603,8 @@ def run_repl(resume: bool = False) -> None:
                         print(block.text)
             print()
     hooks.trigger_hooks("SessionEnd", history, 0)
-    run_init_sh_on_session_end(
-        WORKDIR, _active_config, session_tool_calls=len(history) // 2,
+    schedule_init_sh_on_session_end(
+        WORKDIR, _active_config,
+        on_failure_log=_log_init_sh_failure_to_progress_md,
     )
 
