@@ -1,6 +1,7 @@
 import concurrent.futures
 import os
 import subprocess
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -170,7 +171,12 @@ llm_client = LLMClient(model=os.getenv("MODEL", "deepseek-v4-flash"))
 
 
 def _run_tool_block(block, hooks) -> dict:
-    """Execute a single tool_use block and return the tool_result dict."""
+    """Execute a single tool_use block and return the tool_result dict.
+
+    For ``task`` tools, wraps the handler call with on_subagent_start /
+    on_subagent_end (using ``block.id`` as subagent_id) so the TUI can
+    map subagent overlay rows directly to ChatLog ToolCallMarkers.
+    """
     blocked = hooks.trigger_hooks("PreToolUse", block)
     if blocked is not None:
         tr = trace_mod.current()
@@ -179,7 +185,24 @@ def _run_tool_block(block, hooks) -> dict:
         return {"type": "tool_result", "tool_use_id": block.id,
                 "content": blocked, "is_error": True}
     handler = TOOL_HANDLERS.get(block.name)
-    output = handler(**block.input) if handler else f"Unknown: {block.name}"
+    if block.name == "task":
+        cb = _active_callbacks
+        description = str(block.input.get("description", ""))[:60]
+        if cb is not None and cb.get("on_subagent_start") is not None:
+            cb["on_subagent_start"](block.id, description)
+        t0 = time.monotonic()
+        state = "done"
+        try:
+            output = handler(**block.input) if handler else f"Unknown: {block.name}"
+        except Exception:
+            state = "error"
+            raise
+        finally:
+            elapsed = time.monotonic() - t0
+            if cb is not None and cb.get("on_subagent_end") is not None:
+                cb["on_subagent_end"](block.id, elapsed, state)
+    else:
+        output = handler(**block.input) if handler else f"Unknown: {block.name}"
     hooks.trigger_hooks("PostToolUse", block, output)
     return {"type": "tool_result", "tool_use_id": block.id,
             "content": output, "is_error": False}

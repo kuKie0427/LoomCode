@@ -32,6 +32,7 @@ import inspect
 from textual.events import Click
 
 from loom.tui.app import AgentTUIApp
+from loom.tui.chat_log import ChatLog
 from loom.tui.header import (
     DEFAULT_MOCK_STATE,
     SECTION_MCP,
@@ -44,6 +45,7 @@ from loom.tui.header import (
     HeaderState,
     MCPServer,
     Subagent,
+    SubagentRow,
     TodoItem,
     mcp_glyph,
     subagent_glyph,
@@ -785,3 +787,119 @@ def test_run_todo_write_no_callback_when_no_dispatcher():
     result = tools_mod.run_todo_write([{"content": "x", "status": "pending"}])
     assert "Updated 1 tasks" in result  # still updates CURRENT_TODOS
     # No assertion needed for callback — it's just silently not fired
+
+
+# ── f-tui-subagent-click-jump: SubagentRow widget + click handler ───────────
+
+
+def test_subagent_row_click_posts_subagent_row_clicked_message():
+    """SubagentRow.on_click posts the message and does not call event.stop()."""
+    row = SubagentRow("toolu_abc", "● subagent-id · running · 0s")
+    posted: list[object] = []
+    original_post = row.post_message
+
+    def capture(msg):
+        posted.append(msg)
+        return original_post(msg)
+
+    row.post_message = capture  # type: ignore[method-assign]
+    try:
+        ev = Click(row, 0, 0, 0, 0, 0, False, False, False)
+        stop_calls: list[bool] = []
+        original_stop = ev.stop
+
+        def capture_stop() -> None:
+            stop_calls.append(True)
+            return original_stop()
+
+        ev.stop = capture_stop  # type: ignore[method-assign]
+        try:
+            row.on_click(ev)
+        finally:
+            ev.stop = original_stop  # type: ignore[method-assign]
+
+        assert any(
+            isinstance(m, Header.SubagentRowClicked) and m.tool_use_id == "toolu_abc"
+            for m in posted
+        ), f"SubagentRow click must post Header.SubagentRowClicked(tool_use_id), got: {posted}"
+        assert stop_calls == [], (
+            "SubagentRow.on_click must NOT call event.stop() — HeaderOverlay.on_click stops it"
+        )
+    finally:
+        row.post_message = original_post  # type: ignore[method-assign]
+
+
+
+def test_subagent_row_exposes_tool_use_id():
+    """SubagentRow.tool_use_id property exposes the constructor identifier."""
+    row = SubagentRow("toolu_xyz789", "● id · done · 3s")
+    assert row.tool_use_id == "toolu_xyz789"
+
+
+def test_app_on_subagent_row_clicked_dismisses_overlay():
+    """App.on_subagent_row_clicked removes the HeaderOverlay (spec §4.3.2)."""
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.05)
+            header = pilot.app.query_one(Header)
+            overlay = HeaderOverlay(SECTION_SUBAGENT, header._state, id="header-overlay-subagent")
+            await pilot.app.screen.mount(overlay, before=pilot.app.query_one(ChatLog))
+            await pilot.pause(0.05)
+            assert pilot.app.screen.query(HeaderOverlay), "overlay should be mounted"
+
+            app.on_subagent_row_clicked(Header.SubagentRowClicked("nonexistent_id"))
+            await pilot.pause(0.05)
+
+            assert not list(pilot.app.screen.query(HeaderOverlay)), (
+                "overlay should be dismissed after SubagentRowClicked"
+            )
+
+    asyncio.run(driver())
+
+
+def test_app_on_subagent_row_clicked_handles_unknown_id_gracefully():
+    """on_subagent_row_clicked with unknown tool_use_id must not raise."""
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.05)
+            app.on_subagent_row_clicked(Header.SubagentRowClicked("unknown_tool_use_id"))
+            await pilot.pause(0.05)
+
+    asyncio.run(driver())
+
+
+def test_app_on_subagent_row_clicked_scrolls_chatlog_to_marker():
+    """on_subagent_row_clicked calls scroll_visible on the matching marker."""
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.05)
+            chat_log = pilot.app.query_one(ChatLog)
+
+            chat_log.add_tool_call_inline("task", {"description": "test"}, "toolu_xyz")
+            await pilot.pause(0.05)
+
+            marker = chat_log._tool_markers.get("toolu_xyz")
+            assert marker is not None, "marker must be mounted after add_tool_call_inline"
+
+            scroll_called: list[bool] = []
+            original_scroll_visible = marker.scroll_visible
+
+            def capture_scroll(*args, **kwargs):
+                scroll_called.append(True)
+                return original_scroll_visible(*args, **kwargs)
+
+            marker.scroll_visible = capture_scroll  # type: ignore[method-assign]
+            try:
+                app.on_subagent_row_clicked(Header.SubagentRowClicked("toolu_xyz"))
+                await pilot.pause(0.05)
+            finally:
+                marker.scroll_visible = original_scroll_visible  # type: ignore[method-assign]
+
+            assert scroll_called, (
+                "on_subagent_row_clicked must call scroll_visible on the matching marker"
+            )
+
+    asyncio.run(driver())

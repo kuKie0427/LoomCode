@@ -216,3 +216,24 @@ def test_run_todo_write_invalid_status(monkeypatch, temp_workdir):
         [{"content": "bad task", "status": "invalid_status"}]
     )
     assert "Error: todos[0] has invalid status" in result
+
+
+def test_run_task_does_not_fire_subagent_callback(mocker, monkeypatch, temp_workdir):
+    monkeypatch.setattr(main, "WORKDIR", temp_workdir)
+    mocker.patch.object(main, "spawn_subagent", return_value="subagent result")
+
+    captured: list[tuple] = []
+    callbacks = {
+        "on_subagent_start": lambda sid, desc: captured.append(("start", sid)),
+        "on_subagent_end": lambda sid, elapsed, state: captured.append(("end", sid, state)),
+    }
+    loop_mod = __import__("loom.agent.loop", fromlist=["set_active_callbacks", "clear_active_callbacks"])
+    loop_mod.set_active_callbacks(callbacks)
+    try:
+        result = main.run_task("do the thing")
+        assert result == "subagent result"
+        assert captured == [], (
+            f"run_task should NOT fire subagent callbacks (moved to _run_tool_block); got {captured}"
+        )
+    finally:
+        loop_mod.clear_active_callbacks()

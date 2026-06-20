@@ -213,3 +213,136 @@ class TestSpawnSubagent:
         assert result.startswith("[done: ")
         assert "turns," in result
         assert "tool calls]" in result
+
+
+# ── f-tui-subagent-click-jump refactor tests ───────────────────────────────
+
+
+class TestRunToolBlockSubagentCallbacks:
+    def test_run_tool_block_fires_subagent_start_with_block_id(self, mocker):
+        """For task tools, _run_tool_block fires on_subagent_start using
+        block.id (tool_use_id) as the subagent_id and the description from
+        block.input."""
+        captured: list[tuple] = []
+
+        def cb_start(subagent_id: str, description: str) -> None:
+            captured.append(("start", subagent_id, description))
+
+        def cb_end(subagent_id: str, elapsed: float, state: str) -> None:
+            captured.append(("end", subagent_id, elapsed, state))
+
+        mocker.patch.dict(
+            loom.agent.tools.TOOL_HANDLERS,
+            {"task": lambda description: "stub-result"},
+        )
+
+        block = MagicMock()
+        block.id = "toolu_abc123"
+        block.name = "task"
+        block.input = {"description": "Extract MCP schema"}
+
+        main.set_active_callbacks(
+            {"on_subagent_start": cb_start, "on_subagent_end": cb_end}
+        )
+        try:
+            main._run_tool_block(block, main.hooks)
+        finally:
+            main.clear_active_callbacks()
+
+        assert len(captured) == 2, (
+            f"expected start + end callback, got {captured}"
+        )
+        assert captured[0] == ("start", "toolu_abc123", "Extract MCP schema"), (
+            f"on_subagent_start should fire with (block.id, description), got {captured[0]}"
+        )
+        assert captured[1][0] == "end"
+        assert captured[1][1] == "toolu_abc123", (
+            f"on_subagent_end should fire with same block.id, got {captured[1][1]}"
+        )
+        assert captured[1][3] == "done"
+
+    def test_run_tool_block_fires_subagent_end_with_error_state_on_exception(self, mocker):
+        """When the task handler raises, on_subagent_end fires with state='error'."""
+        captured: list[tuple] = []
+
+        def cb_start(subagent_id: str, description: str) -> None:
+            captured.append(("start", subagent_id))
+
+        def cb_end(subagent_id: str, elapsed: float, state: str) -> None:
+            captured.append(("end", subagent_id, state))
+
+        def fail_handler(description: str) -> str:
+            raise RuntimeError("subagent exploded")
+
+        mocker.patch.dict(
+            loom.agent.tools.TOOL_HANDLERS, {"task": fail_handler}
+        )
+
+        block = MagicMock()
+        block.id = "toolu_xyz"
+        block.name = "task"
+        block.input = {"description": "will fail"}
+
+        main.set_active_callbacks(
+            {"on_subagent_start": cb_start, "on_subagent_end": cb_end}
+        )
+        try:
+            try:
+                main._run_tool_block(block, main.hooks)
+            except RuntimeError:
+                pass
+        finally:
+            main.clear_active_callbacks()
+
+        assert len(captured) == 2
+        assert captured[1] == ("end", "toolu_xyz", "error"), (
+            f"on_subagent_end should fire with state='error' on exception, got {captured[1]}"
+        )
+
+    def test_run_tool_block_does_not_fire_subagent_for_non_task_tools(self, mocker):
+        """Non-task tools (e.g., bash) must not fire on_subagent_start / on_subagent_end."""
+        captured: list[tuple] = []
+
+        def cb_start(subagent_id: str, description: str) -> None:
+            captured.append(("start", subagent_id))
+
+        def cb_end(subagent_id: str, elapsed: float, state: str) -> None:
+            captured.append(("end", subagent_id, state))
+
+        mocker.patch.dict(
+            loom.agent.tools.TOOL_HANDLERS,
+            {"bash": lambda command: "ls output"},
+        )
+
+        block = MagicMock()
+        block.id = "tu_001"
+        block.name = "bash"
+        block.input = {"command": "ls"}
+
+        main.set_active_callbacks(
+            {"on_subagent_start": cb_start, "on_subagent_end": cb_end}
+        )
+        try:
+            main._run_tool_block(block, main.hooks)
+        finally:
+            main.clear_active_callbacks()
+
+        assert captured == [], (
+            f"non-task tools must NOT fire subagent callbacks, got {captured}"
+        )
+
+    def test_run_tool_block_no_active_callbacks_is_silent(self, mocker):
+        """Without set_active_callbacks, _run_tool_block is silent for subagent path."""
+        mocker.patch.dict(
+            loom.agent.tools.TOOL_HANDLERS,
+            {"task": lambda description: "result"},
+        )
+
+        main.clear_active_callbacks()
+        block = MagicMock()
+        block.id = "toolu_silent"
+        block.name = "task"
+        block.input = {"description": "no callbacks"}
+
+        result = main._run_tool_block(block, main.hooks)
+        assert result["content"] == "result"

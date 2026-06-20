@@ -699,3 +699,122 @@ class AppTodoUpdateHandlerDefined(EvalCase):
                 " wired"
             ),
         )
+
+
+# ── f-tui-subagent-click-jump eval cases ───────────────────────────────────
+
+
+class HeaderSubagentRowWidgetDefined(EvalCase):
+    name = "header-subagent-row-widget-defined"
+    description = (
+        "loom.tui.header.SubagentRow class exists — clickable row inside"
+        " HeaderOverlay that posts Header.SubagentRowClicked on click"
+    )
+
+    def run(self) -> EvalResult:
+        from loom.tui.header import SubagentRow
+
+        if SubagentRow is None:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail="SubagentRow not importable from loom.tui.header",
+            )
+        return EvalResult(
+            name=self.name, passed=True,
+            detail="loom.tui.header.SubagentRow defined — clickable subagent row",
+        )
+
+
+class HeaderSubagentRowClickedMessageDefined(EvalCase):
+    name = "header-subagent-row-clicked-message-defined"
+    description = (
+        "Header.SubagentRowClicked Message class is defined — posted when"
+        " a SubagentRow is clicked inside the HeaderOverlay"
+    )
+
+    def run(self) -> EvalResult:
+        from loom.tui.header import Header
+
+        msg = getattr(Header, "SubagentRowClicked", None)
+        if msg is None:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail="Header.SubagentRowClicked not defined",
+            )
+        return EvalResult(
+            name=self.name, passed=True,
+            detail=(
+                "Header.SubagentRowClicked defined — click message contract"
+            ),
+        )
+
+
+class HeaderAppSubagentRowClickedHandlerDefined(EvalCase):
+    name = "header-app-handles-subagent-row-clicked"
+    description = (
+        "AgentTUIApp.on_subagent_row_clicked handler is defined — dismisses"
+        " the HeaderOverlay and scrolls the ChatLog to the matching"
+        " ToolCallMarker (spec §4.3.2)"
+    )
+
+    def run(self) -> EvalResult:
+        from loom.tui.app import AgentTUIApp
+
+        handler = getattr(AgentTUIApp, "on_subagent_row_clicked", None)
+        if handler is None:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=(
+                    "AgentTUIApp.on_subagent_row_clicked not defined —"
+                    " clicking a subagent row in the overlay would no-op"
+                ),
+            )
+        return EvalResult(
+            name=self.name, passed=True,
+            detail=(
+                "AgentTUIApp.on_subagent_row_clicked is defined —"
+                " dismiss + scroll wired per spec §4.3.2"
+            ),
+        )
+
+
+class LoopRunToolBlockFiresSubagentCallbacks(EvalCase):
+    name = "header-task-tool-fires-subagent-callbacks-via-loop"
+    description = (
+        "loom.agent.loop._run_tool_block fires on_subagent_start and"
+        " on_subagent_end for 'task' tools (using block.id as"
+        " subagent_id) — moved from loom.agent.tools.run_task in"
+        " f-tui-subagent-click-jump so the tool_use_id is in scope and"
+        " ChatLog._tool_markers can look up the ToolCallMarker directly"
+    )
+
+    def run(self) -> EvalResult:
+        import inspect
+
+        import loom.agent.loop as loop_mod
+
+        source = inspect.getsource(loop_mod._run_tool_block)
+        if 'block.name == "task"' not in source:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=(
+                    "_run_tool_block does not branch on block.name == 'task'"
+                    " — subagent lifecycle callbacks must fire here"
+                ),
+            )
+        if "on_subagent_start" not in source or "on_subagent_end" not in source:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=(
+                    "_run_tool_block missing on_subagent_start /"
+                    " on_subagent_end callback calls"
+                ),
+            )
+        return EvalResult(
+            name=self.name, passed=True,
+            detail=(
+                "_run_tool_block fires subagent callbacks for task tools"
+                " using block.id as subagent_id — direct lookup into"
+                " ChatLog._tool_markers"
+            ),
+        )

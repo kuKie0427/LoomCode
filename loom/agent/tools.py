@@ -395,26 +395,7 @@ TOOLS.append({
 
 
 def run_task(description: str) -> str:
-    # Fire backend callbacks for f-tui-header-backend-wiring. Deferred
-    # import to avoid circular dependency (loop.py imports tools.py).
-    import time
-    import uuid as _uuid
-
-    from loom.agent.loop import fire_callback
-
-    subagent_id = _uuid.uuid4().hex[:8]
-    fire_callback("on_subagent_start", subagent_id, description[:60])
-    t0 = time.monotonic()
-    state = "done"
-    try:
-        result = spawn_subagent(description)
-        return result
-    except Exception:
-        state = "error"
-        raise
-    finally:
-        elapsed = time.monotonic() - t0
-        fire_callback("on_subagent_end", subagent_id, elapsed, state)
+    return spawn_subagent(description)
 
 
 TOOL_HANDLERS["task"] = run_task

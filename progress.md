@@ -3338,3 +3338,101 @@ The Header spec §4.3.1 says MCP servers are real MCP connections (Claude Code s
 ### Post-delivery cleanup (per AGENTS.md rule #11)
 
 No out-of-scope modifications. The `try/finally` wrap of `agent_loop` body required re-indenting the `while True:` loop body — verified by re-running the affected tests in isolation before declaring done. Initial run of full suite showed 1 flaky failure (`test_app_level_wheel_event_scrolls_chatlog`) which cleared on subsequent runs (test ordering sensitivity, unrelated to my changes).
+
+## Session: f-tui-subagent-click-jump (in progress → done)
+
+**Started:** 2026-06-20 (continued from handoff)
+
+**Goal:** Wire subagent overlay rows to dismiss the overlay + scroll the ChatLog to the corresponding tool call marker — completing the "see it in the rail → jump to it in the log" round trip per spec §4.3.2.
+
+**Critical architectural choice — REFACTOR run_task → _run_tool_block:**
+
+The shipped f-tui-header-backend-wiring has a two-ID problem: `run_task` generates a fresh UUID as the subagent_id, but the TUI's `ChatLog._tool_markers` dict is keyed by `tool_use_id` (Anthropic's `block.id`). The click → scroll flow would need a mapping table to translate between them. The clean fix is to move the subagent callback firing into `loom/agent/loop.py::_run_tool_block` where `block.id` is naturally in scope. This way the subagent_id IS the tool_use_id, eliminating the mapping.
+
+### Implementation
+
+**File 1 — `loom/agent/loop.py`** (+26 -1):
+- Added `import time`
+- `_run_tool_block` now wraps `task` tool calls with `on_subagent_start(block.id, description[:60])` before the handler + `on_subagent_end(block.id, elapsed, state)` in try/finally. Non-task tools skip this branch entirely. Uses module-level `_active_callbacks` (set by `set_active_callbacks`); silent no-op when no callbacks are active (consistent with existing pattern).
+
+**File 2 — `loom/agent/tools.py`** (+1 -20):
+- `run_task` shrunk from 21 lines to 1 line: `return spawn_subagent(description)`. All UUID generation + callback firing + try/finally timing moved to `_run_tool_block`.
+
+**File 3 — `loom/tui/header.py`** (+52 -0):
+- NEW `SubagentRow(Static, can_focus=True)` widget class — takes `(tool_use_id, content)` constructor params, has `tool_use_id` property, posts `Header.SubagentRowClicked(self._tool_use_id)` on click. CSS: hover underline + accent color, focus boost.
+- NEW `Header.SubagentRowClicked(Message)` nested in `Header` class — carries `tool_use_id`.
+- `HeaderOverlay._compose_subagent` yields `SubagentRow` widgets instead of `Static`.
+
+**File 4 — `loom/tui/app.py`** (+17 -0):
+- NEW `on_subagent_row_clicked(self, message: Header.SubagentRowClicked)` handler — dismisses HeaderOverlay (try/except for no-overlay case), looks up `chat_log._tool_markers[message.tool_use_id]`, calls `marker.scroll_visible(top=True, animate=False, immediate=True)`, posts `Update` + `UpdateScroll` messages to the screen for guaranteed repaint (matching the pattern in `_forward_scroll_to_chatlog` for mouse-wheel scroll). Silent no-op for unknown tool_use_id.
+
+**File 5 — `tests/test_agent_loop.py`** (+130 -0):
+- NEW `TestRunToolBlockSubagentCallbacks` class (4 tests):
+  - `test_run_tool_block_fires_subagent_start_with_block_id` — verifies `block.id` is passed as subagent_id
+  - `test_run_tool_block_fires_subagent_end_with_error_state_on_exception` — verifies state="error" on RuntimeError
+  - `test_run_tool_block_does_not_fire_subagent_for_non_task_tools` — bash doesn't fire subagent callbacks
+  - `test_run_tool_block_no_active_callbacks_is_silent` — without dispatcher, no crash
+
+**File 6 — `tests/test_tools.py`** (+19 -0):
+- `test_run_task_does_not_fire_subagent_callback` — verifies the refactor moved callback firing OUT of run_task
+
+**File 7 — `tests/test_tui_header.py`** (+115 -0):
+- 5 new tests in `f-tui-subagent-click-jump: SubagentRow widget + click handler` section:
+  - `test_subagent_row_click_posts_subagent_row_clicked_message` — captures both `post_message` AND `event.stop()` calls; verifies message posted AND `event.stop()` NOT called (HeaderOverlay.on_click stops it)
+  - `test_subagent_row_exposes_tool_use_id` — property access
+  - `test_app_on_subagent_row_clicked_dismisses_overlay` — integration test mounts overlay + verifies it's gone after click
+  - `test_app_on_subagent_row_clicked_handles_unknown_id_gracefully` — no raise on missing marker
+  - `test_app_on_subagent_row_clicked_scrolls_chatlog_to_marker` — patches `marker.scroll_visible` to verify it's called
+
+**File 8 — `loom/eval/cases/tui_header.py`** (+115 -0):
+- 4 new cases: `header-subagent-row-widget-defined`, `header-subagent-row-clicked-message-defined`, `header-app-handles-subagent-row-clicked`, `header-task-tool-fires-subagent-callbacks-via-loop`
+
+**File 9 — `feature_list.json`** (+13 -2):
+- Added f-tui-subagent-click-jump entry (status: done, evidence: full eval/pytest/init.sh output)
+
+### Verification
+
+| Gate | Result |
+|---|---|
+| `uv run pytest tests/test_tui_header.py -v` | 49/49 passed (was 44/44, +5) |
+| `uv run pytest tests/test_agent_loop.py tests/test_tools.py -v` | 30/30 passed (was 25/25, +5) |
+| `uv run python -m loom.cli eval --fail-under 100` | 218/218 passed (was 214/214, +4) |
+| `./init.sh` | "Verification Complete (all green)" — 428 pytest passed (was 418, +10 net), 9 snapshots, 0 ruff, 0 mypy (76 source files) |
+| `uv run ruff check .` | All checks passed! |
+| `uv run mypy loom/` | Success: no issues found in 76 source files |
+
+### Spec compliance
+
+Per `docs/tui-design-language.md` §4.3.2: "Clicking a subagent ID inside the Subagent overlay dismisses the overlay and **scrolls the ChatLog to that subagent's existing marker**. (Markers exist because subagent tool calls are already inline in the chat.)"
+
+Implemented: `SubagentRow.on_click` → posts `Header.SubagentRowClicked(tool_use_id)` → `App.on_subagent_row_clicked` → removes HeaderOverlay (dismiss) + scrolls ChatLog to `chat_log._tool_markers[tool_use_id]` (jump to marker).
+
+### Refactor rationale
+
+The shipped f-tui-header-backend-wiring generated a fresh UUID inside `run_task`:
+```python
+subagent_id = _uuid.uuid4().hex[:8]
+fire_callback("on_subagent_start", subagent_id, description[:60])
+```
+
+But ChatLog's `_tool_markers` is keyed by `block.id` (the LLM provider's tool_use_id). The two IDs are different strings — the click → scroll flow would need a translation table. Moving the callback firing to `_run_tool_block` (where `block.id` is in scope) eliminates the translation and unifies the identifier across the system.
+
+Side benefit: the previous run_task code was 21 lines of timing + UUID + try/finally boilerplate. Now it's 1 line. `_run_tool_block` is the natural place for tool lifecycle instrumentation (similar to how it owns PreToolUse / PostToolUse hooks).
+
+### Files changed (no commit yet)
+
+- `M  loom/agent/loop.py` (+26 -1) — _run_tool_block wraps task tools with subagent callbacks using block.id
+- `M  loom/agent/tools.py` (+1 -20) — run_task reduced to 1 line
+- `M  loom/tui/header.py` (+52 -0) — SubagentRow + Header.SubagentRowClicked
+- `M  loom/tui/app.py` (+17 -0) — on_subagent_row_clicked handler
+- `M  tests/test_agent_loop.py` (+130 -0) — 4 _run_tool_block tests
+- `M  tests/test_tools.py` (+19 -0) — 1 run_task no-callback test
+- `M  tests/test_tui_header.py` (+115 -0) — 5 SubagentRow + click handler tests
+- `M  loom/eval/cases/tui_header.py` (+115 -0) — 4 new eval cases
+- `M  feature_list.json` (+13 -2) — new feature entry, status=done, evidence
+
+### Post-delivery cleanup (per AGENTS.md rule #11)
+
+Git status confirmed: only in-scope files modified. `./init.sh` ran cleanly on first run after the refactor (428/428, no flaky failures this time — the wheel-event flake from the previous session did not appear). `uv run mypy loom/` clean (76 source files, no `# type: ignore` added).
+
+One minor adjustment: `test_subagent_row_click_posts_subagent_row_clicked_message` originally asserted `ev.stopped is False`, but Textual's `Click` event doesn't expose `.stopped` as an attribute — switched to capturing `ev.stop()` calls (matches the pattern used elsewhere in the file).

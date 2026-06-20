@@ -212,6 +212,45 @@ def _subagent_glyph_rich(glyph: str, state: str | None = None) -> str:
 # ── Widgets ──────────────────────────────────────────────────────────────────
 
 
+class SubagentRow(Static):
+    """Clickable subagent row inside ``HeaderOverlay`` (§4.3.2).
+
+    Posts ``Header.SubagentRowClicked(self._tool_use_id)`` on click;
+    ``App.on_subagent_row_clicked`` dismisses the overlay and scrolls
+    the ChatLog to the ToolCallMarker for that tool_use_id. The event
+    is intentionally NOT stopped here — ``HeaderOverlay.on_click``
+    stops it to block the App-level catch-all collapse handler.
+    """
+
+    can_focus = True
+
+    DEFAULT_CSS = """
+    SubagentRow {
+        width: 100%;
+        height: 1;
+        background: transparent;
+    }
+    SubagentRow:hover {
+        text-style: underline;
+        color: $accent;
+    }
+    SubagentRow:focus {
+        background: $boost 5%;
+    }
+    """
+
+    def __init__(self, tool_use_id: str, content: str, **kwargs: Any) -> None:
+        super().__init__(content, **kwargs)
+        self._tool_use_id = tool_use_id
+
+    @property
+    def tool_use_id(self) -> str:
+        return self._tool_use_id
+
+    def on_click(self, event: Click) -> None:
+        self.post_message(Header.SubagentRowClicked(self._tool_use_id))
+
+
 class HeaderSectionButton(Static):
     """One section's clickable button in the collapsed Header line.
 
@@ -356,6 +395,20 @@ class Header(Horizontal):
         def __init__(self, section: str) -> None:
             super().__init__()
             self.section: str = section
+
+    class SubagentRowClicked(Message):
+        """Posted when a subagent row is clicked inside the overlay.
+
+        The App dismisses the overlay and scrolls the ChatLog to the
+        ToolCallMarker with this tool_use_id (which is also the
+        subagent_id since ``_run_tool_block`` uses ``block.id`` for
+        subagent lifecycle callbacks — see
+        ``loom/agent/loop.py::_run_tool_block``).
+        """
+
+        def __init__(self, tool_use_id: str) -> None:
+            super().__init__()
+            self.tool_use_id: str = tool_use_id
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -540,7 +593,7 @@ class HeaderOverlay(Widget):
                     f"[text-muted]· {sub.state}[/]  "
                     f"[text-muted]· {sub.elapsed}[/]"
                 )
-                yield Static(row, classes="header-row row-detail")
+                yield SubagentRow(sub.id, row, classes="header-row row-detail")
 
     def on_click(self, event: Click) -> None:
         # Consume clicks within the overlay so App.on_click doesn't

@@ -450,6 +450,24 @@ class AgentTUIApp(App):
                 break
         self.query_one(Header).update_state(self._header_state)
 
+    def on_subagent_row_clicked(self, message: Header.SubagentRowClicked) -> None:
+        """Spec §4.3.2: dismiss overlay + scroll ChatLog to subagent marker."""
+        try:
+            self.query_one(HeaderOverlay).remove()
+        except Exception:
+            pass
+        try:
+            chat_log = self.query_one(ChatLog)
+            marker = chat_log._tool_markers.get(message.tool_use_id)
+            if marker is None:
+                return
+            marker.scroll_visible(top=True, animate=False, immediate=True)
+            chat_log._set_dirty(chat_log.size.region)
+            self.screen.post_message(textual_messages.Update(chat_log))
+            self.screen.post_message(textual_messages.UpdateScroll())
+        except Exception:
+            logger.warning("Failed to scroll to subagent marker {}", message.tool_use_id)
+
     async def on_composer_submitted(self, event: Composer.Submitted) -> None:
         user_msg = event.value.strip()
         if not user_msg:
