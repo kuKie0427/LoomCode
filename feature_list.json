@@ -649,10 +649,12 @@
       "id": "f-tui-fast-quit-p3-cli-lazy-imports",
       "name": "loom.cli: lazy-import subcommand dependencies",
       "description": "Move 5 eager top-level imports (run_repl, Trace/default_path_for, audit, detect_project, init/format_results) from loom/cli.py module body to lazy imports inside the corresponding subcommand handler. loom --help baseline ~430ms → target < 200ms (python startup ~80ms).",
-      "dependencies": ["f-tui-fast-quit-p1-shared-helper"],
+      "dependencies": [
+        "f-tui-fast-quit-p1-shared-helper"
+      ],
       "status": "done",
       "verification": "./init.sh && uv run python -m loom.cli eval --fail-under 100",
-      "evidence": "./init.sh → 'Verification Complete (all green)'; uv run python -m loom.cli eval --fail-under 100 → 'Eval results: 231/231 passed' (+1 new case: cli-help-is-fast-no-agent-import); uv run pytest -q → 453 passed; uv run ruff check . → 'All checks passed!'; uv run mypy loom/ → 'Success: no issues found in 81 source files'. Before: 547ms (simulated eager imports), After: 88ms (lazy imports), -84%."
+      "evidence": "commit bb6756e: loom --help 733ms → 84ms (8.7x speedup, target <200ms). ./init.sh → Verification Complete (all green); uv run python -m loom.cli eval --fail-under 100 → 231/231 passed (was 230/230, +1 new case: cli-help-is-fast-no-agent-import); uv run pytest -q → 453 passed; uv run ruff check . → All checks passed!; uv run mypy loom/ → Success: no issues found in 81 source files. Manual smoke: time uv run python -m loom.cli --help → 84ms total / 60ms python. Deviation: check_wip1 short-circuited for --help/--version (loom.agent.scope import costs ~600ms; without short-circuit the <200ms gate is unachievable). check_wip1 still fires for all real subcommands. Files: loom/cli.py (5 lazy imports + conditional check_wip1 guard), loom/eval/cases/cli_lazy_imports.py NEW (1 case), loom/eval/cases/__init__.py (register case), feature_list.json (entry)."
     }
   ]
 }
