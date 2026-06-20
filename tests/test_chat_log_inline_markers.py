@@ -1,5 +1,6 @@
 """Unit tests for ChatLog inline subagent + todo markers (f-tui-inline-event-markers)."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -150,9 +151,8 @@ class TestClearContentClearsSubagentMarkers:
         log_no_async.add_subagent_marker("id2", "task2")
         assert len(log_no_async._subagent_markers) == 2
         log_no_async._create_task_mock.reset_mock()
-        import asyncio
 
-        asyncio.get_event_loop().run_until_complete(log_no_async.clear_content())
+        asyncio.run(log_no_async.clear_content())
         assert len(log_no_async._subagent_markers) == 0
         assert log_no_async._last_todo_summary == ""
 
@@ -169,8 +169,6 @@ class TestTimelinePersistsAcrossUserTurns:
     """
 
     def test_subagent_markers_persist_across_append_user_message(self, log_no_async):
-        import asyncio
-
         log_no_async.add_subagent_marker("id1", "extract schema")
         log_no_async.add_subagent_marker("id2", "research topic")
         assert len(log_no_async._subagent_markers) == 2
@@ -186,8 +184,6 @@ class TestTimelinePersistsAcrossUserTurns:
         )
 
     def test_last_todo_summary_persists_across_append_user_message(self, log_no_async):
-        import asyncio
-
         log_no_async.emit_todo_note("1 done, 2 active, 0 pending")
         assert log_no_async._last_todo_summary == "1 done, 2 active, 0 pending"
 
@@ -197,4 +193,58 @@ class TestTimelinePersistsAcrossUserTurns:
         assert log_no_async._last_todo_summary == "1 done, 2 active, 0 pending", (
             "_last_todo_summary must persist across user turns — only"
             " clear_content() should reset it (used for dedup)"
+        )
+
+
+# ── LOW-1: complete_subagent_marker state parameter type signature ────────────
+
+
+class TestCompleteSubagentMarkerTypeSignature:
+    def test_state_param_is_literal_done_or_error(self):
+        import inspect
+        sig = inspect.signature(ChatLog.complete_subagent_marker)
+        state_param = sig.parameters["state"]
+        annotation = str(state_param.annotation)
+        # Accept either "Literal['done', 'error']" or "Literal['done','error']"
+        assert "Literal" in annotation, f"state annotation is not Literal: {annotation}"
+        assert "done" in annotation and "error" in annotation, (
+            f"state Literal must include 'done' and 'error', got: {annotation}"
+        )
+
+
+# ── MEDIUM-2: SubagentMarker.description property ─────────────────────────────
+
+
+class TestSubagentMarkerDescriptionProperty:
+    def test_description_property_returns_constructor_arg(self):
+        marker = SubagentMarker("id1", "extract schema")
+        assert marker.description == "extract schema"
+
+    def test_description_property_empty_string(self):
+        marker = SubagentMarker("id1", "")
+        assert marker.description == ""
+
+
+# ── LOW-5: add_subagent_marker replaces old widget in DOM ─────────────────────
+
+
+class TestAddSubagentMarkerReplacesOld:
+    def test_add_subagent_marker_same_id_replaces_widget_in_dict(self, log_no_async):
+        log_no_async.add_subagent_marker("id1", "first")
+        first_marker = log_no_async._subagent_markers["id1"]
+        assert first_marker._description == "first"
+        log_no_async.add_subagent_marker("id1", "second")
+        second_marker = log_no_async._subagent_markers["id1"]
+        assert second_marker is not first_marker
+        assert second_marker._description == "second"
+
+    def test_add_subagent_marker_same_id_schedules_old_remove(self, log_no_async):
+        log_no_async.add_subagent_marker("id1", "first")
+        # Spy on the new helper to confirm it's scheduled
+        log_no_async._create_task_mock.reset_mock()
+        log_no_async.add_subagent_marker("id1", "second")
+        # Verify _remove_async was scheduled (or _mount_async for new marker)
+        # We expect at least 2 create_task calls: remove old + mount new
+        assert log_no_async._create_task_mock.call_count >= 2, (
+            "add_subagent_marker should schedule at least 2 tasks: remove old + mount new"
         )

@@ -3574,3 +3574,35 @@ LOW issues deferred to a follow-up chore (not blocking commit):
 - Missing `tui-app-wires-todo-update-emit-todo-note` eval case (4→5)
 - `asyncio.get_event_loop()` deprecated in `test_clear_resets_markers`
 - DOM widget leak on `add_subagent_marker` with same id (theoretical, never hits in practice)
+
+## Post-review LOW fixes (2026-06-20)
+
+Closed all 6 review LOW/MEDIUM issues from f-tui-inline-event-markers in one chore. No behavior changes — pure type safety + UX hint + DOM cleanup + encapsulation.
+
+**Fixes applied:**
+
+- **LOW-1**: `complete_subagent_marker.state` typed as `Literal["done", "error"]` (was `str`). Added `from typing import Literal`. Matches existing `SubagentEnd.state` in `loom/tui/messages.py:99`.
+- **LOW-2**: `_run_tool_block` now truncates descriptions > 60 chars to 59 chars + `…` (U+2026). Short descriptions pass through unchanged. UX hint to user that text was clipped.
+- **LOW-3**: New eval case `tui-app-wires-todo-update-emit-todo-note` (5th case in `loom/eval/cases/tui_inline_markers.py`) — locks the wiring `AgentTUIApp.on_todo_update → chat_log.emit_todo_note`.
+- **LOW-4**: `asyncio.get_event_loop().run_until_complete(...)` → `asyncio.run(...)` in `tests/test_chat_log_inline_markers.py:155`. Consolidated `import asyncio` to top of file (3 inline imports removed).
+- **LOW-5**: `add_subagent_marker` now removes the old widget from the DOM when called with an existing `subagent_id` (theoretical — `block.id` is unique per Anthropic task tool call in practice). Used `_remove_async(widget)` helper to mirror existing `_mount_async` pattern.
+- **MEDIUM-2**: `SubagentMarker.description` @property added. Both caller sites in `complete_subagent_marker` updated to use `marker.description` (no longer reach into `_description`).
+
+**Plan deviation**: The plan suggested `asyncio.create_task(existing.remove())` but `Widget.remove()` returns `AwaitRemove` (Textual's awaitable wrapper, not a coroutine). mypy rejected direct usage. Added a 4-line async helper `_remove_async(self, widget)` mirroring the existing `_mount_async` pattern — preserves plan intent while satisfying type-checker and matching project style.
+
+**Tests added** (4 classes, 7 methods total):
+- `TestCompleteSubagentMarkerTypeSignature` (1 test) — LOW-1
+- `TestRunToolBlockDescriptionTruncation` (2 tests) — LOW-2 (long + short)
+- `TestAddSubagentMarkerReplacesOld` (2 tests) — LOW-5 (identity change + scheduling)
+- `TestSubagentMarkerDescriptionProperty` (2 tests) — MEDIUM-2 (basic + empty string)
+
+**Verification**: `./init.sh` → **453 pytest passed** (was 446, +7), 224/224 eval cases (was 223, +1), ruff + mypy clean. All 6 issues closed; no regressions.
+
+**Files modified**:
+- `loom/tui/chat_log.py` — `Literal` import, `description` property, `_remove_async` helper, `add_subagent_marker` cleanup, `complete_subagent_marker` typed + callers updated
+- `loom/agent/loop.py` — `raw_desc[:59] + "…"` truncation
+- `loom/eval/cases/tui_inline_markers.py` — `TuiAppWiresTodoUpdateEmitTodoNote` (5th case)
+- `tests/test_chat_log_inline_markers.py` — `asyncio.run` + top-level `import asyncio` + 5 new tests
+- `tests/test_agent_loop.py` — `TestRunToolBlockDescriptionTruncation` (2 tests)
+- `feature_list.json` — new entry `f-chore-inline-markers-low-fixes`
+- `progress.md` — this section

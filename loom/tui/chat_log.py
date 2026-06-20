@@ -10,7 +10,7 @@ import json
 import re
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
@@ -393,6 +393,11 @@ class SubagentMarker(Static):
         self._subagent_id = subagent_id
         self._description = description
 
+    @property
+    def description(self) -> str:
+        """The task description shown in the marker text."""
+        return self._description
+
 
 class ToolCallMarker(Static):
     can_focus = True
@@ -544,6 +549,9 @@ class ChatLog(VerticalScroll):
     async def _mount_async(self, widget: Any) -> None:
         await self.mount(widget)
 
+    async def _remove_async(self, widget: SubagentMarker) -> None:
+        await widget.remove()
+
     def _tick_spinner(self) -> None:
         if self._thinking_widget is None:
             return
@@ -663,6 +671,9 @@ class ChatLog(VerticalScroll):
         self._force_flush_stream_buffer()
         self._finalize_streaming()
         self._current_body = None
+        existing = self._subagent_markers.get(subagent_id)
+        if existing is not None:
+            asyncio.create_task(self._remove_async(existing))
         marker = SubagentMarker(subagent_id, description)
         self._subagent_markers[subagent_id] = marker
         asyncio.create_task(self._mount_async(marker))
@@ -670,17 +681,17 @@ class ChatLog(VerticalScroll):
             self.scroll_end()
 
     def complete_subagent_marker(
-        self, subagent_id: str, elapsed: float, state: str
+        self, subagent_id: str, elapsed: float, state: Literal["done", "error"]
     ) -> None:
         marker = self._subagent_markers.get(subagent_id)
         if marker is None:
             return
         elapsed_str = f"{elapsed:.1f}s" if elapsed < 60 else f"{int(elapsed)}s"
         if state == "done":
-            marker.update(f"◑ task: {marker._description} · done {elapsed_str}")
+            marker.update(f"◑ task: {marker.description} · done {elapsed_str}")
             marker.add_class("marker-done")
         else:
-            marker.update(f"⊗ task: {marker._description} · error {elapsed_str}")
+            marker.update(f"⊗ task: {marker.description} · error {elapsed_str}")
             marker.add_class("marker-error")
         if self._sticky:
             self.scroll_end()

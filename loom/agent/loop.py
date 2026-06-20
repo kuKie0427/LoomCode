@@ -187,7 +187,8 @@ def _run_tool_block(block, hooks) -> dict:
     handler = TOOL_HANDLERS.get(block.name)
     if block.name == "task":
         cb = _active_callbacks
-        description = str(block.input.get("description", ""))[:60]
+        raw_desc = str(block.input.get("description", ""))
+        description = (raw_desc[:59] + "…") if len(raw_desc) > 60 else raw_desc
         if cb is not None and cb.get("on_subagent_start") is not None:
             cb["on_subagent_start"](block.id, description)
         t0 = time.monotonic()

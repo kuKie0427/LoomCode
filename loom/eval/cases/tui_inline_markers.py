@@ -89,3 +89,22 @@ class TuiAppWiresSubagentMarkerInEnd(EvalCase):
             name=self.name, passed=True,
             detail="on_subagent_end wires complete_subagent_marker",
         )
+
+
+class TuiAppWiresTodoUpdateEmitTodoNote(EvalCase):
+    name = "tui-app-wires-todo-update-emit-todo-note"
+    description = "AgentTUIApp.on_todo_update calls chat_log.emit_todo_note"
+
+    def run(self) -> EvalResult:
+        from loom.tui.app import AgentTUIApp
+
+        src = inspect.getsource(AgentTUIApp.on_todo_update)
+        if "emit_todo_note" not in src:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail="on_todo_update does not call emit_todo_note",
+            )
+        return EvalResult(
+            name=self.name, passed=True,
+            detail="on_todo_update wires emit_todo_note",
+        )

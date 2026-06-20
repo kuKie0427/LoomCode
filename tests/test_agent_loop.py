@@ -346,3 +346,96 @@ class TestRunToolBlockSubagentCallbacks:
 
         result = main._run_tool_block(block, main.hooks)
         assert result["content"] == "result"
+
+
+# ── LOW-2: _run_tool_block description truncation with `…` indicator ──────────
+
+
+class TestRunToolBlockDescriptionTruncation:
+    def test_long_description_truncates_with_ellipsis(self, mocker):
+        """80-char description → result description is exactly 60 chars (59 + U+2026)
+        and ends with `…`. Locks in LOW-2 truncation behavior."""
+        captured: list[tuple] = []
+
+        def cb_start(subagent_id: str, description: str) -> None:
+            captured.append(("start", subagent_id, description))
+
+        def cb_end(subagent_id: str, elapsed: float, state: str) -> None:
+            captured.append(("end", subagent_id, elapsed, state))
+
+        raw = "a" * 80
+        expected_truncated = raw[:59] + "…"
+
+        mocker.patch.dict(
+            loom.agent.tools.TOOL_HANDLERS,
+            {"task": lambda description: "stub-result"},
+        )
+
+        block = MagicMock()
+        block.id = "toolu_long"
+        block.name = "task"
+        block.input = {"description": raw}
+
+        main.set_active_callbacks(
+            {"on_subagent_start": cb_start, "on_subagent_end": cb_end}
+        )
+        try:
+            main._run_tool_block(block, main.hooks)
+        finally:
+            main.clear_active_callbacks()
+
+        assert len(captured) >= 1, f"expected start callback, got {captured}"
+        assert captured[0][0] == "start"
+        assert captured[0][1] == "toolu_long"
+        assert captured[0][2] == expected_truncated, (
+            f"long description should be truncated to 59 chars + '…', "
+            f"got {captured[0][2]!r}"
+        )
+        assert len(captured[0][2]) == 60, (
+            f"truncated description length should be 60 (59 + U+2026), "
+            f"got {len(captured[0][2])}"
+        )
+        assert captured[0][2].endswith("…"), (
+            f"truncated description must end with U+2026 '…', got {captured[0][2]!r}"
+        )
+
+    def test_short_description_passes_through(self, mocker):
+        """30-char description → result is the exact 30-char string, NO `…` appended.
+        Locks in the pass-through branch of the truncation ternary."""
+        captured: list[tuple] = []
+
+        def cb_start(subagent_id: str, description: str) -> None:
+            captured.append(("start", subagent_id, description))
+
+        def cb_end(subagent_id: str, elapsed: float, state: str) -> None:
+            captured.append(("end", subagent_id, elapsed, state))
+
+        raw = "a" * 30
+
+        mocker.patch.dict(
+            loom.agent.tools.TOOL_HANDLERS,
+            {"task": lambda description: "stub-result"},
+        )
+
+        block = MagicMock()
+        block.id = "toolu_short"
+        block.name = "task"
+        block.input = {"description": raw}
+
+        main.set_active_callbacks(
+            {"on_subagent_start": cb_start, "on_subagent_end": cb_end}
+        )
+        try:
+            main._run_tool_block(block, main.hooks)
+        finally:
+            main.clear_active_callbacks()
+
+        assert len(captured) >= 1, f"expected start callback, got {captured}"
+        assert captured[0][2] == raw, (
+            f"short description should pass through unchanged, "
+            f"got {captured[0][2]!r}"
+        )
+        assert "…" not in captured[0][2], (
+            f"short description must NOT have ellipsis appended, "
+            f"got {captured[0][2]!r}"
+        )
