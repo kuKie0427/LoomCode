@@ -1,9 +1,14 @@
+import html
+import http.client
 import re
 import shutil
 import subprocess
 import time
+import urllib.parse
+from html.parser import HTMLParser
 from pathlib import Path
 
+import httpx
 from anthropic.types import MessageParam, ToolParam
 from loguru import logger
 
@@ -430,6 +435,101 @@ def run_grep(pattern: str, path: str = ".", glob: str | None = None,
     return "\n".join(rendered)
 
 
+WEB_FETCH_TIMEOUT_S = 30
+WEB_FETCH_MAX_REDIRECTS = 5
+WEB_FETCH_MAX_CHARS = 50_000
+
+
+class _TextExtractor(HTMLParser):
+    """Convert HTML to readable plain text. Drops scripts/styles, inserts
+    blank lines around block-level elements, decodes entities."""
+
+    BLOCK_TAGS = {
+        "p", "div", "section", "article", "header", "footer", "main",
+        "nav", "aside", "br", "hr", "li", "ul", "ol",
+        "h1", "h2", "h3", "h4", "h5", "h6", "pre", "blockquote",
+    }
+    SKIP_TAGS = {"script", "style", "noscript"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIP_TAGS:
+            self.skip_depth += 1
+        if tag in self.BLOCK_TAGS:
+            self.parts.append("\n\n")
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIP_TAGS and self.skip_depth > 0:
+            self.skip_depth -= 1
+        if tag in self.BLOCK_TAGS:
+            self.parts.append("\n\n")
+
+    def handle_data(self, data):
+        if self.skip_depth == 0:
+            self.parts.append(data)
+
+    def get_text(self) -> str:
+        text = "".join(self.parts)
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n[ \t]+", "\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+
+def run_web_fetch(url: str, max_chars: int = WEB_FETCH_MAX_CHARS) -> str:
+    """Fetch a URL and return its readable text content.
+
+    Implementation: httpx with redirect follow (max 5), 30s timeout, content-type
+    sniff (text/html -> HTMLParser-based extraction; text/plain -> returned as-is;
+    other -> error). Result is truncated to max_chars. is_read_only=True.
+    """
+    if not url:
+        return "Error: url is required"
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return f"Error: only http/https URLs supported, got scheme={parsed.scheme!r}"
+    try:
+        with httpx.Client(
+            timeout=WEB_FETCH_TIMEOUT_S,
+            follow_redirects=True,
+            max_redirects=WEB_FETCH_MAX_REDIRECTS,
+        ) as client:
+            r = client.get(url, headers={"User-Agent": "loom-web-fetch/1.0"})
+    except httpx.HTTPError as exc:
+        return f"Error: HTTP request failed: {type(exc).__name__}: {exc}"
+    except Exception as exc:
+        return f"Error: fetch failed: {type(exc).__name__}: {exc}"
+    if r.status_code >= 400:
+        return f"Error: HTTP {r.status_code} for {url}"
+    content_type = r.headers.get("content-type", "").lower()
+    body = r.text
+    if "html" in content_type or body.lstrip().lower().startswith("<!doctype") or body.lstrip().lower().startswith("<html"):
+        extractor = _TextExtractor()
+        try:
+            extractor.feed(body)
+            text = extractor.get_text()
+        except Exception as exc:
+            return f"Error: HTML parse failed: {type(exc).__name__}: {exc}"
+    elif "plain" in content_type or "markdown" in content_type or "json" in content_type:
+        text = body
+    else:
+        return f"Error: unsupported content-type {content_type!r} for {url}"
+    if not text.strip():
+        return f"(empty content from {url})"
+    truncated = False
+    if len(text) > max_chars:
+        text = text[:max_chars]
+        truncated = True
+    header = f"[fetch: {url} status={r.status_code} bytes_returned={len(body)}]"
+    if truncated:
+        header += f" (truncated at {max_chars} chars)"
+    return f"{header}\n{text}"
+
+
 def run_todo_write(todos: list) -> str:
     global CURRENT_TODOS
     for i, t in enumerate(todos):
@@ -598,6 +698,31 @@ TOOL_REGISTRY.register(Tool(
     is_read_only=True,
     is_concurrent_safe=True,
 ))
+TOOL_REGISTRY.register(Tool(
+    name="web_fetch",
+    description=(
+        "Fetch a URL and return its readable text content. Use this to read "
+        "external API docs, package READMEs, or reference material. Supports "
+        "http and https only. Follows redirects (max 5) with a 30s timeout. "
+        "Content-type routing: text/html -> extracted plain text (scripts/styles "
+        "stripped, block elements separated by blank lines); text/plain / "
+        "application/json / markdown -> returned as-is; other types -> error. "
+        "Result is truncated to max_chars (default 50000). Returns a structured "
+        "header with the URL, status code, and bytes returned so you can verify "
+        "the fetch succeeded."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "Absolute http or https URL to fetch."},
+            "max_chars": {"type": "integer", "description": "Max content length to return (default 50000)."},
+        },
+        "required": ["url"],
+    },
+    handler=run_web_fetch,
+    is_read_only=True,
+    is_concurrent_safe=True,
+))
 TODO_WRITE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -679,12 +804,14 @@ SUB_TOOLS: list[ToolParam] = [
      "input_schema": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}},
     {"name": "grep", "description": "Search files for a regex or literal pattern. Output is `path:line:content` per match, capped at 200 hits. Use grep BEFORE reading multiple files when looking for symbols or string usages — much cheaper than opening files one by one.",
      "input_schema": {"type": "object", "properties": {"pattern": {"type": "string"}, "path": {"type": "string"}, "glob": {"type": "string"}, "case_insensitive": {"type": "boolean"}}, "required": ["pattern"]}},
+    {"name": "web_fetch", "description": "Fetch a URL and return readable text content. Supports http/https. Follows redirects (max 5). HTML is extracted; text/plain and json returned as-is. Default max 50000 chars.",
+     "input_schema": {"type": "object", "properties": {"url": {"type": "string"}, "max_chars": {"type": "integer"}}, "required": ["url"]}},
 ]
 
 SUB_HANDLERS = {
     "bash": run_bash, "read_file": run_read, "write_file": run_write,
     "edit_file": run_edit, "multi_edit": run_multi_edit, "edit_lines": run_edit_lines,
-    "glob": run_glob, "grep": run_grep,
+    "glob": run_glob, "grep": run_grep, "web_fetch": run_web_fetch,
 }
 
 SUB_SYSTEM = (

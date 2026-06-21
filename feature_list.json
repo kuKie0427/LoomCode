@@ -882,6 +882,14 @@
       "dependencies": [],
       "status": "done",
       "evidence": "uv run pytest tests/test_microcompact_counter.py -v -> 8/8 passed. uv run python -m loom.cli eval --filter microcompact-counter --fail-under 100 -> 2/2 passed. uv run pytest -m 'not snapshot' -q -> 639 passed (was 631, +8). uv run ruff + mypy -> 0 issues in 98 source files. loom/agent/context.py: microcompact() now tracks bytes_cleared by comparing old tool_result content length vs the 38-char placeholder. After clearing, decrements self.last_input_tokens by bytes_cleared // 4 (clamped to 0). Also invalidates _token_cache entry for the messages list so the next should_compact uses fresh counts. Pre-fix bug: last_input_tokens stayed at the pre-microcompact value, so should_compact immediately thought we were over the 85% threshold and triggered autocompact even though the message list had just shrunk. Post-fix: counter tracks reality, autocompact doesn't fire spuriously."
+    },
+    {
+      "id": "f-web-fetch-tool-p1",
+      "name": "Phase 1 P1: web_fetch tool (httpx + HTML extraction)",
+      "description": "Modern coding requires reading external docs, package READMEs, RFCs. Add web_fetch tool that fetches http/https URLs and returns readable text.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "uv run pytest tests/test_web_fetch.py -v -> 17/17 passed. uv run python -m loom.cli eval --filter web-fetch --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 656 passed (was 639, +17). uv run ruff + mypy -> 0 issues in 99 source files. loom/agent/tools.py: run_web_fetch(url, max_chars=50000) using httpx with 30s timeout + 5 redirect follow. _TextExtractor (stdlib HTMLParser) strips script/style, decodes entities, adds blank lines around block elements. Content-type routing: html -> extract; plain/json/markdown -> passthrough; other -> error. is_read_only=True, is_concurrent_safe=True. Registered in TOOL_REGISTRY + SUB_TOOLS + SUB_HANDLERS. Decision: used stdlib HTMLParser (zero new deps) instead of readability-lxml / markdownify since the agent's needs are moderate (read docs, not preserve perfect formatting). Could swap for readability later if formatting matters."
     }
   ]
 }

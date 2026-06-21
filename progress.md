@@ -5326,3 +5326,26 @@ next phase: `f-grep-tool-p0` (highest leverage per Oracle, but expected ROI may 
 - 第二次跑: 全绿.
 
 **next phase**: `f-web-fetch-tool-p1` (httpx + readability)
+
+---
+
+## 2026-06-22 — f-web-fetch-tool-p1 (httpx + stdlib HTMLParser)
+
+**Goal**: 让 agent 能读外部 docs / package READMEs / RFCs.
+
+**实现**:
+- `loom/agent/tools.py:run_web_fetch(url, max_chars=50000)` — httpx.Client + 30s timeout + 5 redirect follow. Content-type 路由: html -> _TextExtractor; plain/json/markdown -> passthrough; other -> error.
+- `_TextExtractor(HTMLParser)` — block tags (`p`/`div`/`h1-6`/`li`/`pre` 等) 加 `\n\n`, skip `<script>`/`<style>` 整段, decode entities (Tom &amp; Jerry -> Tom & Jerry), normalize 多余空白.
+- 决定: 用 stdlib `html.parser`, **零新依赖**. 改 readability/markdownify 是后续优化 — 当前 LLM 看的是内容不是格式, stdlib 提取够用.
+- 注册到 TOOL_REGISTRY + SUB_TOOLS + SUB_HANDLERS (subagent 也能用).
+
+**Verification**:
+- `uv run pytest tests/test_web_fetch.py -v` → 17/17 passed (含 URL 验证 / content-type 路由 / HTML 提取 / 脚本剥离 / entity 解码 / 截断 / 网络错误 / 404 / 空内容)
+- `uv run python -m loom.cli eval --filter web-fetch` → 3/3 passed
+- `uv run pytest -m 'not snapshot' -q` → 656 passed (was 639, +17)
+- `uv run ruff + mypy` → 0 issues in 99 source files
+
+**TDD 过程 bug**:
+- 第一次写测试时用 `__import__("unittest.mock")` 延迟 import, 运行时抛 `AttributeError: module 'unittest' has no attribute 'patch'`. 修法: 直接 `from unittest.mock import patch` 顶部 import. 这个 bug 反映我对 `__import__` 的误解 — `__import__("unittest.mock")` 返回的仍是 `unittest` 模块不是 `unittest.mock`. 正确是 `__import__("unittest.mock", fromlist=["patch"])` 或者直接 import. 选了直接的方案, 测试文件也清晰.
+
+**next phase**: `f-session-mutable-prompt-p1` (SystemPrompt 模块级常量, 改 MEMORY.md 后 agent 看不到 — 改成 lazy cached property)
