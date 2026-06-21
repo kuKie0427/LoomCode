@@ -23,6 +23,7 @@ from loom.eval.cases import (
     max_output_tokens_config,  # noqa: F401
     max_turns_guard,  # noqa: F401
     memory_skills,  # noqa: F401
+    microcompact_counter,  # noqa: F401
     permission_canonicalize,  # noqa: F401
     permission_deny_expanded,  # noqa: F401
     permission_unify,  # noqa: F401

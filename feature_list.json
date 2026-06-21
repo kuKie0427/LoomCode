@@ -874,6 +874,14 @@
       "dependencies": [],
       "status": "done",
       "evidence": "uv run pytest tests/test_autocompact_fallback.py -v -> 8/8 passed. uv run python -m loom.cli eval --filter autocompact-fallback --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 631 passed (was 623, +8 new + 2 updated context tests). uv run ruff check . + uv run mypy loom/ -> 0 issues in 97 source files. loom/agent/context.py: new _raw_truncate_fallback() method replaces silent-return when LLM summary fails. autocompact() branches on summary success/failure. Pre-fix bug: loop re-triggered autocompact on every iteration since size was unchanged, creating an infinite recompact loop. Post-fix: size drops, should_compact returns False, loop continues normally."
+    },
+    {
+      "id": "f-microcompact-token-counter-p1",
+      "name": "Phase 1 P1: microcompact updates last_input_tokens",
+      "description": "microcompact replaces tool_result content with placeholder but never updates last_input_tokens, so should_compact returns stale (inflated) values and triggers autocompact prematurely.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "uv run pytest tests/test_microcompact_counter.py -v -> 8/8 passed. uv run python -m loom.cli eval --filter microcompact-counter --fail-under 100 -> 2/2 passed. uv run pytest -m 'not snapshot' -q -> 639 passed (was 631, +8). uv run ruff + mypy -> 0 issues in 98 source files. loom/agent/context.py: microcompact() now tracks bytes_cleared by comparing old tool_result content length vs the 38-char placeholder. After clearing, decrements self.last_input_tokens by bytes_cleared // 4 (clamped to 0). Also invalidates _token_cache entry for the messages list so the next should_compact uses fresh counts. Pre-fix bug: last_input_tokens stayed at the pre-microcompact value, so should_compact immediately thought we were over the 85% threshold and triggered autocompact even though the message list had just shrunk. Post-fix: counter tracks reality, autocompact doesn't fire spuriously."
     }
   ]
 }

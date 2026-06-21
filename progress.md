@@ -5302,3 +5302,27 @@ next phase: `f-grep-tool-p0` (highest leverage per Oracle, but expected ROI may 
 - 第三次跑: 8/8 + 0 regression. 全绿.
 
 **next phase**: `f-microcompact-token-counter-p1` (microcompact 不更新 last_input_tokens 导致 should_compact 提前触发).
+
+---
+
+## 2026-06-22 — f-microcompact-token-counter-p1 (track cleared bytes)
+
+**Goal**: 修 microcompact 不更新 last_input_tokens 导致 should_compact 提前触发 autocompact 的 bug.
+
+**实现**:
+- `loom/agent/context.py:microcompact()` — 新增 `bytes_cleared` 计数, 对比每个 tool_result 替换前后的 content 长度差. 替换后 `self.last_input_tokens = max(0, self.last_input_tokens - bytes_cleared // 4)`. 同时 invalidate `_token_cache` for the messages list, 这样下次 should_compact 走真 Anthropic count_tokens API 拿新值, 不用过期 heuristic.
+- Pre-fix 复盘: `tr["content"] = "[Old tool result content cleared]"` 替换了但 `last_input_tokens` 不动, `current_tokens()` 拿的 `last_input_tokens + estimate(new_messages)` 算的 token 数**仍基于原 tool_result 长度** (heuristic fallback), 触发 should_compact 返回 True, autocompact 又跑一遍. 浪费 token + 时间.
+- Post-fix: counter 与 messages 实际长度保持同步, should_compact 用真值判断.
+
+**Verification**:
+- `uv run pytest tests/test_microcompact_counter.py -v` → 8/8 passed
+- `uv run python -m loom.cli eval --filter microcompact-counter` → 2/2 passed
+- `uv run pytest -m 'not snapshot' -q` → 639 passed (was 631, +8)
+- `uv run ruff + mypy` → 0 issues in 98 source files
+
+**TDD 过程 bug**:
+- 第一次跑: 1 fail (`test_microcompact_cleared_byte_count_matches_reduction` 期望 last_input_tokens == 233 但实际 == 0, 因为我设了初始值 0 然后减 233 被 clamp 到 0). 修法: 初始值 1000, 期望 1000 - 233 = 767.
+- 1 ruff B007 (unused loop var `i`) — 改 for m in messages 即可.
+- 第二次跑: 全绿.
+
+**next phase**: `f-web-fetch-tool-p1` (httpx + readability)

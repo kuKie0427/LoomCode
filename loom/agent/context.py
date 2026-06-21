@@ -104,6 +104,8 @@ class Context:
                     t = cast(ToolUseBlockParam, block)
                     tool_names[t["id"]] = t["name"]
 
+        placeholder = "[Old tool result content cleared]"
+        bytes_cleared = 0
         for i in range(cutoff):
             msg = messages[i]
             if msg["role"] != "user":
@@ -118,7 +120,15 @@ class Context:
                 tool_use_id = tr["tool_use_id"]
                 tool_name = tool_names.get(tool_use_id, "")
                 if tool_name in COMPACTABLE_TOOLS:
-                    tr["content"] = "[Old tool result content cleared]"
+                    old = tr["content"]
+                    old_len = len(old) if isinstance(old, str) else 0
+                    tr["content"] = placeholder
+                    bytes_cleared += max(0, old_len - len(placeholder))
+
+        if bytes_cleared > 0:
+            tokens_saved = bytes_cleared // 4
+            self.last_input_tokens = max(0, self.last_input_tokens - tokens_saved)
+            _token_cache.pop(id(messages), None)
     def autocompact(self, messages: list[MessageParam], client: Anthropic, model: str, context_window: int) -> None:
         try:
             rounds = self._find_rounds(messages)
