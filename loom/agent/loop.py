@@ -310,9 +310,13 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                     )
                 else:
                     # ===== SYNC PATH (unchanged) =====
+                    from loom.agent.llm import with_cache_control, with_tool_cache_control
                     response = llm_client.client.messages.create(
-                        model=llm_client.model, system=_get_system_prompt(), messages=messages,
-                        tools=cast(list, TOOLS), max_tokens=LLM_CONFIG.max_output_tokens,
+                        model=llm_client.model,
+                        system=with_cache_control(_get_system_prompt()),
+                        messages=messages,
+                        tools=with_tool_cache_control(cast(list, TOOLS)) if TOOLS else cast(list, TOOLS),
+                        max_tokens=LLM_CONFIG.max_output_tokens,
                     )
                 context.update(len(messages), response)
                 if tr is not None:

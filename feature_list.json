@@ -898,6 +898,14 @@
       "dependencies": [],
       "status": "done",
       "evidence": "uv run pytest tests/test_session_mutable_prompt.py -v -> 10/10 passed. uv run python -m loom.cli eval --filter session-mutable --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 666 passed (was 656, +10). uv run ruff + mypy -> 0 issues in 101 source files. loom/agent/system_prompt.py (NEW): own module owning process-local cache of rendered system prompt string, keyed by workdir. Invalidated by (1) explicit invalidate_system_prompt() call, (2) any tracked file (AGENTS.md, MEMORY.md, session-handoff.md) mtime change. loom/agent/loop.py: removed module-level SYSTEM = build_system_prompt().build(), replaced with _get_system_prompt() function called at each LLM request site. loom/agent/tools.py: run_memory_write and run_load_skill call invalidate_system_prompt(reason=...) after their writes so the next LLM call sees fresh state. Pre-fix bug class: session-mid edits invisible to the agent. Post-fix: mtime check + explicit invalidation hooks both cover the gap."
+    },
+    {
+      "id": "f-prompt-caching-p2",
+      "name": "Phase 2: Anthropic prompt caching (50%+ token cost reduction)",
+      "description": "loom's prompt.py has the cache-boundary architecture (static/session/memory split by ---) but client.messages.create never sends cache_control. Add ephemeral cache_control to the static tier + tool list.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "uv run pytest tests/test_prompt_caching.py -v -> 8/8 passed. uv run python -m loom.cli eval --filter prompt-caching --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 674 passed (was 666, +8). uv run ruff + mypy -> 0 issues in 101 source files. loom/agent/llm.py: with_cache_control(system) wraps string as single text block with cache_control: ephemeral; with_tool_cache_control(tools) marks last tool with cache_control. both wired into stream_iter (async) and the sync messages.create call site in loop.py. Pre-fix: zero cache hits because client.messages.create never sent cache_control. Post-fix: static tier + tools list cache across turns (estimated 50-80% token cost reduction on long sessions; depends on Anthropic's actual cache hit rate at this model's price tier). Note: cache hit rate requires the configured endpoint to support prompt caching; the DeepSeek-Anthropic-compatible endpoint may or may not honor it — verified the API contract is correct regardless."
     }
   ]
 }

@@ -13,7 +13,45 @@ from loguru import logger
 
 from loom.agent.config import LLM_CONFIG
 
-dotenv.load_dotenv()
+DEFAULT_WINDOW = 128_000
+MIN_CACHEABLE_TOKENS = 1024  # Anthropic prompt-cache minimum content length
+
+
+def with_cache_control(system: str | list) -> str | list:
+    """Wrap a string system prompt as a list of text blocks with
+    `cache_control: ephemeral` on the LAST block. If the system is
+    already a list (e.g. caller pre-built blocks), pass it through
+    unchanged — the caller is expected to mark their own cache point.
+
+    Anthropic's prompt-cache requires content >= 1024 tokens for caching
+    to be honored. Short system prompts (< ~4KB) won't cache; we still
+    send the marker for API consistency.
+    """
+    if isinstance(system, list):
+        return system
+    if not system:
+        return system
+    return [
+        {
+            "type": "text",
+            "text": system,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
+
+def with_tool_cache_control(tools: list) -> list:
+    """Mark the LAST tool with `cache_control: ephemeral` so the tools
+    list caches across turns. The tool definitions are stable across
+    a session (loom has a fixed TOOLS list), so this is a big win.
+    """
+    if not tools:
+        return tools
+    out = list(tools)
+    last = dict(out[-1])
+    last["cache_control"] = {"type": "ephemeral"}
+    out[-1] = last
+    return out
 
 _MODEL_WINDOWS = {
     "deepseek-v4-flash": 1000000,
@@ -99,9 +137,9 @@ class LLMClient:
             try:
                 async with self.async_client.messages.stream(
                     model=self.model,
-                    system=system,
+                    system=with_cache_control(system),
                     messages=messages,
-                    tools=tools,
+                    tools=with_tool_cache_control(list(tools)) if tools else tools,
                     max_tokens=max_tokens,
                 ) as stream:
                     async for event in stream:
