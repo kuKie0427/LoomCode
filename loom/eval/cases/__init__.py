@@ -28,6 +28,7 @@ from loom.eval.cases import (
     microcompact_counter,  # noqa: F401
     permission_canonicalize,  # noqa: F401
     permission_deny_expanded,  # noqa: F401
+    permission_persistence,  # noqa: F401
     permission_unify,  # noqa: F401
     phase5_coverage,  # noqa: F401
     pre_compact_hook,  # noqa: F401

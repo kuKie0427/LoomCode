@@ -922,6 +922,14 @@
       "dependencies": [],
       "status": "done",
       "evidence": "uv run pytest tests/test_conversation_export.py -v -> 19/19 passed. uv run python -m loom.cli eval --filter conversation-export --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 706 passed (was 687, +19). uv run ruff + mypy -> 0 issues in 105 source files. loom/agent/export.py (NEW): ExportMetadata dataclass; to_markdown(messages, meta) renders role headers, thinking blocks collapsed in <details>, tool calls as JSON, tool results truncated at 500 chars, cost summary footer. to_json(messages, meta) produces lossless JSON with metadata. redact_pii() strips sk-xxx API keys, ANTHROPIC_API_KEY=xxx env vars, and email addresses. write_export() creates parent dirs. loom/cli.py: new `loom export --output PATH --format {md,json} --redact` subcommand reads the latest checkpoint and writes the transcript."
+    },
+    {
+      "id": "f-permission-persistence-p2",
+      "name": "Phase 2: Permission persistence (allow-always across sessions)",
+      "description": "PermissionScreen 'allow always' decision only persisted in-memory for current session. Across restart, agent re-prompts. Persist to .minicode/permissions.json with TTL, with workspace-write safety carve-out.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "uv run pytest tests/test_permission_persistence.py -v -> 20/20 passed. uv run python -m loom.cli eval --filter permission-store --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 726 passed (was 706, +20). uv run ruff + mypy -> 0 issues in 107 source files. loom/agent/permission_store.py (NEW): grant/is_granted/revoke/list_grants + load_grants/save_grants + PermissionGrant dataclass. Stored at .minicode/permissions.json. Per-tool canonicalization: bash -> command with whitespace collapsed; path tools -> path arg; unknown -> sorted JSON. Default TTL 30 days; expired grants are silently filtered on load. SAFETY: WORKSPACE_WRITE_TOOLS frozenset (write_file, edit_file, multi_edit, edit_lines) is NEVER auto-allowed -- grant() returns None and is_granted() returns False. Workspace writes always re-prompt the user. TDD bug: loguru formatter doesn't accept {} -- had to use %s. Fixed."
     }
   ]
 }
