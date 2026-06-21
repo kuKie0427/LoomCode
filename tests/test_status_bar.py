@@ -353,3 +353,39 @@ def test_wheel_event_with_cursor_over_composer_uses_app_on_event():
             )
 
     asyncio.run(driver())
+
+
+def test_status_bar_renders_engine_state_badge_for_three_representative_states():
+    """P0a §4.2.1: StatusBar.render() must include the engine_state badge
+    in the joined stats. Locks the 3 representative branches:
+      - executing (active):   [$accent]▸ run[/]
+      - idle:                 [$text-muted]● idle[/]
+      - error:                [$error]⊗ error[/]
+    P0b will wire the App reactive transitions; this test locks the render layer.
+    """
+
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test(size=(120, 25)) as pilot:
+            await pilot.pause(0.05)
+            status_bar = app.query_one(StatusBar)
+
+            status_bar.engine_state = "executing"
+            await pilot.pause(0.05)
+            assert "[$accent]▸ run[/]" in status_bar.render(), (
+                f"executing badge missing: {status_bar.render()!r}"
+            )
+
+            status_bar.engine_state = "idle"
+            await pilot.pause(0.05)
+            assert "[$text-muted]● idle[/]" in status_bar.render(), (
+                f"idle badge missing: {status_bar.render()!r}"
+            )
+
+            status_bar.engine_state = "error"
+            await pilot.pause(0.05)
+            assert "[$error]⊗ error[/]" in status_bar.render(), (
+                f"error badge missing: {status_bar.render()!r}"
+            )
+
+    asyncio.run(driver())

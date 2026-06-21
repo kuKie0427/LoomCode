@@ -4283,3 +4283,58 @@ Success: no issues found in 84 source files
 **Design contract preserved:** §5 "1-line StatusBar cap" (still 1 line, still 87 chars), §2 rule 2 "quiet by default" (no new motion), §8.1 "one-theme rule" (zero literal color names), §6 motion intent (all transitions still instant). The 93-col narrow-terminal budget is unchanged.
 
 **Not done (intentionally):** Options B/C/D/E from the proposal. User picked A; the other options remain valid future work if "monotonous" feedback recurs. B (loop state indicator) would solve it more directly but introduces a new reactive; A keeps the diff minimal and contract-locked.
+
+## Session: f-tui-paradigm-p0a — Engine state badge in StatusBar (2026-06-21)
+
+P0a delivers the render layer for the §2.2.1 engine state machine + §4.2.1 StatusBar engine badge. P0b will wire the App reactive transitions; this session covers the helper + StatusBar wiring + tests + snapshot re-baseline.
+
+**Implementation:**
+- `loom/tui/status_bar.py` (+20): added `from typing import Literal`, module-level `EngineState = Literal["idle", "thinking", "streaming", "executing", "compacting", "error"]`, `engine_state: reactive[EngineState] = reactive("idle")` reactive field, pure helper `_render_engine_badge(state) -> str` with 3 branches (error → `[$error]⊗ error[/]`, idle → `[$text-muted]● idle[/]`, others → `[$accent]▸ run[/]`), wired `_render_engine_badge(self.engine_state)` into `render()` after `ctx_str` (final order: `loom · model · ⎇ branch · Nt·Mtl · ctx · badge · key_hints`).
+- `tests/test_engine_state.py` (new, 77 lines): 6 test functions = 9 pytest cases. Verifies Literal has exactly 6 values, idle/error/4-active-state badge strings, no literal color names (regex sweep across all 6 states), StatusBar default reactive = "idle".
+- `tests/test_status_bar.py` (+36): 1 integration test using `AgentTUIApp.run_test()` to verify the badge appears in `render()` for executing/idle/error states inside a real Textual driver.
+
+**Verification:**
+```
+$ uv run pytest tests/test_engine_state.py tests/test_status_bar.py -v
+9 passed + 14 passed = 23 passed in 5.22s
+
+$ uv run ruff check loom/tui/status_bar.py tests/test_engine_state.py tests/test_status_bar.py
+All checks passed!
+
+$ uv run mypy loom/tui/status_bar.py
+Success: no issues found in 1 source file
+
+$ uv run python -c "import re; print(len(re.findall(r'\[(green|yellow|cyan|red|blue|purple|magenta|orange|black|white)', open('loom/tui/status_bar.py').read())))"
+0   # §2.3 one-theme rule: zero literal color names
+
+$ uv run python -m loom.cli eval --fail-under 100
+Eval results: 234/234 passed   # no regression
+
+$ ./init.sh
+=== Verification Complete (all green) ===
+==================== 463 passed, 37 warnings in 47.66s =======================
+```
+
+**Snapshot re-baseline (Working Rule #10):** The default state is `idle`, so 7 full-app snapshot baselines were rebaselined with `pytest --snapshot-update`. Diff inspection (after `terminal-X` hash normalization) confirmed the ONLY change in each snapshot is the addition of `● idle` text segment between ctx stats and key hints, with proper `· ` separator. `test_permission_modal_open` and `test_tool_card_completed` correctly unchanged (modal covers status bar; tool-card test uses minimal TestApp without StatusBar).
+
+**Files changed:**
+
+| File | Lines | Notes |
+|---|---|---|
+| `loom/tui/status_bar.py` | +20 | `Literal` import, `EngineState` type alias, `engine_state` reactive, `_render_engine_badge` helper, render() wiring |
+| `tests/test_engine_state.py` | new 77 | 6 test functions = 9 pytest cases (Literal-arity, 3 badge branches, regex no-literal-colors, default reactive) |
+| `tests/test_status_bar.py` | +36 | 1 integration test (3-state render check via AgentTUIApp.run_test) |
+| `tests/__snapshots__/test_tui_header/test_header_collapsed_empty.raw` | rebaselined | `● idle` text segment added between ctx and esc hints |
+| `tests/__snapshots__/test_tui_header/test_header_collapsed_populated.raw` | rebaselined | same |
+| `tests/__snapshots__/test_tui_header/test_header_collapsed_subagent_hidden.raw` | rebaselined | same |
+| `tests/__snapshots__/test_tui_header/test_header_expanded_mcp.raw` | rebaselined | same |
+| `tests/__snapshots__/test_tui_header/test_header_expanded_subagent.raw` | rebaselined | same |
+| `tests/__snapshots__/test_tui_header/test_header_expanded_todo.raw` | rebaselined | same |
+| `tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw` | rebaselined | same |
+| `feature_list.json` | +1 entry | `f-tui-paradigm-p0` added at end with `status: "active"` (parent feature; P0b will mark `done` once App wiring is also complete) |
+
+**Design contract preserved:** §4.2.1 (3 badge strings exact match), §8.3 (token spans: `$text-muted`/`$error`/`$accent`), §2.3 one-theme rule (0 literal color names verified by regex), §2.2.4 (no hover/animation in badge), §5 anti-pattern (no "ready"/"waiting" for idle), §7 narrow-terminal budget (StatusBar now ~95 cols vs ≤95 budget).
+
+**Gotcha (noted in `.sisyphus/notepads/loop-tui-paradigm-p0a/learnings.md`):** `EngineState = Literal[...]` is a value assignment, not an import. Placing it between stdlib and third-party import blocks triggers Ruff E402. Correct placement is: stdlib imports → third-party imports → type alias → constants → helpers → class. Also: Textual `reactive` kwargs go in `compose()` body, not `Static.__init__()` — the only way to set initial reactive value is `widget.engine_state = "executing"` AFTER the widget mounts (use `await pilot.pause(0.05)` after assignment).
+
+**Out of scope (deferred to P0b):** App-level reactive transitions (6 LLM/hook events → engine_state updates), integration tests for those transitions, and the full f-tui-paradigm-p0 → `done` evidence (this phase's evidence is the P0a render layer; P0b will append App wiring evidence and mark parent feature `done`).

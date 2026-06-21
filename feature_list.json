@@ -702,6 +702,14 @@
       "status": "done",
       "verification": "./init.sh && uv run python -m loom.cli eval --fail-under 100",
       "evidence": "Before: status bar was a single $text-color strip with only the progress bar color and elapsed time as visual anchors. After: 5-tier hierarchy with the model name now a $secondary cyan-ish anchor; loom wordmark and key hints demoted to $text-faint; ctx: label and git branch to $text-muted; Nt·Mtl counters carry the main $text weight. Direct verification: ./init.sh → 453 pytest passed, 0 ruff, 0 mypy, 9 snapshot tests pass. uv run python -m loom.cli eval --fail-under 100 → 234/234 passed (no regression). 7 snapshot baselines re-recorded (test_header_collapsed_empty/populated/subagent_hidden, test_header_expanded_mcp/todo/subagent, test_empty_layout) — diff confirmed color-only change: 4 of the 7 had a single $text segment per element become 4 segments (loom / · / model / ·) due to Rich splitting token spans, plus r8/r9 color slots in the SVG CSS palette shifted to accommodate $secondary insertion. Text content and geometry identical after terminal-X hash normalization per Working Rule 10. test_status_bar.py::test_status_bar_shows_context_capacity_with_bar still passes (asserts \"ctx:\" in text — the new token span is still ctx: when stripped), test_status_bar_turns_counts_user_messages_only still passes (asserts \"3t\" in text), test_status_bar_updates_after_user_turn_count_changes still passes (asserts \"0t\" / \"5t\" in text). No literal color names (no [green]/[yellow]/[cyan]/[red]/[blue]/[purple]) in loom/tui/status_bar.py. [dim] style modifier removed in favor of [$text-faint] token. Files changed: 1 source (loom/tui/status_bar.py +7/-5) + 7 snapshot baselines + 1 docs section (§9.3 visual hierarchy bullet added, §9.5 envelope table StatusBar row updated, Appendix B change log entry)."
+    },
+    {
+      "id": "f-tui-paradigm-p0",
+      "name": "TUI 织机范式 P0: Engine state machine + StatusBar engine badge",
+      "description": "实现 §2.2.1 6 态 engine state (idle/thinking/streaming/executing/compacting/error) + §4.2.1 StatusBar engine badge ([▸ run]/[● idle]/[⊗ error])。P0a: EngineState type + StatusBar reactive + 渲染层。P0b: App reactive + 6 transition + tests。",
+      "dependencies": [],
+      "status": "active",
+      "verification": "uv run python -m loom.cli eval --fail-under 100 && uv run pytest tests/test_engine_state.py tests/test_status_bar.py -v && ./init.sh"
     }
   ]
 }

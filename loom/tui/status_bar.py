@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from textual.reactive import reactive
 from textual.widgets import Static
+
+EngineState = Literal["idle", "thinking", "streaming", "executing", "compacting", "error"]
 
 _BAR_WIDTH = 10
 _BAR_FULL = "█"
@@ -41,6 +45,20 @@ def _ctx_color_class(ratio: float) -> str:
     return "ctx-ok"
 
 
+def _render_engine_badge(state: EngineState) -> str:
+    """§4.2.1 engine badge — 1-glyph state indicator.
+
+    idle  → [$text-muted]● idle[/]
+    error → [$error]⊗ error[/]
+    其他 (thinking/streaming/executing/compacting) → [$accent]▸ run[/]
+    """
+    if state == "error":
+        return "[$error]⊗ error[/]"
+    if state == "idle":
+        return "[$text-muted]● idle[/]"
+    return "[$accent]▸ run[/]"
+
+
 class StatusBar(Static):
     DEFAULT_CSS = """
     StatusBar {
@@ -54,6 +72,7 @@ class StatusBar(Static):
     ctx_window: reactive[int] = reactive(0)
     elapsed_seconds: reactive[int] = reactive(0)
     git_branch: reactive[str] = reactive("")
+    engine_state: reactive[EngineState] = reactive("idle")
 
     def render(self) -> str:
         app = self.app
@@ -86,6 +105,7 @@ class StatusBar(Static):
             )
         stat_parts.append(f"{self.turns}t·{self.tools}tl")
         stat_parts.append(ctx_str)
+        stat_parts.append(_render_engine_badge(self.engine_state))
 
         elapsed = _format_elapsed(self.elapsed_seconds)
         key_hints = f"[$text-faint]esc ^l / {elapsed}[/]"
