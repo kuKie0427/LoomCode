@@ -954,6 +954,14 @@
       "dependencies": [],
       "status": "done",
       "evidence": "uv run pytest tests/test_trace_batch_io.py -v -> 9/9 passed. uv run python -m loom.cli eval --filter trace- --fail-under 100 -> 6/6 passed (3 new). uv run pytest -m 'not snapshot' -q -> 761 passed (was 752, +9). uv run ruff + mypy -> 0 issues in 112 source files. loom/agent/trace.py: Trace.__init__ adds self._fh = None; record() uses _ensure_open() to lazy-open once. The file is opened with buffering=1 (line-buffered) and f.write() + f.flush() after each record (preserves append-on-crash invariant). Added close() method; stop() calls close() before clearing the global. Pre-fix: open+write+close per record -> 500 syscalls per session. Post-fix: 1 syscall to open, 1 to close, N writes between. TDD caught: 4x ambiguous variable `l` (renamed to `line`); mypy caught None.get in subagent_templates eval case (added None check); concurrent test (5 threads x 10 records) verified no JSONL corruption."
+    },
+    {
+      "id": "f-readme-update-chore",
+      "name": "Chore: README rewrite (drop ~300 LOC claim, accurate size + honest gaps)",
+      "description": "README claimed ~300 LOC. Actual is ~17K. Rewrite to be accurate + add a 'what loom does NOT do well' section so the project positioning is honest.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "wc -l loom/agent/*.py loom/eval/*.py loom/eval/cases/*.py loom/tui/*.py = 17,123 total. README updated: new 'What loom does well' + 'What loom does NOT do well (yet)' sections. '~300 LOC' claim removed. New size table: agent ~5K, eval ~9K, tui ~2.8K, tests ~7.5K, total ~17K. Quick Start updated to show all 4 main subcommands (run, tui, eval, --help). Links to feature_list_roadmap.json for full plan. Verification: grep '~300 LOC' README.md -> 0 matches (claim removed)."
     }
   ]
 }
