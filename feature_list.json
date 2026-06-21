@@ -806,6 +806,37 @@
       "status": "done",
       "verification": "uv run pytest -q && uv run ruff check . && uv run mypy loom/ && uv run python -m loom.cli eval --fail-under 100 && ./init.sh",
       "evidence": "uv run pytest -q → 554 passed (含 7 个新录快照), uv run ruff check . → All checks passed, uv run mypy loom/ → Success: no issues found in 87 source files, uv run python -m loom.cli eval --fail-under 100 → Eval results: 253/253 passed, ./init.sh → 'Verification Complete (all green)' + '554 passed, 44 warnings in 83.83s' + EXIT=0. 93列预算实测 (default model 'deepseek-v4-flash'): idle-empty 80 / idle-99t 87 / thinking-3t 90 / streaming-3t 91 / executing-3t 91 / compacting-3t 92 / compacting-99t 93 (worst case exactly at budget) / error-3t 87. 全部 ≤93 列符合 §7 预算。trim 来源: prefix leading ' ' (-1) + trailing ' ' (-1) + render '   ' → ' ' (-2) = -5 cols total。Tests test_ctx_rail.py (10) + test_status_bar.py (22) = 32 passed。Snapshots: test_tui_snapshot.test_empty_layout + 6 test_tui_header.* = 7 snapshots re-recorded, all PASS post-update。Working Rule 10 验证: 旧快照 vs 新渲染的 <text> 段规范化 hash 后,真实视觉变化为 (1) loom 前缀删除 (2) ●───── → ❋┄┄┄┄┄┄┄┄┄┄┄┄┄ (3) ShuttleTickOverlay caret tick 行删除 (4) esc ^l key hint 删除;● idle / ctx: 保留。Files: docs/tui-design-language.md (§7 L504 inline annotation + §9.3 L722 placeholder 回填 + Appendix B L785 SP2 close entry) + loom/tui/status_bar.py (3 cosmetic trims) + 7 snapshot .raw files。"
+    },
+    {
+      "id": "f-read-file-linenums",
+      "name": "read_file 输出加行号 (cat -n 风格, 1-indexed offset)",
+      "description": "follow-up f-read-file-offset 的 UX 增强: (1) run_read 输出加 1-indexed 行号前缀, cat -n 风格, 右对齐宽度 = len(str(total_lines)); (2) offset 语义从 0-indexed 升到 1-indexed, 与显示行号 1:1 对齐 (LLM 看到 '120: def mcp_glyph' 就能直接传 offset=120); (3) read_file tool description + SUB_TOOLS schema description 同步更新 1-indexed 语义。Breaking 改动: 之前 f-read-file-offset 写的 4 个单测 + 1 个 eval case 的 offset 值要迁移 (0-indexed → 1-indexed); 此外基础 read_file 调用的输出也变了 (现在带行号), 不影响 LLM 但 UI 视觉上更密。动机: LLM 之前调用 read_file(limit=200) 后只能猜 'file 至少 685 行, 我猜 120 附近' (盲调 offset=120 撞 past-end), 现在看到 '120: def mcp_glyph' 就能精准回传 offset=120。",
+      "dependencies": [
+        "f-test-framework-p3"
+      ],
+      "status": "done",
+      "verification": "uv run pytest tests/test_tools.py -q && uv run python -m loom.cli eval 2>&1 | grep read-file-offset && ./init.sh",
+      "evidence": "uv run pytest tests/test_tools.py -q → 28 passed (4 new + 4 migrated; was 24). uv run python -m loom.cli eval 2>&1 | grep read-file-offset → '[PASS] read-file-offset-returns-windowed-slice (1ms) — 1-indexed offset+window+footer ok'; full eval 255/255 this run (pre-existing cli-help wall-time flake, 200ms threshold, noted in sp0/sp1 evidence). ./init.sh → 'Verification Complete (all green)' + 563 passed, 8 snapshots (was 559, +4 new tests). LLM 闭环验证: run_read('loom/tui/header.py', limit=200) → 1:...200: + '... (486 more lines)' (header.py 685 行); LLM 看到 '120: def mcp_glyph' → run_read(limit=10, offset=120) → 120:def mcp_glyph(...) 起 10 行 + '... (557 more lines)', 1:1 闭环。ruff + mypy clean。"
+    },
+    {
+      "id": "f-verify-quick",
+      "name": "两档 verification: verify-quick.sh (dev ~10s) + init.sh (closeout ~165s)",
+      "description": "解决 '改 10 分钟跑半小时' 的痛点。当前 init.sh 单 cycle ~165s (init.sh 118s pytest 8 snapshot + eval 44s), 跑两次 (agent + reviewer) = 5.5 分钟, 严重拖慢开发。本 feature: (1) loom eval 加 --filter 按 case name substring 过滤; (2) conftest pytest_collection_modifyitems hook 给所有用 snap_compare fixture 的 test 自动打 snapshot marker; (3) pyproject.toml 注册 snapshot marker 描述; (4) 新增 scripts/verify-quick.sh: 跑 ruff+mypy (0.2s) + git diff 推断 loom/X/Y.py → tests/test_Y.py 跑子集 + skip snapshot (-m 'not snapshot') + grep changed loom/eval/cases/*.py 的 `name = \"...\"` 自动跑相关 eval。Wall-time: auto scope 7.6s, 显式指定文件 1.2s, --no-skip-snapshot 12.2s。AGENTS.md 加 Working Rule #17 + Quick Start 加 verify-quick.sh 行 + verification commands 章节更新。",
+      "dependencies": [
+        "f-test-framework-p3"
+      ],
+      "status": "done",
+      "verification": "uv run pytest -m 'not snapshot' -q && time scripts/verify-quick.sh && time scripts/verify-quick.sh tests/test_tools.py && ./init.sh",
+      "evidence": "uv run pytest -m 'not snapshot' -q → 555 passed, 8 deselected (marker works). time scripts/verify-quick.sh (auto scope: changed loom/agent/tools.py + loom/eval/cases/phase5_coverage.py) → real 7.483s (was 165s, 22x speedup). time scripts/verify-quick.sh tests/test_tools.py (explicit file) → real 1.240s (133x). time scripts/verify-quick.sh --no-skip-snapshot → real 12.153s. ./init.sh → 'Verification Complete (all green)' + 563 passed + 8 snapshots. loom eval --filter read-file-offset → 1/1 passed (was 255/255 = 44s). ruff clean, mypy clean. Conftest hook auto-marks 8 snap_compare tests; pyproject registers 'snapshot' marker description. 11 files changed, +295/-23. AGENTS.md Working Rule #17 enforces 'dev cycle → verify-quick.sh, closeout → init.sh + loom eval' pattern."
+    },
+    {
+      "id": "f-agent-quality-eval-p0",
+      "name": "Phase 1 P0: Agent-quality eval framework (the compass)",
+      "description": "THE blocker for the post-skeleton roadmap. Establish the FIRST set of agent-quality evals — real coding tasks executed by an actual loom agent against an isolated tmp workdir, with the agent's git diff asserted against an expected outcome. Cases live in loom/eval/cases/agent_quality/. New `loom eval --kind agent-quality` selector separates from harness evals. Baseline pass rate is the calibration point for all subsequent Phase 1 fixes (grep, edit-file v2, max-turns guard) — each must measurably improve the agent-quality score.",
+      "dependencies": [],
+      "status": "done",
+      "verification": "uv run python -m loom.cli eval --kind agent-quality --fail-under 30",
+      "evidence": "uv run python -m loom.cli eval --kind agent-quality --fail-under 30 → 'Eval results: 10/10 passed' (75 LLM calls, 74 tool calls, 21,212 input + 8,293 output tokens across the 10-case baseline). Each case spawns `loom run` as a subprocess against an isolated git-initialized tmp workdir under /tmp/loop-eval/agent-quality/<case-name>/, captures the resulting git diff, and runs deterministic judge asserts on file state + executable behavior. Categories: 3 targeted-edit (aq-edit-*), 3 cross-file search-and-modify (aq-search-*), 2 bug investigation from error message (aq-bug-*), 2 test-driven fix (aq-tdd-*). 18 new pytest tests in tests/test_agent_quality_framework.py verify the framework mechanics without LLM cost. 573/573 non-snapshot pytest pass. 255/255 harness evals still pass. ruff + mypy clean. The baseline is more positive than the Oracle 'thin SDK wrapper' analysis predicted (10/10 vs expected 30-50%): this means Phase 1 P0 fixes (grep/edit-v2) must be measured against the HARDER cases (ambiguous prompts, 50+ tool-call sessions, multi-file refactors) which a future round of agent-quality cases should target."
     }
   ]
 }

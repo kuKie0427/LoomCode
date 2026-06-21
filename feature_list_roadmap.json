@@ -1,0 +1,251 @@
+{
+  "$schema": "./feature_list.schema.json",
+  "project": "loom",
+  "description": "Roadmap to evolve loom from agent-skeleton to production-grade coding agent. Entries follow feature_list.schema.json. Copy individual entries into the main feature_list.json features array when ready to start. Strategic frame: harness-as-product. Phase 1 P0 ships agent-quality eval FIRST so every subsequent fix is measured.",
+  "state_machine": {
+    "transitions": [
+      "not-started → in-progress",
+      "in-progress → blocked",
+      "blocked → in-progress",
+      "in-progress → done"
+    ],
+    "rule": "Only ./init.sh (or a direct call to a feature verification command with passing output) may set status=done."
+  },
+  "features": [
+    {
+      "id": "f-agent-quality-eval-p0",
+      "name": "Phase 1 P0: Agent-quality eval framework (the compass)",
+      "description": "THE blocker for the entire roadmap. Establish the FIRST set of agent-quality evals — real coding tasks executed by an actual loom agent against the loom codebase itself. Ship 10-15 cases covering: (1) targeted file edits given file+function name; (2) cross-file search-and-modify; (3) bug investigation from error message; (4) test-driven fix (read failing test → locate bug → fix → re-run). Each case spawns `loom run` as subprocess against a tmp git clone, captures the resulting `git diff`, and asserts diff matches a tolerance-bounded expected outcome (exact for narrow cases; deterministic LLM-as-judge for open-ended cases). Cases live in loom/eval/cases/agent_quality/. Add `loom eval --kind agent-quality` selector. Document baseline pre-Phase-1 pass rate in evidence (expected 30-50%). Without this, no later fix has measurable impact.",
+      "dependencies": [],
+      "status": "not-started",
+      "verification": "uv run python -m loom.cli eval --kind agent-quality --fail-under 30",
+      "evidence": null
+    },
+    {
+      "id": "f-grep-tool-p0",
+      "name": "Phase 1 P0: Native grep tool (structured search)",
+      "description": "Most-needed missing tool. Register `grep` in TOOL_REGISTRY. Use ripgrep (rg) if on PATH, fall back to Python re + Path.rglob. Signature: grep(pattern, path='.', glob=None, case_insensitive=False). Output is STRUCTURED: each match formatted as path:line:content with content truncated to 200 chars; results capped at 200 matches with explicit [...N more matches] footer. Workspace-bound via safe_path(). is_read_only=True, is_concurrent_safe=True. CRITICAL: also add to SUB_TOOLS and SUB_HANDLERS — without grep, subagents are useless for the most common delegation pattern (code investigation). Tool description teaches the agent: 'Use grep BEFORE reading files when looking for symbols/patterns; structured output is far cheaper than reading many files'. Gate: must improve at least 3 agent-quality cases that were failing due to missing search.",
+      "dependencies": [
+        "f-agent-quality-eval-p0"
+      ],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_grep_tool.py -q && uv run python -m loom.cli eval --filter grep && uv run python -m loom.cli eval --kind agent-quality --fail-under 50",
+      "evidence": null
+    },
+    {
+      "id": "f-edit-file-v2-p0",
+      "name": "Phase 1 P0: edit_file v2 (fuzzy + multi-edit + line-range)",
+      "description": "Current run_edit is text.replace(old, new, 1) — fails on whitespace mismatch, silently picks first match if old_text appears multiple times, no transaction. Rewrite as: (1) exact match — if unique, apply; (2) multiple matches → return error 'old_text matches N locations, add surrounding context'; (3) zero matches AND len(old_text)>40 → try difflib.SequenceMatcher fuzzy fallback with ratio>=0.85, apply only if exactly one fuzzy match; (4) new multi_edit(path, edits=[{old_text,new_text},...]) tool — all-or-nothing in one file with rollback on partial failure; (5) new edit_lines(path, start_line, end_line, new_content) tool — 1-indexed inclusive range replacement. Update SUB_TOOLS to expose all three. Tool result includes ASCII unified diff so the agent can self-verify. Migrate existing tests, add 15+ new cases covering exact / multi-match error / fuzzy success / fuzzy miss / multi-edit transaction / multi-edit rollback / line-range / past-EOF.",
+      "dependencies": [
+        "f-agent-quality-eval-p0"
+      ],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_edit_file_v2.py -q && uv run python -m loom.cli eval --filter edit-file && uv run python -m loom.cli eval --kind agent-quality --fail-under 60",
+      "evidence": null
+    },
+    {
+      "id": "f-max-turns-guard-p0",
+      "name": "Phase 1 P0: max_turns guard (kill while-True)",
+      "description": "loop.py is `while True` — if the LLM forks tool calls infinitely, the loop runs until OOM or context overflow. Wrap with `for turn in range(MAX_TURNS=100)` where MAX_TURNS reads from harness.toml [agent] max_turns (default 100). On limit, inject `<system-reminder>You have reached the maximum turn limit. Summarize current progress, list remaining work, and stop.</system-reminder>` as user message, then break with stop_reason='max_turns_reached'. Same for spawn_subagent (already 30 cap — promote to config-driven). New trace event loop_limit_reached with turn_count, tool_call_count, last_stop_reason. Update docs/context.md. Eval asserts: (a) loop exits cleanly at limit, (b) reminder injected, (c) trace event fires.",
+      "dependencies": [],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_max_turns_guard.py -q && uv run python -m loom.cli eval --filter max-turns",
+      "evidence": null
+    },
+    {
+      "id": "f-autocompact-fallback-p1",
+      "name": "Phase 1 P1: autocompact fallback (kill infinite recompact loop)",
+      "description": "Bug: Context.autocompact silently returns when _generate_summary() fails (returns None). But the next loop iteration is still over 85% threshold, so autocompact retries immediately, forever. Fix with fallback chain: (1) try LLM summary (current behavior); (2) on failure, fall back to raw truncation — keep tail + inject placeholder system-reminder + clear last_input_tokens + checked_at_index so next should_compact() check sees reduced size; (3) if tail extraction itself fails, raise CompactionError; the loop catches it, logs to trace, injects the same reminder. Add eval simulating LLM summary failure (monkeypatch _generate_summary -> None) asserting (a) compaction still happens, (b) tail preserved, (c) loop continues without re-triggering compaction next turn.",
+      "dependencies": [],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_autocompact_fallback.py -q && uv run python -m loom.cli eval --filter autocompact-fallback",
+      "evidence": null
+    },
+    {
+      "id": "f-microcompact-token-counter-p1",
+      "name": "Phase 1 P1: microcompact updates last_input_tokens",
+      "description": "Bug: Context.microcompact replaces tool_result content with '[Old tool result content cleared]' but never updates self.last_input_tokens. Result: current_tokens() returns an inflated value reflecting OLD content size, so should_compact() triggers autocompact prematurely. Fix: track bytes_cleared in the microcompact loop, then self.last_input_tokens = max(0, self.last_input_tokens - bytes_cleared // 4). Also invalidate _count_tokens_accurate cache for id(messages). Test asserts: after microcompact clears N bytes, current_tokens() drops by ~N/4. Eval wraps a 50-turn fake session asserting autocompact does NOT fire prematurely after microcompact.",
+      "dependencies": [],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_microcompact_counter.py -q && uv run python -m loom.cli eval --filter microcompact-counter",
+      "evidence": null
+    },
+    {
+      "id": "f-web-fetch-tool-p1",
+      "name": "Phase 1 P1: web_fetch tool (read external docs and APIs)",
+      "description": "Modern coding requires reading external docs, package READMEs, RFCs. Add web_fetch(url, max_chars=50000) to TOOL_REGISTRY and SUB_TOOLS. Implementation: httpx with 30s timeout + redirect follow (max 5 hops); content-type sniff — text/html through readability-lxml + markdownify to clean markdown; text/plain returned as-is; other types rejected with explanatory error. Allow-list config in harness.toml [tools.web_fetch] allowed_hosts (default ['*']); permission rule prompts user on first request per host per session (extends PermissionScreen). Cap response at 50KB pre-conversion. is_read_only=True, is_concurrent_safe=True. Trace event web_fetch with url, response_code, bytes_returned. Eval case fetches a known-stable doc page and asserts content extraction succeeds.",
+      "dependencies": [],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_web_fetch.py -q && uv run python -m loom.cli eval --filter web-fetch",
+      "evidence": null
+    },
+    {
+      "id": "f-session-mutable-prompt-p1",
+      "name": "Phase 1 P1: session-mutable system prompt (rebuild on memory_write)",
+      "description": "Bug: SystemPrompt is built ONCE at loop.py module import (line 147). Session-mid edits to AGENTS.md or MEMORY.md (e.g. via memory_write) are invisible to the agent until process restart. Fix: convert the module-level SYSTEM constant to a lazy cached property on a SystemPromptBuilder singleton; mark cache dirty whenever (a) memory_write succeeds, (b) load_skill writes its body to scratch, (c) external file mtime on AGENTS.md/MEMORY.md changes (cheap stat check at top of each LLM call). Rebuild lazily on next access. Add a unit test that flips MEMORY.md mid-session and asserts the rebuilt prompt contains the new content. Trace event prompt_rebuilt with reason.",
+      "dependencies": [],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_session_mutable_prompt.py -q && uv run python -m loom.cli eval --filter session-mutable-prompt",
+      "evidence": null
+    },
+    {
+      "id": "f-cost-telemetry-p2",
+      "name": "Phase 2: Token cost telemetry (per-turn + cumulative)",
+      "description": "Real users need cost visibility before they trust the agent. Track usage per LLM call (input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens). Multiply by model-specific $/M-token rate from harness.toml [pricing.<model>] table (defaults shipped for claude-sonnet-4, deepseek-v4-flash). Surface: (a) TUI StatusBar new cost cell showing `$0.0X | total: $Y.YY`; (b) /cost slash command for breakdown; (c) trace event llm_usage already partially exists — extend with cost_usd field; (d) `loom run` REPL prints turn-end summary; (e) /export includes cost summary in markdown. Eval: simulated 10-turn session yields a cost > 0 and the sum equals per-turn sum.",
+      "dependencies": [],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_cost_telemetry.py -q && uv run python -m loom.cli eval --filter cost-telemetry",
+      "evidence": null
+    },
+    {
+      "id": "f-conversation-export-p2",
+      "name": "Phase 2: Conversation export (markdown + json)",
+      "description": "When the agent fails, users need to share the transcript for debugging. Add /export slash command supporting --format markdown|json, --output PATH. Markdown variant: includes role headers, thinking blocks (collapsed), tool calls with input + output (truncated to 200 chars in summary, full in code block), assistant text, cost summary footer. JSON variant: the raw messages list + metadata (model, session_id, total_cost, turn_count, tool_call_count, started_at, ended_at). CLI subcommand `loom export <checkpoint-path>` for offline export. Eval asserts (a) markdown round-trips structurally, (b) JSON re-imports as a valid conversation, (c) PII redaction option (--redact) removes ANTHROPIC_API_KEY-like strings.",
+      "dependencies": [],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_export.py -q && uv run python -m loom.cli eval --filter conversation-export",
+      "evidence": null
+    },
+    {
+      "id": "f-tool-error-semantics-p2",
+      "name": "Phase 2: Tool error handling semantics (self-correction)",
+      "description": "Currently when bash exits non-zero or edit_file can't find old_text, the agent sees the error string but the system prompt doesn't teach it to read errors and self-correct — observed failure mode: agent retries identical command, ignoring the error. Fix is primarily prompt engineering + structured error contracts. Add: (a) all tool error returns prefixed with `[error]` marker for grep-ability; (b) new system-prompt section 'Tool Failure Handling' explaining how to read stderr, check exit codes, retry with adjusted args, escalate to user if 2 retries fail; (c) trace event tool_retry tracking same-command retries; (d) PostToolUse hook detects 3+ identical-command retries and injects guidance reminder. Eval simulates `edit_file` failing 3x with same args and asserts agent reads error and either (a) changes args or (b) asks user.",
+      "dependencies": [
+        "f-agent-quality-eval-p0"
+      ],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_tool_error_semantics.py -q && uv run python -m loom.cli eval --kind agent-quality --filter tool-error-recovery",
+      "evidence": null
+    },
+    {
+      "id": "f-permission-persistence-p2",
+      "name": "Phase 2: Permission persistence (allow-always across sessions)",
+      "description": "PermissionScreen has 'allow once', 'allow always', 'deny' but 'allow always' only persists in-memory for the current session. Persist to .minicode/permissions.json keyed by (tool_name, canonical_command_pattern). On startup, load and apply. Add `loom permissions list` and `loom permissions revoke <id>` CLI commands. Sensitive write/edit decisions DO NOT persist (workspace-write rule is always re-prompted). Add expiration TTL field (default 30 days) configurable in harness.toml [permissions] ttl_days. Eval asserts: (a) allow-always survives process restart, (b) revoke removes it, (c) expired entries are filtered out.",
+      "dependencies": [],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_permission_persistence.py -q && uv run python -m loom.cli eval --filter permission-persistence",
+      "evidence": null
+    },
+    {
+      "id": "f-prompt-caching-p2",
+      "name": "Phase 2: Anthropic prompt caching (50%+ token cost reduction)",
+      "description": "loom's prompt.py already has the cache-boundary architecture (static/session/memory tiers split by --- separator) but client.messages.create() never sends cache_control. Add cache_control={'type':'ephemeral'} to the last block of the static tier of the system prompt; same for tool definitions list (tools rarely change within a session). Verify with API response cache_creation_input_tokens > 0 on first call and cache_read_input_tokens > 0 on subsequent calls. Update cost_telemetry feature to report cache hit rate. Skip caching when tier is below the 1024-token cache minimum (Anthropic API requirement). Eval asserts hit rate >50% across a 5-turn fixture session.",
+      "dependencies": [
+        "f-cost-telemetry-p2"
+      ],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_prompt_caching.py -q && uv run python -m loom.cli eval --filter prompt-caching",
+      "evidence": null
+    },
+    {
+      "id": "f-subagent-grep-patterns-p2",
+      "name": "Phase 2: Subagent task templates (investigation / refactor / TDD-fix)",
+      "description": "Currently `task` is a free-form 'description' string — agents pass anything. After grep is exposed to subagents (f-grep-tool-p0), add three structured task templates as separate tools (or task variants): (a) investigate_code(question, hint_paths=[]) — subagent searches + reads + returns findings; (b) refactor_across_files(rename_or_pattern, scope_glob) — subagent searches all occurrences, plans edits, applies with multi_edit, verifies; (c) fix_failing_test(test_path) — subagent runs test, reads failure, locates source, fixes, re-runs. Each template injects a specialized SUB_SYSTEM prompt tailored to that workflow. Templates are first-class tools alongside `task`. Eval cases cover each template against loom itself.",
+      "dependencies": [
+        "f-grep-tool-p0",
+        "f-edit-file-v2-p0"
+      ],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_subagent_templates.py -q && uv run python -m loom.cli eval --kind agent-quality --filter subagent-template",
+      "evidence": null
+    },
+    {
+      "id": "f-trace-batch-io-p2",
+      "name": "Phase 2: Trace JSONL batch I/O",
+      "description": "Current trace.record() opens, writes, closes the JSONL file per event. For a 500-tool-call session that's 500+ syscalls. Fix: keep a single file handle open at the Trace level (acquired in start(), released in stop()), write+flush per record (preserving append-only-on-crash invariant), but skip the open/close overhead. Optional opt-in `[telemetry] batch_size=N` config that buffers N events before flush for throughput-critical workloads. Working Rule update if needed. Eval: 100-event burst session, assert file contains exactly 100 valid JSON lines AND completes 5x faster than baseline.",
+      "dependencies": [],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_trace_batch.py -q && uv run python -m loom.cli eval --filter trace-batch",
+      "evidence": null
+    },
+    {
+      "id": "f-mcp-client-p3",
+      "name": "Phase 3: MCP client integration (real, not stub)",
+      "description": "Header currently fakes MCP by treating loom's own tools as 'MCP servers' (with explicit `loom has no real MCP infra yet` comment). Implement real MCP client: stdio transport + SSE transport per MCP spec; per-server config in harness.toml [mcp.servers.<name>] command, args, env; on AgentStart, spawn configured servers, discover their tools, dynamically register into TOOL_REGISTRY with `mcp:<server>:<tool>` namespace. PreToolUse hook treats MCP tools with same permission flow. Ship 3 reference integrations: filesystem-mcp (read-only outside workspace), git-mcp (status/log/diff/branch — never push/force without explicit permission rule), github-mcp (issues/PRs read-only by default). Header widget consumes real server data, no fake mapping. Eval: spawn a stub MCP server, call its tools through agent_loop, verify result.",
+      "dependencies": [
+        "f-permission-persistence-p2"
+      ],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_mcp_client.py -q && uv run python -m loom.cli eval --filter mcp-client",
+      "evidence": null
+    },
+    {
+      "id": "f-lsp-integration-p3",
+      "name": "Phase 3: LSP integration (Python-first via pylsp/pyright)",
+      "description": "Python is loom's primary use case (the project itself is Python). Spawn pylsp (default) or pyright as a managed subprocess; expose 3 LSP-powered tools: (a) goto_definition(symbol_or_file_line) — returns file:line of definition; (b) find_references(symbol) — returns list of file:line:context; (c) rename_symbol(symbol, new_name, dry_run=False) — workspace-wide rename with optional dry-run diff. LSP backend is pluggable per harness.toml [lsp] language=python|typescript|rust server=pylsp|pyright|tsserver|rust-analyzer. is_read_only=True for goto/find; is_read_only=False for rename. Eval: rename a function in a fixture project and assert all call sites updated atomically.",
+      "dependencies": [
+        "f-edit-file-v2-p0"
+      ],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_lsp_tools.py -q && uv run python -m loom.cli eval --filter lsp",
+      "evidence": null
+    },
+    {
+      "id": "f-tui-diff-viewer-p3",
+      "name": "Phase 3: Minimal diff viewer in TUI",
+      "description": "When edit_file v2 / multi_edit return a unified diff, show it in a scrollable Static panel inside the ToolCallMarker's expanded card (instead of raw text). Color-code +/- lines per loom-ink theme (green/red). Add 'q' key in expanded view to collapse. Scope: pure display — NO approve/reject UI (that's Phase 4, 2-week project). 2-day target. New widget `DiffPane(Static)` parsing unified diff via difflib. Eval: snapshot test renders diff with correct +/- coloring.",
+      "dependencies": [
+        "f-edit-file-v2-p0"
+      ],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_diff_pane.py -q && uv run python -m loom.cli eval --filter diff-pane",
+      "evidence": null
+    },
+    {
+      "id": "f-long-context-stability-p3",
+      "name": "Phase 3: Long-context stability (1M+ token sessions)",
+      "description": "Today loom's compaction is 2-level (micro + auto). For very long sessions (1M+ tokens, 50+ rounds), tier the storage: hot (current 85% threshold for autocompact), warm (compacted summaries in messages), cold (older summaries written to .minicode/cold-storage/<session>.jsonl and replaced in messages with a `<system-reminder>N older rounds in cold storage — call cold_load(round_N) to retrieve</system-reminder>` pointer). New cold_load tool restores a chunk on demand. Backstop: hard message cap (e.g. 200 rounds in-memory) with auto-cold beyond that. Eval: simulate 100-round session, assert (a) memory stays under 200K tokens, (b) cold_load successfully retrieves round 5 mid-session, (c) no infinite recompact loop.",
+      "dependencies": [
+        "f-autocompact-fallback-p1"
+      ],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_cold_storage.py -q && uv run python -m loom.cli eval --filter long-context",
+      "evidence": null
+    },
+    {
+      "id": "f-repomap-p4",
+      "name": "Phase 4: Repomap (Aider-style codebase awareness)",
+      "description": "Differentiator vs Claude Code: structural codebase awareness. On session start, use tree-sitter (Python-first; later Go/Rust/JS) to extract top-level symbols (classes, functions, type aliases) from each source file. Rank by PageRank-like importance (how many other files reference this symbol). Inject top N (config: [repomap] max_files=20, max_tokens=4000) into the system prompt's memory tier as a compact symbol map: `file.py: ClassA, ClassB.method, function_foo`. Updates on file write events (cheap dirty-flag re-rank). Disable for huge monorepos via `[repomap] enabled=false`. Eval: generate repomap for loom itself, assert TOP file (loom/agent/loop.py) shows agent_loop + _run_tool_block + _run_tool_turn.",
+      "dependencies": [
+        "f-grep-tool-p0"
+      ],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_repomap.py -q && uv run python -m loom.cli eval --filter repomap",
+      "evidence": null
+    },
+    {
+      "id": "f-tdd-agent-mode-p4",
+      "name": "Phase 4: TDD agent mode (test-first Python workflows)",
+      "description": "Python-native differentiation. New `loom tdd <file_or_test>` subcommand wraps a specialized agent loop with TDD-tuned system prompt: (1) read failing test, (2) understand intent, (3) locate source, (4) make minimal change, (5) re-run test, (6) iterate up to max_turns. Surfaces (a) test selection via pytest -k pattern, (b) coverage-aware mode (only files in coverage of the test), (c) anti-cheat checks (refuses to edit the test file itself, refuses to skip/xfail). Eval cases pick 5 real loom commits that fixed test failures, replay the failing state, run TDD mode, assert agent reproduces the fix.",
+      "dependencies": [
+        "f-agent-quality-eval-p0",
+        "f-edit-file-v2-p0",
+        "f-grep-tool-p0"
+      ],
+      "status": "not-started",
+      "verification": "uv run python -m loom.cli tdd tests/test_dummy.py --self-test && uv run python -m loom.cli eval --kind agent-quality --filter tdd-mode",
+      "evidence": null
+    },
+    {
+      "id": "f-harness-as-product-polish-p4",
+      "name": "Phase 4: Harness-as-product polish (the defensible moat)",
+      "description": "Loom's unique value is `loom eval` on YOUR codebase. Make this a first-class user experience. (a) `loom eval init` scaffolds a starter eval suite for the user's project (detects language, generates 3-5 template cases: edit-by-name, search-and-modify, bug-fix-from-error); (b) `loom eval --baseline <git-ref>` shows pass-rate delta against a baseline commit for CI gating; (c) HTML report includes per-case agent transcript + cost + duration; (d) GitHub Action template `.github/workflows/loom-eval.yml` shipped via `loom init --with-ci`. README update: drop the misleading '~300 LOC' claim, position as 'the verifiably reliable Python coding agent — every change passes a deterministic eval'. Eval: `loom eval init` in a tmp Python project produces a runnable suite.",
+      "dependencies": [
+        "f-agent-quality-eval-p0",
+        "f-cost-telemetry-p2"
+      ],
+      "status": "not-started",
+      "verification": "uv run pytest tests/test_eval_init.py -q && uv run python -m loom.cli eval --filter harness-as-product",
+      "evidence": null
+    },
+    {
+      "id": "f-readme-update-chore",
+      "name": "Chore: README rewrite (drop ~300 LOC claim, position as harness-engineered)",
+      "description": "README currently claims '~300 LOC Python' which is 50x off (actual ~16K LOC product). Rewrite to reflect reality: (a) accurate LOC stats from a measure script; (b) new positioning paragraph 'a verifiably reliable coding agent — every behavior is locked by deterministic eval cases'; (c) link to docs/harness-roadmap.md (refreshed to current state); (d) quick start updated for new `loom eval --kind agent-quality` command; (e) screenshot of TUI; (f) honest 'what loom does NOT do well' section listing remaining gaps. Bundle docs/harness-roadmap.md refresh: mark Phase 0-5 done, document Phase 1-4 of this roadmap as the new plan.",
+      "dependencies": [],
+      "status": "not-started",
+      "verification": "scripts/check-readme-claims.sh && test -f docs/harness-roadmap.md",
+      "evidence": null
+    }
+  ]
+}

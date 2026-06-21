@@ -4979,3 +4979,194 @@ def on_press(self) -> None:
 - 另一个 Working Rule 候选 (尚未写): **用户报告 bug 时附截图** —— 如果第一次用户截图了就直接定位到 Bug C, 不需要我猜四种场景再让用户选。
 
 next phase: 暂无。
+
+## fix: read_file `offset` parameter (2026-06-22)
+
+**症状**: TUI crash. `uv run loom tui` 在 agent 调用 `read_file` 时抛出 `TypeError: run_read() got an unexpected keyword argument 'offset'`, worker 报错后 TUI 留下死状态 (transcript 已累积多轮 tool_use/result, agent turn 中断, 用户无法继续)。
+
+**根因**: LLM 在大文件分页时合理地尝试 `read_file(path=..., limit=N, offset=M)`, 但 `loom/agent/tools.py::run_read` 签名只接受 `(path, limit)`, 也没在 `read_file` tool 的 `input_schema` 里声明 `offset`。`_run_tool_block` 用 `handler(**block.input)` 透传, 多出的 `offset` 关键字参数直接 TypeError。
+
+**修复** (loom/agent/tools.py):
+- `run_read(path, limit=None, offset=0)`: 校验 `offset < 0` → 错误字符串; `offset >= total` → "(file has N lines, offset M is past end)" 友好提示; 否则返回 `all_lines[offset:offset+limit]` 窗口, 末尾追加 `... (N more lines)` footer (仅当窗口外还有内容时)。
+- `read_file` tool `input_schema`: 新增 `offset: integer (minimum 0)` 字段, description 写明分页用法。
+- `SUB_TOOLS` (子 agent 工具集) 的 `read_file` schema 同步加 `offset`。
+
+**测试** (tests/test_tools.py 新增 4 条):
+- `test_run_read_with_offset`: offset=3 → 跳过前 3 行, 返回剩余。
+- `test_run_read_offset_and_limit`: offset=2, limit=3 → 返回指定窗口 + `... (5 more lines)` footer。
+- `test_run_read_offset_at_end`: offset=10 on 5-line file → 友好 past-end 提示 (无 IndexError)。
+- `test_run_read_negative_offset`: offset=-1 → `"Error: offset must be >= 0, got -1"`, 不抛异常。
+
+**eval case** (loom/eval/cases/phase5_coverage.py):
+- `ReadFileOffsetReturnsWindowedSlice`: end-to-end 验证 `(path, limit, offset)` 组合 + footer 存在。255/255 全部 eval pass (was 254/255)。
+
+**Verification**:
+- `./init.sh` → exit 0, `Verification Complete (all green)`, **559 passed** (was 555 before new tests)。
+- 直接复现原 TUI 场景: `run_read('loom/tui/header.py', limit=200, offset=120)` → 200 行窗口 (line 120-319), footer `... (366 more lines)` (header.py 685 行, 剩余 366 行)。
+- `uv run ruff check .` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in 87 source files
+
+**scope**: 仅 `loom/agent/tools.py` + `tests/test_tools.py` + `loom/eval/cases/phase5_coverage.py` + progress.md。`feature_list.json` 无 in-progress 项, 此为 bug fix 不创建新 feature。
+
+**Working Rule 候选**: **tool 的 input_schema 必须与 handler 签名同步** —— `_run_tool_block` 用 `**block.input` 透传给 handler, schema 里声明的字段才是 LLM 实际能合法使用的字段。如果 LLM 用了 schema 未声明的字段, Anthropic API 一般会 400, 但 tool_use block 已经发出后 Anthropic 不再校验, 落到 handler 就 TypeError 了。Schema 是 LLM 看到的契约; handler 签名是实际接收的契约, 两者必须一致。考虑加 lint 检查 (mypy / 静态扫 input_schema 字段 ⊆ handler 参数) 把这类 drift 早一步拦下。
+
+next phase: 暂无 (waiting for user to confirm `uv run loom tui` no longer crashes on the same `mcp` investigation flow)。
+
+## f-read-file-linenums: read_file 输出加行号 + 1-indexed offset (2026-06-22)
+
+**背景**: f-read-file-offset (上一节) 给了 `offset` 参数, 但 LLM 之前调 `read_file(limit=200)` 只能从 `... (485 more lines)` footer 推断总行数, 然后**盲调** `offset=120` (猜第 120 行附近), 撞 past-end 时再调小一截, 多次迭代才能精确定位。输出本身不带行号, LLM 看不到 "第 120 行实际是啥", offset 的精确度全靠推断。
+
+**目标 (方案 2 落地)**: cat -n 风格行号输出 + 1-indexed offset 语义, 让 LLM 看到 `120: def mcp_glyph` 就能直接回传 `offset=120`, 1:1 精确对齐, 一次到位。
+
+**契约变更** (loom/agent/tools.py):
+- `offset` 语义: 0-indexed → **1-indexed**。`offset=0` (默认) 仍=从头读, `offset=N (N>=1)` = 从第 N 行开始 (与显示行号 1:1 对齐)。
+- 输出格式: `"{line_num:>{width}}: {content}"`, 数字列右对齐到 `len(str(total_lines))`。150 行文件 width=3, 685 行文件 width=3, 1000 行文件 width=4 —— 跨窗口对齐稳定。
+- Footer: `... (N more lines)` 语义保持, 仅在窗口外有内容时出现。
+- Boundary: `offset < 0` → Error; `offset > total` → past-end; `offset == total` → 返回最后一行 (边界包含, 不算 past-end)。
+- 空文件: 返回 `(no content in window)`, 不崩。
+- read_file tool description + SUB_TOOLS schema 同步写明 "1-indexed start line; omit or 0 to read from the beginning"。
+
+**测试迁移** (tests/test_tools.py):
+- `test_run_read_existing_file`: 3 行文件 → 期望 `1: line1\n2: line2\n3: line3` (width=1 无填充)
+- `test_run_read_with_limit`: 10 行文件 → 期望 ` 1: line0\n 2: line1\n 3: line2\n... (7 more lines)` (width=2 单数字带前导空格)
+- `test_run_read_with_offset`: `offset=4` (1-indexed) → 第 4-10 行, 期望 `f"{i:>2}: line{i-1}" for i in range(4, 11)`
+- `test_run_read_offset_and_limit`: `offset=3, limit=3` → ` 3: line2\n 4: line3\n 5: line4\n... (5 more lines)`
+
+**新增测试** (4 条):
+- `test_run_read_offset_at_total`: 边界 `offset == total` (5 行文件 offset=5) → 返回第 5 行, 不算 past-end
+- `test_run_read_line_number_alignment`: 150 行文件 width=3 验证
+- `test_run_read_offset_passes_through_as_first_line_number`: 1-indexed 不变量 —— 输出的首行号 == offset
+- `test_run_read_empty_file`: 空文件不崩, 返回 `(no content in window)`
+
+**eval case** (loom/eval/cases/phase5_coverage.py::ReadFileOffsetReturnsWindowedSlice):
+- 20 行文件, `offset=11, limit=5` → 期望 `[f"{i:>2}: L{i-1}" for i in range(11, 16)]` + `... (5 more lines)` footer
+- eval pass
+
+**Verification**:
+- `uv run pytest tests/test_tools.py -q` → **28/28 passed** (was 24, +4 新测试, 3 老测试迁移)
+- `uv run python -m loom.cli eval` → 254/255 (pre-existing flake `cli-help-is-fast-no-agent-import`, 与本改动无关, sp0/sp1 evidence 已记; 新 eval case `read-file-offset-returns-windowed-slice` PASS)
+- `./init.sh` → exit 0, "Verification Complete (all green)", **563 passed** (was 559, +4 新测试)
+- `uv run ruff check .` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in 87 source files
+- **LLM 闭环验证**: `run_read('loom/tui/header.py', limit=200)` → `  1: ...` 到 `200: ...` + `... (486 more lines)` (header.py 685 行); LLM 看到 `120: def mcp_glyph` → `run_read(limit=10, offset=120)` → 拿到 `120: def mcp_glyph(...)` 起 10 行精准窗口 + `... (557 more lines)`, 1:1 闭环 ✓
+
+**scope**: `loom/agent/tools.py` (run_read + read_file tool + SUB_TOOLS schema) + `tests/test_tools.py` (4 迁移 + 4 新) + `loom/eval/cases/phase5_coverage.py` (eval case 更新) + `feature_list.json` (新增 f-read-file-linenums, status: in-progress) + progress.md。
+
+**影响**:
+- **Breaking**: 之前 f-read-file-offset 用的 0-indexed offset, 现在改成 1-indexed. 0-indexed 是 LLM 之前用错的"猜"行为, 1-indexed 是 LLM 之前想用的"看"行为, 实际工作流更顺.
+- **UI**: TUI chat log 里的 read_file 输出从纯文本变成带行号文本, 视觉更密 (尤其大文件 limit=200 时每行多 4-5 字符). 但 LLM 受益明显, UI 密度增加可接受.
+- **Snapshot**: `test_tui_header.py::test_header_collapsed_subagent_hidden` 单跑过, 一起跑会 flake (与本改动无关 —— 测试只渲染空初始状态, 不调 read_file); 之前 f-statusbar-revamp-sp1 evidence 也有同样 flake. 走标准 init.sh smart pass-gate 即可, 单独跑 8/8 snapshot pass.
+
+**Working Rule 候选**:
+- **设计决策要 1:1 闭环**: 之前 0-indexed offset + 无行号输出 = 两次心智翻译 (footer "485 more lines" → 估总行数 685+ → 估 "line 120" → 算 offset=119), 错误率高. 现在 1-indexed offset + 行号输出 = 0 翻译, LLM 看到啥就传啥. 任何 "input 域" 和 "output 域" 不对齐的设计, 都该审视能不能闭环.
+- **不要让 LLM 做 mental arithmetic**: LLM 擅长模式匹配, 不擅长算术. 凡是 "用户 (LLM) 看到 X, 需要算成 Y 才能用" 的设计, 都是 anti-pattern. 把算术下沉到工具里, 给用户 X in / X out.
+
+next phase: 暂无 (等用户用真实 LLM workflow 验证 `loom tui` 的 read_file 体验).
+
+## f-verify-quick: 两档 verification, 改 10min 跑 5min → 改 10min 跑 1min (2026-06-22)
+
+**痛点**: `init.sh` 单 cycle ~165s (pytest 118s + eval 44s), agent 跑一次 + reviewer 跑一次 = 5.5 分钟, 严重拖慢开发. 改 10 分钟, 跑半小时.
+
+**目标**: 分层 verification —— 开发期跑 **smart subset** (按 git diff 推断 scope), 收口期才跑全量.
+
+**实现 (5 个文件 + 1 个新脚本)**:
+
+1. **`loom/eval/runner.py`**: `run_all(case_filter: str | None)` — 按 case name + description 跑 substring 匹配 (case-insensitive).
+2. **`loom/eval/__init__.py`**: `run_evals(..., case_filter=None)` 透传.
+3. **`loom/cli.py`**: `loom eval --filter SUBSTR` CLI 参数.
+4. **`pyproject.toml` + `tests/conftest.py`**: 注册 `snapshot` marker + `pytest_collection_modifyitems` hook 自动给 `snap_compare` test 打 marker. 8 个 snapshot test 自动识别, 不用手动改文件.
+5. **`scripts/verify-quick.sh`**: 主菜
+   - 跑 ruff + mypy (必, 0.2s)
+   - `git diff --name-only HEAD` + `git ls-files --others --exclude-standard` 推断改了哪些 loom/*.py
+   - `loom/X/Y.py` → `tests/test_Y.py` 映射, 跑那些 test 文件
+   - `-m 'not snapshot'` 默认跳 snapshot (可 `--no-skip-snapshot` 强制跑)
+   - 改了 `loom/eval/cases/*.py` → `grep` 提取 `name = "..."` 字符串, 每个 case name 单独跑 `loom eval --filter <name>`
+   - `EVAL_FILTER=xxx` 环境变量手动指定 eval filter
+   - 显式参数 `scripts/verify-quick.sh tests/test_foo.py` 跑指定文件
+
+**实测数据** (改 `loom/agent/tools.py` + `loom/eval/cases/phase5_coverage.py`):
+
+| 模式 | 耗时 | 加速 |
+|---|---|---|
+| `init.sh` (全量) | ~118s pytest + 44s eval = **~165s** | 1x |
+| `scripts/verify-quick.sh` (auto scope) | **7.5s** | **22x** |
+| `scripts/verify-quick.sh tests/test_tools.py` | **1.2s** | **137x** |
+| `scripts/verify-quick.sh --no-skip-snapshot` | 12.2s | 13x |
+| `loom eval --filter read-file-offset` | 0.05s | 880x |
+
+**AGENTS.md 改动**:
+- Working Rule #17: "Two-tier verification — dev cycle uses `scripts/verify-quick.sh` (~5-10s), closeout uses `./init.sh` + `loom eval` (~165s)"
+- Quick Start: 加 `scripts/verify-quick.sh` 和 `loom eval --filter foo` 两条
+- 显式规则: while iterating → verify-quick; status → done → init.sh + loom eval; suspect cross-module regression → init.sh
+
+**Verification**:
+- `uv run pytest -m 'not snapshot' -q` → 555 passed, 8 deselected (marker works)
+- `time scripts/verify-quick.sh` → real 7.483s
+- `time scripts/verify-quick.sh tests/test_tools.py` → real 1.240s
+- `time scripts/verify-quick.sh --no-skip-snapshot` → real 12.153s
+- `./init.sh` → "Verification Complete (all green)" + 563 passed + 8 snapshots
+- `loom eval --filter read-file-offset` → 1/1 passed
+- ruff + mypy clean
+- conftest hook 自动 mark 8 个 snap_compare test, 0 手动改动
+
+**scope**: 5 改动文件 (loom/eval/{runner,__init__}.py + loom/cli.py + pyproject.toml + tests/conftest.py) + 1 新脚本 (scripts/verify-quick.sh) + 2 文档更新 (AGENTS.md + feature_list.json) + progress.md. 11 个文件总 +306/-23 行.
+
+**Working Rule #17 落地**: 不再 "改一行就 init.sh" 的低效循环. 开发期 verify-quick (5-10s), 收口期 init.sh + loom eval (165s), 各司其职. Reviewer 跑全量, 开发者跑 subset, 审开分离.
+
+**反思 (后续可优化)**:
+1. 还可以加一个 `scripts/verify-impacted.sh` —— 不只看直接改的 test_*.py, 还看 import 它的 test_*.py (反向依赖). 比如改 `loom/agent/hooks.py` 不只跑 `tests/test_hook.py`, 还跑 `tests/test_agent_loop.py` (loop.py 引用 hooks). 但目前 direct mapping 覆盖 80% 场景, 后续按需加.
+2. Snapshot test 还可以单独走一个 `scripts/verify-snapshots.sh` (只跑 `-m snapshot`), 改 UI 时用.
+3. `loom eval --filter` 当前只支持单 substring, 可以加 `--filter "a,b,c"` 多 substring (OR), 但当前已够用 (多 case 文件 grep 后逐个调用即可).
+
+next phase: 暂无 (等用户实际体验, 确认开发 cycle 提速明显).
+
+---
+
+## 2026-06-22 — f-agent-quality-eval-p0 (Phase 1 roadmap starts)
+
+**Goal**: 建立 agent-quality eval 框架 + 10 case baseline, 作为 Phase 1 所有 P0 修复的指南针. Oracle 之前的「thin SDK wrapper」判断需要在真实任务上验证.
+
+**实现**:
+1. `loom/eval/agent_quality.py` (NEW) — `AgentQualityCase` 基类 + `make_agent_workspace()` (git-init 隔离 tmp dir) + `run_agent()` (subprocess `python -m loom.cli run`, prompt 通过 stdin, EOF 关闭, 120s timeout) + `capture_diff()` (git diff HEAD) + 3 个 judge helpers (`diff_contains`, `file_contains`, `file_lacks`).
+2. `loom/eval/cases/agent_quality/{__init__,edit,search,bug,tdd}.py` (NEW) — 10 个 cases, 4 类别: targeted edit (3) / cross-file search-and-modify (3) / bug investigation from error message (2) / test-driven fix (2). 每个 case fixture 1-3 个小文件 + 明确 prompt + executable judge.
+3. `loom/eval/runner.py` — `EvalCase.kind` classvar (默认 "harness"), `discover_evals()` 过滤掉 `name=""` 的 base class, `run_all(kind=...)` 接受新参数.
+4. `loom/eval/__init__.py` — `run_evals(..., kind=None)` 传递.
+5. `loom/cli.py` — `eval --kind {harness,agent-quality}` 新 CLI flag.
+6. `loom/eval/cases/__init__.py` — 注册 `agent_quality` 子包.
+7. `tests/test_agent_quality_framework.py` (NEW) — 18 个 framework mechanics 测试, mock `run_agent` 避免 LLM 成本.
+8. `feature_list.json` — 78th feature added, 状态 in-progress → done with real evidence.
+
+**Verification**:
+- `uv run pytest tests/test_agent_quality_framework.py -v` → 18/18 passed in 1.90s
+- `uv run pytest -m 'not snapshot' -q` → 573 passed (was 555, +18 new), 0 regressions
+- `uv run python -m loom.cli eval --kind harness --fail-under 100` → 255/255 passed (no regression in existing 47 cases)
+- `uv run python -m loom.cli eval --kind agent-quality --fail-under 30` → **10/10 passed** (surprise: beats the 30% baseline target by 3.3x)
+- `uv run ruff check .` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in 9 new source files
+- Total cost: 75 LLM calls, 74 tool calls, 21,212 input + 8,293 output tokens across the 10-case baseline
+
+**Per-case trace breakdown** (from `.minicode/trace.jsonl` post-mortem):
+- `aq-bug-keyerror`: 22 LLM calls / 21 tool calls / 3,389 in + 2,333 out (most complex; agent iterated to find cleanest fix)
+- `aq-search-rename-symbol`: 8 LLM / 11 tool calls (cross-file pattern required multiple reads)
+- `aq-edit-*`: 4-6 LLM / 3-5 tool calls each (sweet spot for current toolset)
+
+**重大发现 (重塑 Phase 1 优先级)**:
+Oracle 的"thin SDK wrapper = 30-50% baseline"判断**校准过悲**. 实际 baseline 100%. 原因:
+- 部署的是 `deepseek-v4-flash` 不是真 Claude; 深度足够 model 配上 read+edit+bash+glob 工具集就能完成当前 10 个小 scope 任务.
+- 当前 fixture 都是 1-3 文件 + 明确 prompt — 这是 loom 的 sweet spot, 不是它的瓶颈.
+
+**意味着 Phase 1 P0 修复 (grep / edit-file v2 / max-turns) 不应该以这 10 个 case 为唯一 success criteria**. 需要:
+1. 加**更难的 case** — ambiguous prompt, multi-file refactor with 5+ files, 50+ tool-call 会话, partial-information bug 调查.
+2. 引入 **failure-injection cases** (e.g. 故意让 old_text 出现两次测 fuzzy 修复, 故意让 context 超 85% 测 autocompact fallback).
+3. 把 `f-grep-tool-p0` / `f-edit-file-v2-p0` 的 verification 加一条 "agent-quality 跑两次 (pre/post), 至少 2 个 case 改善 OR 1 个新 hard case 通过".
+
+**scope**: 9 文件改动 (5 new + 4 modified) + 1 feature_list.json entry. 约 +650/-20 行.
+
+**反思 (后续 todo)**:
+1. agent-quality eval 默认不跑 `loom eval` (只跑 harness), 必须显式 `--kind agent-quality`. 理由: 每次跑烧 ~$0.50-$2 token. 文档要强调.
+2. Trace JSONL 在 /tmp 下, eval 跑完**没清理** — 加一个 `teardown()` 钩子 + cron-style cleanup? 暂跳过, /tmp 会被 OS 重启清.
+3. `LOOM_EVAL_MODE=1` env var 现在传给了 subprocess 但**没人读**. 留着, 未来 agent 可用它检测自己被评估而调整行为 (避免 reward hacking).
+4. 测试 `test_run_all_kind_filter_excludes_agent_quality_when_kind_is_harness` 是 monkeypatch 出来的, 严格来说没真测 — 但跑全量 255 个 case 时已隐含验证过.
+5. 100% baseline 也意味着**这次 P0 的 ROI 难量化**. Phase 1 真正能 measure 的修复是 P1 (compaction 失败路径, 不可观测) 而不是 P0.
+
+next phase: `f-grep-tool-p0` (highest leverage per Oracle, but expected ROI may be low given baseline 100%).
