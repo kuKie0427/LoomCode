@@ -50,13 +50,13 @@ class TestCollapsibleToolOutput:
 
         assert issubclass(CollapsibleToolOutput, Vertical)
 
-    def test_compose_yields_markdown(self):
-        from textual.widgets import Markdown
+    def test_compose_yields_static(self):
+        from textual.widgets import Static
 
         out = CollapsibleToolOutput("hello\nworld")
         children = list(out.compose())
         assert len(children) == 1
-        assert isinstance(children[0], Markdown)
+        assert isinstance(children[0], Static)
 
     def test_toggle_flips_display_property(self):
         out = CollapsibleToolOutput("text")
@@ -65,6 +65,18 @@ class TestCollapsibleToolOutput:
         assert out.display is True
         out.toggle()
         assert out.display is False
+
+    def test_compose_yields_static_with_truncated_text(self):
+        """Regression for f-tool-display-p2 'blank after turn end': Markdown's
+        async update + display-toggle interaction left the content un-rendered.
+        Switched to Static (synchronous update, no markdown quirks) so multi-line
+        output renders immediately when the panel is expanded."""
+        from textual.widgets import Static
+
+        out = CollapsibleToolOutput("line1\nline2\nline3")
+        [child] = list(out.compose())
+        assert isinstance(child, Static)
+        assert child.content == "line1\nline2\nline3"
 
 
 class TestThinkingDisplayStartsHidden:
@@ -83,12 +95,12 @@ class TestThinkingDisplayStartsHidden:
         td.display = False
         assert td.styles.display == "none"
 
-    def test_set_output_updates_markdown_child(self):
+    def test_set_output_updates_static_child(self):
         out = CollapsibleToolOutput("")
-        mock_md = MagicMock()
-        with patch.object(out, "query_one", return_value=mock_md):
+        mock_static = MagicMock()
+        with patch.object(out, "query_one", return_value=mock_static):
             out.set_output("new output text")
-        mock_md.update.assert_called_once_with(_truncate("new output text"))
+        mock_static.update.assert_called_once_with(_truncate("new output text"))
 
     def test_set_output_before_mount_does_not_raise(self):
         out = CollapsibleToolOutput("")
@@ -119,7 +131,9 @@ class TestToolCallMarkerClickBehavior:
         marker.on_click(event)
         mock_output.toggle.assert_called_once()
 
-    def test_double_click_opens_modal(self):
+    def test_double_click_also_toggles_no_modal(self):
+        """Regression for f-tool-display-p2: double-click must NOT open a
+        separate modal — it should toggle inline, matching ThinkingMarker."""
         marker = ToolCallMarker("bash", "{}")
         mock_output = MagicMock()
         marker.set_output_widget(mock_output)
@@ -127,10 +141,9 @@ class TestToolCallMarkerClickBehavior:
         event = MagicMock()
         event.chain = 2
 
-        with patch.object(marker, "_open_modal") as open_modal:
-            marker.on_click(event)
-        open_modal.assert_called_once()
-        mock_output.toggle.assert_not_called()
+        marker.on_click(event)
+        mock_output.toggle.assert_called_once()
+        assert not hasattr(marker, "_open_modal")
 
     def test_on_press_calls_output_widget_toggle(self):
         marker = ToolCallMarker("bash", "{}")

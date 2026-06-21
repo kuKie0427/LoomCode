@@ -17,8 +17,7 @@ from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.events import Click
 from textual.reactive import reactive
-from textual.screen import ModalScreen
-from textual.widgets import Button, Markdown, Static
+from textual.widgets import Markdown, Static
 
 MAX_TOOL_OUTPUT_LINES = 30
 _HEAD_LINES = 15
@@ -452,12 +451,16 @@ class ThinkingMarker(Static):
 class CollapsibleToolOutput(Vertical):
     DEFAULT_CSS = """
     CollapsibleToolOutput {
+        height: auto;
         max-height: 20;
         overflow-y: auto;
         background: $surface;
         padding: 1 2;
         margin: 0 0 1 2;
         border: none;
+    }
+    CollapsibleToolOutput > Static {
+        height: auto;
     }
     """
 
@@ -467,7 +470,7 @@ class CollapsibleToolOutput(Vertical):
         self.display = False
 
     def compose(self) -> ComposeResult:
-        yield Markdown(_truncate(self._output), parser_factory=_markdown_parser_factory)
+        yield Static(_truncate(self._output), markup=False)
 
     def toggle(self) -> None:
         self.display = not self.display
@@ -475,69 +478,10 @@ class CollapsibleToolOutput(Vertical):
     def set_output(self, text: str) -> None:
         self._output = text
         try:
-            md = self.query_one(Markdown)
-            md.update(_truncate(text))
+            static = self.query_one(Static)
+            static.update(_truncate(text))
         except Exception:
             pass
-
-
-class ToolCallModal(ModalScreen):
-    BINDINGS = [("escape", "dismiss", "Close")]
-
-    DEFAULT_CSS = """
-    ToolCallModal {
-        align: center middle;
-    }
-    #tc-modal-container {
-        width: 80%;
-        height: 80%;
-        background: $panel;
-        border: thick $primary;
-        padding: 1 2;
-    }
-    #tc-modal-title {
-        text-style: bold;
-        margin-bottom: 1;
-    }
-    #tc-modal-body {
-        height: 1fr;
-        overflow-y: auto;
-        border: solid $primary-darken-2;
-        padding: 1;
-    }
-    #tc-modal-close {
-        margin-top: 1;
-        width: 100%;
-    }
-    """
-
-    def __init__(self, title: str, args_str: str, output_str: str, is_error: bool) -> None:
-        super().__init__()
-        self._title = title
-        self._args_str = args_str
-        self._output_str = output_str
-        self._is_error = is_error
-
-    def compose(self) -> ComposeResult:
-        icon = "❌" if self._is_error else "📄"
-        with Vertical(id="tc-modal-container"):
-            yield Static(f"🔧 {self._title}", id="tc-modal-title")
-            body_parts: list[str] = []
-            if self._args_str:
-                body_parts.append(f"**Args:**\n```json\n{self._args_str}\n```")
-            body_parts.append(f"**{icon} Result:**\n```text\n{self._output_str}\n```")
-            yield Markdown(
-                "\n\n".join(body_parts),
-                id="tc-modal-body",
-                parser_factory=_markdown_parser_factory,
-            )
-            yield Button("Close", id="tc-modal-close", variant="primary")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        self.dismiss()
-
-    async def action_dismiss(self, result: Any = None) -> None:
-        self.dismiss(result)
 
 
 class SubagentMarker(Static):
@@ -658,10 +602,7 @@ class ToolCallMarker(Static):
         self.update(f"{glyph} {display_name} · {self._summary or 'running'}")
 
     def on_click(self, event: Click) -> None:
-        if event.chain == 2:
-            self._open_modal()
-        else:
-            self._toggle_output()
+        self._toggle_output()
 
     def on_press(self) -> None:
         self._toggle_output()
@@ -672,11 +613,6 @@ class ToolCallMarker(Static):
     def _toggle_output(self) -> None:
         if self._output_widget is not None:
             self._output_widget.toggle()
-
-    def _open_modal(self) -> None:
-        self.app.push_screen(ToolCallModal(
-            self._tool_name, self._args_str, self._output_str, self._is_error
-        ))
 
     def set_complete(self, output: str, is_error: bool) -> None:
         if self._complete:

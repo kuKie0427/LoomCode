@@ -1,13 +1,14 @@
 """Eval cases for TUI collapsible tool output (f-tui-collapsible-tools).
 
-Phase P2 — 4 EvalCase classes that lock in the collapsible-output contract:
-CollapsibleToolOutput (Vertical + toggle), ToolCallMarker click-toggle +
-double-click-modal behaviour, and the "double-click shows full output" contract.
+Phase P2 — 5 EvalCase classes that lock in the collapsible-output contract:
+CollapsibleToolOutput (Vertical + toggle), ToolCallMarker click-toggles-only
+(no modal path), ToolCallModal removed, and inline multi-line rendering
+preserves newlines.
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from loom.eval.runner import EvalCase, EvalResult
 
@@ -67,14 +68,15 @@ class TuiCollapsibleToolOutputToggleable(EvalCase):
         )
 
 
-# ── Case 3: ToolCallMarker single-click toggles output, double-click opens modal
+# ── Case 3: ToolCallMarker click toggles output (no modal path) ─────────────
 
 
 class TuiToolCallMarkerClickTogglesOutput(EvalCase):
     name = "tui-tool-call-marker-click-toggles-output"
     description = (
-        "ToolCallMarker.set_output_widget stores reference; single-click toggles "
-        "output (does NOT push modal); double-click opens modal"
+        "ToolCallMarker.set_output_widget stores reference; ALL click events "
+        "(single-click and double-click) toggle the inline output widget — "
+        "no modal is opened, matching ThinkingMarker. _open_modal must NOT exist."
     )
 
     def run(self) -> EvalResult:
@@ -89,73 +91,86 @@ class TuiToolCallMarkerClickTogglesOutput(EvalCase):
                 name=self.name, passed=False,
                 detail="set_output_widget did not store reference",
             )
+        if hasattr(marker, "_open_modal"):
+            return EvalResult(
+                name=self.name, passed=False,
+                detail="ToolCallMarker._open_modal must be removed (design parity with ThinkingMarker)",
+            )
 
-        with patch.object(marker, "_open_modal") as open_modal:
-            single_event = MagicMock()
-            single_event.chain = 1
-            marker.on_click(single_event)
-
+        for chain in (1, 2, 3):
+            mock_output.toggle.reset_mock()
+            event = MagicMock()
+            event.chain = chain
+            marker.on_click(event)
             if mock_output.toggle.call_count != 1:
                 return EvalResult(
                     name=self.name, passed=False,
-                    detail=f"single-click: toggle called {mock_output.toggle.call_count} time(s), expected 1",
-                )
-            if open_modal.call_count != 0:
-                return EvalResult(
-                    name=self.name, passed=False,
-                    detail=f"single-click opened modal ({open_modal.call_count}x), should not",
-                )
-
-            double_event = MagicMock()
-            double_event.chain = 2
-            marker.on_click(double_event)
-
-            if open_modal.call_count != 1:
-                return EvalResult(
-                    name=self.name, passed=False,
-                    detail=f"double-click: _open_modal called {open_modal.call_count} time(s), expected 1",
+                    detail=f"chain={chain}: toggle called {mock_output.toggle.call_count} time(s), expected 1",
                 )
 
         return EvalResult(
             name=self.name, passed=True,
-            detail="single-click toggles output (no modal); double-click opens modal",
+            detail="all click events (chain 1/2/3) toggle inline output; no modal path exists",
         )
 
 
-# ── Case 4: double-click modal must show full (untruncated) output ────────────
+# ── Case 4: ToolCallModal class must NOT exist (removed with f-tool-display-p2)
 
 
-class TuiToolCallModalShowsFullOutput(EvalCase):
-    name = "tui-tool-call-modal-shows-full-output"
+class TuiToolCallModalRemoved(EvalCase):
+    name = "tui-tool-call-modal-removed"
     description = (
-        "ToolCallMarker._output_str stores the full (untruncated) tool result "
-        "so that opening the modal (via double-click) shows complete output, not "
-        "the truncated version rendered inline"
+        "ToolCallModal class must be removed from loom.tui.chat_log — it was "
+        "the dead-code modal path triggered by double-click that violated the "
+        "design intent (single inline toggle, like ThinkingMarker)."
     )
 
     def run(self) -> EvalResult:
-        from loom.tui.chat_log import ToolCallMarker, _truncate
+        from loom import tui
 
-        marker = ToolCallMarker("bash", "{}")
-        long_output = "line\n" * 100
-        marker.set_complete(long_output, False)
-
-        if marker._output_str != long_output:
+        if hasattr(tui.chat_log, "ToolCallModal"):
             return EvalResult(
                 name=self.name, passed=False,
-                detail=f"_output_str was truncated (len={len(marker._output_str)}, expected {len(long_output)})",
-            )
-        if _truncate(long_output) == long_output:
-            return EvalResult(
-                name=self.name, passed=False,
-                detail="test fixture too short to exercise truncation",
-            )
-        if marker._output_str == _truncate(long_output):
-            return EvalResult(
-                name=self.name, passed=False,
-                detail="_output_str matches _truncate(long_output) — modal will show truncated text",
+                detail="ToolCallModal still defined in loom.tui.chat_log",
             )
         return EvalResult(
             name=self.name, passed=True,
-            detail="_output_str stores full output (modal sees complete result)",
+            detail="ToolCallModal removed from loom.tui.chat_log",
+        )
+
+
+# ── Case 5: inline CollapsibleToolOutput must render multi-line content as
+#            separate rows (regression for "blank on click" bug) ──────────────
+
+
+class TuiCollapsibleToolOutputPreservesNewlines(EvalCase):
+    name = "tui-collapsible-tool-output-preserves-newlines"
+    description = (
+        "CollapsibleToolOutput renders multi-line tool output (bash, file "
+        "reads) as separate rows. Uses Static (not Markdown) because Markdown's "
+        "async update + display-toggle interaction left content un-rendered "
+        "after agent turn end (regression: blank-after-turn bug 2026-06-22)."
+    )
+
+    def run(self) -> EvalResult:
+        from textual.widgets import Static
+
+        from loom.tui.chat_log import CollapsibleToolOutput
+
+        out = CollapsibleToolOutput("line1\nline2\nline3")
+        children = list(out.compose())
+        if len(children) != 1 or not isinstance(children[0], Static):
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=f"compose() should yield exactly one Static child; got {children!r}",
+            )
+        rendered = str(children[0].content)
+        if rendered != "line1\nline2\nline3":
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=f"Static renderable should preserve newlines; got {rendered!r}",
+            )
+        return EvalResult(
+            name=self.name, passed=True,
+            detail="Static renders multi-line output verbatim (no markdown collapse)",
         )
