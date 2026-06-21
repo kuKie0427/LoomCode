@@ -946,6 +946,14 @@
       "dependencies": [],
       "status": "done",
       "evidence": "uv run pytest tests/test_subagent_templates.py -v -> 13/13 passed. uv run python -m loom.cli eval --filter subagent-template --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 752 passed (was 739, +13). uv run ruff + mypy -> 0 issues in 111 source files. loom/agent/subagent_templates.py (NEW): 3 templates with focused system prompts. investigate_code: read-only search specialist (emphasizes grep). refactor_across_files: cross-file rename specialist (4-step: search, plan, multi_edit, verify; emphasizes non-overlapping edits). fix_failing_test: TDD-driven bug-fixer (read error -> locate -> minimal fix -> re-run; explicitly anti-skip/anti-xfail to prevent reward hacking). loom/agent/tools.py: 3 new tools registered as task_investigate_code / task_refactor_across_files / task_fix_failing_test, each with required arg schema from the template. Subagents get the focused system prompt instead of the generic SUB_SYSTEM."
+    },
+    {
+      "id": "f-trace-batch-io-p2",
+      "name": "Phase 2: Trace batch I/O (open-once not per-record)",
+      "description": "Trace.record() opened and closed the file on every event. For a 500-tool-call session that's 500+ syscalls. Switch to lazy open + line-buffered + flush after each record + close on stop.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "uv run pytest tests/test_trace_batch_io.py -v -> 9/9 passed. uv run python -m loom.cli eval --filter trace- --fail-under 100 -> 6/6 passed (3 new). uv run pytest -m 'not snapshot' -q -> 761 passed (was 752, +9). uv run ruff + mypy -> 0 issues in 112 source files. loom/agent/trace.py: Trace.__init__ adds self._fh = None; record() uses _ensure_open() to lazy-open once. The file is opened with buffering=1 (line-buffered) and f.write() + f.flush() after each record (preserves append-on-crash invariant). Added close() method; stop() calls close() before clearing the global. Pre-fix: open+write+close per record -> 500 syscalls per session. Post-fix: 1 syscall to open, 1 to close, N writes between. TDD caught: 4x ambiguous variable `l` (renamed to `line`); mypy caught None.get in subagent_templates eval case (added None check); concurrent test (5 threads x 10 records) verified no JSONL corruption."
     }
   ]
 }

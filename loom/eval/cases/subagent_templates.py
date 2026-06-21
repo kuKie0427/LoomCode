@@ -10,14 +10,14 @@ class SubagentTemplatesDefined(EvalCase):
     description = "3 subagent task templates registered: investigate_code, refactor_across_files, fix_failing_test"
 
     def run(self) -> EvalResult:
-        from loom.agent.subagent_templates import list_templates, get_template
+        from loom.agent.subagent_templates import get_template, list_templates
         names = list_templates()
         expected = {"investigate_code", "refactor_across_files", "fix_failing_test"}
         if set(names) != expected:
             return EvalResult(name=self.name, passed=False, detail=f"got {names}, expected {expected}")
         for n in expected:
             tpl = get_template(n)
-            if not tpl.get("system"):
+            if tpl is None or not tpl.get("system"):
                 return EvalResult(name=self.name, passed=False, detail=f"{n} has empty system prompt")
         return EvalResult(name=self.name, passed=True, detail="all 3 templates present with non-empty system prompts")
 

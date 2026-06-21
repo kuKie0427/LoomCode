@@ -46,6 +46,12 @@ class Trace:
         self.path = default_path_for(self.workdir)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
+        self._fh = None
+
+    def _ensure_open(self):
+        if self._fh is None:
+            self._fh = self.path.open("a", encoding="utf-8", buffering=1)
+        return self._fh
 
     def record(self, event: str, **fields: Any) -> None:
         payload = {
@@ -56,8 +62,9 @@ class Trace:
         payload.update(fields)
         line = json.dumps(payload, ensure_ascii=False, default=str) + "\n"
         with self._lock:
-            with self.path.open("a", encoding="utf-8") as f:
-                f.write(line)
+            fh = self._ensure_open()
+            fh.write(line)
+            fh.flush()
         if self.sink_command is not None:
             try:
                 subprocess.run(
@@ -71,7 +78,16 @@ class Trace:
                 logger.warning("telemetry sink failed: {}", exc)
 
     def flush(self) -> None:
-        pass
+        with self._lock:
+            if self._fh is not None:
+                self._fh.flush()
+
+    def close(self) -> None:
+        with self._lock:
+            if self._fh is not None:
+                self._fh.flush()
+                self._fh.close()
+                self._fh = None
 
     def set_sink(self, sink_command: str | None) -> None:
         self.sink_command = sink_command
@@ -116,4 +132,6 @@ def set_sink(sink_command: str | None) -> None:
 def stop() -> None:
     global _CURRENT
     with _CURRENT_LOCK:
+        if _CURRENT is not None:
+            _CURRENT.close()
         _CURRENT = None

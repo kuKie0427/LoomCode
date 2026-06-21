@@ -43,6 +43,7 @@ from loom.eval.cases import (
     subagent_templates,  # noqa: F401
     telemetry_sink,  # noqa: F401
     tool_error_semantics,  # noqa: F401
+    trace_batch_io,  # noqa: F401
     trace_path,  # noqa: F401
     tui_app,  # noqa: F401
     tui_assistant_message_start,  # noqa: F401
