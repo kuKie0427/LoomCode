@@ -18,7 +18,7 @@ from textual.events import MouseScrollDown, MouseScrollUp
 
 from loom.tui.app import AgentTUIApp
 from loom.tui.chat_log import ChatLog
-from loom.tui.status_bar import StatusBar, _format_tokens, _progress_bar, _render_engine_badge
+from loom.tui.status_bar import StatusBar, _format_tokens, _render_engine_badge
 from tests.conftest import wait_for_state
 
 
@@ -28,20 +28,6 @@ def test_format_tokens_compact():
     assert _format_tokens(1000) == "1.0k"
     assert _format_tokens(1234) == "1.2k"
     assert _format_tokens(1_500_000) == "1.5M"
-
-
-def test_progress_bar_endpoints():
-    bar = _progress_bar(0.0, width=10)
-    assert bar.count("█") == 0
-    assert bar.count("░") == 10
-    bar = _progress_bar(1.0, width=10)
-    assert bar.count("█") == 10
-    assert bar.count("░") == 0
-    bar = _progress_bar(0.5, width=10)
-    assert bar.count("█") == 5
-    assert bar.count("░") == 5
-    bar = _progress_bar(2.0, width=10)
-    assert bar.count("█") == 10
 
 
 def _seed_user_messages(app: AgentTUIApp, n: int) -> None:
@@ -72,7 +58,7 @@ def test_status_bar_turns_counts_user_messages_only():
     asyncio.run(driver())
 
 
-def test_status_bar_shows_context_capacity_with_bar():
+def test_status_bar_shows_context_capacity_with_rail():
     async def driver():
         app = AgentTUIApp()
         async with app.run_test(size=(120, 25)) as pilot:
@@ -82,8 +68,8 @@ def test_status_bar_shows_context_capacity_with_bar():
             assert "ctx:" in text, f"status bar missing ctx field: {text!r}"
             window = app.llm.get_context_window()
             assert str(window // 1000)[0] in text or "M" in text or "k" in text
-            assert "█" in text or "░" in text, (
-                f"progress bar glyphs missing: {text!r}"
+            assert "─" in text, (
+                f"ctx rail tick glyph missing: {text!r}"
             )
 
     asyncio.run(driver())
@@ -408,5 +394,46 @@ def test_status_bar_renders_engine_state_badge_for_three_representative_states()
             assert "[$error]⊗ error[/]" in status_bar.render(), (
                 f"error badge missing: {status_bar.render()!r}"
             )
+
+    asyncio.run(driver())
+
+
+def test_status_bar_renders_rail_not_fill_bar():
+    """P1b §2.2.4: ctx must use fixed rail (─) + shuttle (●), not fill bar (█/░)."""
+
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test(size=(120, 25)) as pilot:
+            await pilot.pause(0.05)
+            status_bar = app.query_one(StatusBar)
+            status_bar.engine_state = "idle"
+            await pilot.pause(0.05)
+            text = status_bar.render()
+            assert "█" not in text, f"fill bar forbidden in idle render: {text!r}"
+            assert "░" not in text, f"empty bar forbidden in idle render: {text!r}"
+            assert "─" in text, f"rail tick must appear in idle render: {text!r}"
+            assert "●" in text, f"shuttle must appear in idle render: {text!r}"
+
+    asyncio.run(driver())
+
+
+def test_status_bar_renders_shuttle_phase_indicator():
+    """P1b §4.2.1 inline phase indicator: render contains `^0` or `^1`."""
+
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test(size=(120, 25)) as pilot:
+            await pilot.pause(0.05)
+            status_bar = app.query_one(StatusBar)
+
+            status_bar.shuttle_phase = 0
+            await pilot.pause(0.05)
+            text = status_bar.render()
+            assert "^0" in text, f"phase 0 indicator missing: {text!r}"
+
+            status_bar.shuttle_phase = 1
+            await pilot.pause(0.05)
+            text = status_bar.render()
+            assert "^1" in text, f"phase 1 indicator missing: {text!r}"
 
     asyncio.run(driver())

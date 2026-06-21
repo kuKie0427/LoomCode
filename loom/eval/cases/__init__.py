@@ -35,6 +35,7 @@ from loom.eval.cases import (
     tui_assistant_message_start,  # noqa: F401
     tui_async_init_sh,  # noqa: F401
     tui_collapsible,  # noqa: F401
+    tui_ctx_rail,  # noqa: F401
     tui_engine_state,  # noqa: F401
     tui_header,  # noqa: F401
     tui_inline_markers,  # noqa: F401

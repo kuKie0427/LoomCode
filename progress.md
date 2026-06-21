@@ -4403,3 +4403,57 @@ $ ./init.sh
 **Gotcha (now in `.sisyphus/notepads/loop-tui-paradigm-p0b/learnings.md`):** The plan's tests said "post TextDelta → streaming" but the actual implementation has engine_state set in the CALLBACK lambda (worker thread), not the MESSAGE HANDLER (main thread). So `app.post_message(TextDelta(...))` does NOT change engine_state — the message just renders the chat log. The right test approach is to call `_set_engine_state("streaming")` directly, then verify the `watch_engine_state` reactive propagates to `StatusBar.engine_state`. The eval case `TuiAppCallbacksSetEngineState` independently verifies the source-level wiring so a regression where someone removes `_set_engine_state` from the callbacks dict would be caught even though the integration tests would still pass.
 
 **P0 complete:** P0a + P0b together implement the full §2.2.1 + §4.2.1 contract. Next session should `/start-work loop-tui-paradigm-p1a` to continue the TUI paradigm work.
+
+---
+
+## 2026-06-21 — f-tui-paradigm-p1a: Ctx rail + shuttle 1Hz + idle freeze
+
+**Source changes (commit `0596cab`):**
+
+| File | Lines | Notes |
+|---|---|---|
+| `loom/tui/status_bar.py` | +25/-16 | Replace `_BAR_FULL`/`_BAR_EMPTY`/`_BAR_WIDTH` + `_progress_bar()` with `_RAIL_WIDTH=10`/`_RAIL_TICK="─"`/`_SHUTTLE="●"`/`_SHUTTLE_PASS_RANGE=1`. New pure helper `_ctx_rail_render(ratio, shuttle_phase, state)` (idle freezes offset=0; active toggles phase 0↔1 ±1 char; clamp to [0,9]; color via `_ctx_color_class` → `[$success]`/`[$warning]`/`[$error]`). New `shuttle_phase: reactive[int]` on StatusBar. `render()` calls helper. |
+| `loom/tui/app.py` | +20/-0 | `on_mount()` adds `set_interval(1.0, _tick_shuttle, name="shuttle-tick")` after elapsed-tick. New `_tick_shuttle` method with idle early-return guard (`if self.engine_state == "idle": return`). `watch_engine_state` resets `shuttle_phase = 0` on entering idle, then always sets `engine_state = new`. |
+
+**Gate verification (5/5 items pass, inline):**
+
+| # | Item | Evidence |
+|---|------|----------|
+| 1 | `_ctx_rail_render` pure helper unit tests | 5 sub-cases via `uv run python`: idle@phase0/1 frozen at base, active@phase0 vs phase1 toggle (`────●─────` ↔ `─────●────`), ratio=1.0+phase=1 clamp (`─────────●`) |
+| 2 | `StatusBar(executing, shuttle_phase=1, ratio=0.5).render()` ● at position 5 | rail = `─────●────` (10 chars, ● at index 5) via `AgentTUIApp.run_test()` |
+| 3 | No █/░ in `loom/tui/status_bar.py` | `grep -E '█\|░\|_BAR_FULL\|_BAR_EMPTY\|_BAR_WIDTH\|_progress_bar' loom/tui/status_bar.py` → 0 hits |
+| 4 | `_tick_shuttle` line 353 first statement `if self.engine_state == "idle": return` | confirmed by `grep -nA2 'def _tick_shuttle' loom/tui/app.py` |
+| 5 | `git diff --stat` only 2 files | `status_bar.py` (+25/-16) + `app.py` (+20/-0) |
+
+**Test breakage expected:** P1a intentionally broke `tests/test_status_bar.py` (removed `_progress_bar` import + 1 helper test + fill-bar assertion). P1b (next commit) replaces these.
+
+## 2026-06-21 — f-tui-paradigm-p1b: Tick-above-shuttle 解 + Tests + Snapshot 重基线
+
+**Tick-above-shuttle 解 (方案 C — inline indicator):**
+- §4.2.1 spec: shuttle `●` with `^` tick above. §9.3 cap: `StatusBar.height: 1`. Two-line impossible → chosen 解: inline `[$text-muted]^N[/]` after rail in ctx_str (方案 C). Strict ^-above-shuttle deferred to P3.
+- `_ctx_rail_render` docstring updated with deferred note.
+
+**Test + eval cases added:**
+- `tests/test_ctx_rail.py` (NEW, 94 lines, 8 tests): idle_zero_ratio, idle_full_ratio, idle_freezes_at_phase_zero, active_phase_zero, active_phase_one, color_thresholds, clamps_out_of_range_ratio, no_fill_bar_glyphs
+- `tests/test_app_shuttle.py` (NEW, 104 lines, 4 tests): tick_idle_noop, tick_active_toggles, watch_engine_state_resets_shuttle_on_idle, shuttle_interval_registered (discovers Timer by `_tick_shuttle` callback or by `name`)
+- `tests/test_status_bar.py` (modified, +45/-18): removed `_progress_bar` import + `test_progress_bar_endpoints` (deleted function), renamed `..._with_bar` → `..._with_rail` + assert `"─"`, added `test_status_bar_renders_rail_not_fill_bar` + `test_status_bar_renders_shuttle_phase_indicator`
+- `loom/eval/cases/tui_ctx_rail.py` (NEW, 155 lines, 5 EvalCases): no-fill-bar, shuttle-helper-defined, shuttle-tick-1hz-interval, idle-freeze, shuttle-position-formula
+- `loom/eval/cases/__init__.py` (+1): `tui_ctx_rail` module registered alphabetically between `tui_collapsible` and `tui_engine_state`
+
+**Snapshot rebaseline (7 files via `pytest --snapshot-update`):**
+- `tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw`
+- 6 × `tests/__snapshots__/test_tui_header/test_header_*.raw`
+- Per-file text diff: 1 segment swap (fill bar `░░░░░░░░░░` → rail `●─────────` at idle/ratio=0) + 1 new `^0` segment + downstream index shift. Cell-level `<rect>` width/position changes per character glyph. Hash ID drift (`terminal-X`) also present per Working Rule 10.
+- Bounded to ctx rail field per plan §Task 4.
+
+**Verification (all green):**
+| Check | Result |
+|---|---|
+| `pytest tests/test_ctx_rail.py tests/test_app_shuttle.py tests/test_status_bar.py` | **34/34 passed** |
+| `uv run python -m loom.cli eval --fail-under 100` | **243/243 passed** (+5 new ctx_rail cases) |
+| `pytest tests/test_tui_header.py tests/test_tui_snapshot.py` | **52/52 passed** (9 snapshots, 7 rebaselined) |
+| `./init.sh` | **491 passed, all green** |
+| `ruff check loom/eval/cases/tui_ctx_rail.py` | All checks passed |
+| `mypy loom/eval/cases/tui_ctx_rail.py` | No issues found |
+
+**P1 complete:** f-tui-paradigm-p0 (engine state) + f-tui-paradigm-p1 (ctx rail shuttle) implement §2.2.1 + §2.2.3 primitive 1 + §4.2.1 contract. Next session should `/start-work loop-tui-paradigm-p2a` for §2.2.3 primitives 2-5 (ToolCallMarker cycle, thinking spinner 5fps ✓, section button pulse, cursor blink ✓).

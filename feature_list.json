@@ -711,6 +711,17 @@
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100 && uv run pytest tests/test_engine_state.py tests/test_status_bar.py -v && ./init.sh",
       "evidence": "P0a: 463 pytest + 234/234 eval (commit 702b6b4). P0b: 478 pytest (38 in test_engine_state.py + test_status_bar.py) + 238/238 eval cases (was 234, +4 new tui-engine-state cases) + 9 snapshots pass. All ruff/mypy clean. App.engine_state reactive + 6 transitions wired in run_agent_turn callbacks."
+    },
+    {
+      "id": "f-tui-paradigm-p1",
+      "name": "TUI 织机范式 P1: Ctx rail 改为固定刻度 + shuttle 1Hz 来回",
+      "description": "实现 §2.2.3 primitive 1（shuttle pass 1Hz on ctx rail）。P1a: _ctx_rail_render helper + StatusBar shuttle_phase reactive + App 1Hz interval + idle freeze。P1b: tick-above 解 + tests + 7 snapshot 重基线。fill bar 彻底移除（§2.2.4 禁止）。",
+      "dependencies": [
+        "f-tui-paradigm-p0"
+      ],
+      "status": "done",
+      "verification": "uv run python -m loom.cli eval --fail-under 100 && uv run pytest tests/test_status_bar.py tests/test_ctx_rail.py tests/test_app_shuttle.py -v && ./init.sh",
+      "evidence": "P1a (commit 0596cab): status_bar.py _ctx_rail_render + shuttle_phase reactive + app.py _tick_shuttle 1Hz interval + idle freeze. Gate: 5/5 items pass inline (idle freeze, phase toggle, ratio clamp, ●@5, no █/░, _tick_shuttle line 353 idle guard). P1b: status_bar.py render() adds inline [$text-muted]^N[/] phase indicator (方案 C since StatusBar.height=1 §9.3 cap). 8 rail tests + 4 app shuttle tests + 2 status_bar tests added (12/12 + 22/22 = 34/34 in test_status_bar+ctx_rail+app_shuttle). 5 eval cases (tui-ctx-rail-*) added (243/243 eval pass). 7 snapshots rebaselined via pytest --snapshot-update; text diff bounded to ctx rail field (fill bar → rail + new ^0 segment + downstream index shift). ./init.sh: 491 passed, all green. tick-above-shuttle deferred to P3 (per §4.2.1)."
     }
   ]
 }

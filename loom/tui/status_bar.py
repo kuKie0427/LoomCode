@@ -41,7 +41,12 @@ def _ctx_color_class(ratio: float) -> str:
 
 
 def _ctx_rail_render(ratio: float, shuttle_phase: int, state: EngineState) -> str:
-    """§2.2.3 ctx rail with shuttle pass — idle freezes, active passes."""
+    """§2.2.3 ctx rail with shuttle pass — idle freezes, active passes.
+
+    Note: §4.2.1 spec requires a `^` tick ABOVE the shuttle, but StatusBar.height=1
+    (§9.3 cap) physically can't show two lines. Phase indicator is rendered
+    inline as `^0`/`^1` on the same line. Strict ^-above-shuttle deferred to P3.
+    """
     base_x = round(ratio * (_RAIL_WIDTH - 1))
     offset = 0 if state == "idle" else shuttle_phase * _SHUTTLE_PASS_RANGE
     shuttle_x = max(0, min(_RAIL_WIDTH - 1, base_x + offset))
@@ -97,7 +102,8 @@ class StatusBar(Static):
         rail = _ctx_rail_render(ratio, self.shuttle_phase, self.engine_state)
         ctx_str = (
             f"[$text-muted]ctx:[/] {rail} "
-            f"{_format_tokens(self.ctx_tokens)}/{_format_tokens(self.ctx_window)} "
+            f"[$text-muted]^{self.shuttle_phase}[/]"
+            f" {_format_tokens(self.ctx_tokens)}/{_format_tokens(self.ctx_window)} "
             f"({ratio * 100:.0f}%)"
         )
 
