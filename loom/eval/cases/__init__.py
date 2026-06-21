@@ -9,6 +9,7 @@ from loom.eval.cases import (
     cold_start_continuity,  # noqa: F401
     cross_session_resume,  # noqa: F401
     detect,  # noqa: F401
+    edit_file_v2,  # noqa: F401
     eval_benchmark_cli,  # noqa: F401
     failure_modes,  # noqa: F401
     grep_tool,  # noqa: F401

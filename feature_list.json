@@ -856,6 +856,16 @@
       "dependencies": [],
       "status": "done",
       "evidence": "(see f-grep-tool-p0 commit for full evidence; added here for completeness)"
+    },
+    {
+      "id": "f-edit-file-v2-p0",
+      "name": "Phase 1 P0: edit_file v2 (fuzzy + multi-edit + line-range)",
+      "description": "Replace brittle str.replace with multi-match error + difflib fuzzy fallback; add multi_edit and edit_lines tools.",
+      "dependencies": [
+        "f-agent-quality-eval-p0"
+      ],
+      "status": "done",
+      "evidence": "(see commit message for full evidence)"
     }
   ]
 }

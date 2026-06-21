@@ -144,16 +144,160 @@ def run_write(path: str, content: str) -> str:
         return f"Error: {e}"
 
 
+def _format_unified_diff(path: str, original: str, updated: str) -> str:
+    import difflib
+    diff = difflib.unified_diff(
+        original.splitlines(keepends=True),
+        updated.splitlines(keepends=True),
+        fromfile=f"a/{path}",
+        tofile=f"b/{path}",
+        n=2,
+    )
+    return "".join(diff).rstrip("\n")
+
+
+def _fuzzy_match_single(text: str, snippet: str, min_ratio: float = 0.85) -> int | None:
+    """Return the byte offset of the best single fuzzy match of `snippet` in `text`,
+    or None if no match meets `min_ratio` AND the snippet is unique enough.
+
+    Uses difflib.SequenceMatcher ratio at every possible start position.
+    """
+    import difflib
+    if not snippet:
+        return None
+    snippet_lines = snippet.splitlines(keepends=True)
+    snippet_len = sum(len(s) for s in snippet_lines)
+    if snippet_len == 0 or snippet_len > len(text):
+        return None
+    n_lines = len(snippet_lines)
+    text_lines = text.splitlines(keepends=True)
+    if n_lines > len(text_lines):
+        return None
+    best_ratio = 0.0
+    best_offset = -1
+    for i in range(len(text_lines) - n_lines + 1):
+        window = "".join(text_lines[i : i + n_lines])
+        ratio = difflib.SequenceMatcher(None, snippet, window).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_offset = sum(len(l) for l in text_lines[:i])
+            if best_ratio >= 0.999:
+                break
+    if best_ratio >= min_ratio:
+        return best_offset
+    return None
+
+
+def _edit_apply(text: str, old_text: str, new_text: str, fuzzy_min_ratio: float = 0.85) -> tuple[str, str]:
+    """Apply a single old->new edit to `text`.
+
+    Returns (updated_text, mode) where mode is 'exact', 'fuzzy', or 'error'.
+    """
+    if not old_text:
+        return text, "error:empty_old_text"
+    count = text.count(old_text)
+    if count == 1:
+        return text.replace(old_text, new_text, 1), "exact"
+    if count > 1:
+        return text, f"error:multiple_matches({count})"
+    if len(old_text) >= 40:
+        offset = _fuzzy_match_single(text, old_text, fuzzy_min_ratio)
+        if offset is not None:
+            return text[:offset] + new_text + text[offset + len(old_text):], "fuzzy"
+    return text, "error:not_found"
+
+
 def run_edit(path: str, old_text: str, new_text: str) -> str:
+    """Replace a single block of text in a file.
+
+    Match order: (1) exact unique match -> apply, (2) multiple exact matches
+    -> return error, (3) zero exact matches AND old_text is >=40 chars ->
+    difflib fuzzy fallback at ratio>=0.85 -> apply once, (4) otherwise
+    return error. Returns a structured message with a unified diff on success.
+    """
     try:
         file_path = safe_path(path)
         text = file_path.read_text()
-        if old_text not in text:
-            return f"Error: text not found in {path}"
-        file_path.write_text(text.replace(old_text, new_text, 1))
-        return f"Edited {path}"
-    except Exception as e:
-        return f"Error: {e}"
+    except Exception as exc:
+        return f"Error: {exc}"
+    updated, mode = _edit_apply(text, old_text, new_text)
+    if mode.startswith("error:"):
+        return f"Error: {mode.split(':', 1)[1]} (path={path})"
+    if mode == "fuzzy":
+        note = f" (fuzzy match, len(old_text)={len(old_text)})"
+    else:
+        note = ""
+    diff = _format_unified_diff(path, text, updated)
+    try:
+        file_path.write_text(updated)
+    except Exception as exc:
+        return f"Error: {exc}"
+    return f"Edited {path}{note}\n--- diff ---\n{diff}"
+
+
+def run_multi_edit(path: str, edits: list[dict]) -> str:
+    """Apply multiple edits to one file atomically.
+
+    Each edit is {old_text, new_text}. All edits must apply (with the same
+    exact/fuzzy rules as run_edit) or the file is left unchanged and an
+    error is returned. Returns a structured message with the diff.
+    """
+    try:
+        file_path = safe_path(path)
+        original = file_path.read_text()
+    except Exception as exc:
+        return f"Error: {exc}"
+    if not isinstance(edits, list) or not edits:
+        return f"Error: edits must be a non-empty list"
+    for i, e in enumerate(edits):
+        if not isinstance(e, dict) or "old_text" not in e or "new_text" not in e:
+            return f"Error: edits[{i}] missing old_text or new_text"
+    text = original
+    for i, e in enumerate(edits):
+        updated, mode = _edit_apply(text, e["old_text"], e["new_text"])
+        if mode.startswith("error:"):
+            return f"Error: edits[{i}] {mode.split(':', 1)[1]} (path={path}, file unchanged)"
+        text = updated
+    try:
+        file_path.write_text(text)
+    except Exception as exc:
+        return f"Error: {exc}"
+    diff = _format_unified_diff(path, original, text)
+    return f"Multi-edited {path} ({len(edits)} edits applied)\n--- diff ---\n{diff}"
+
+
+def run_edit_lines(path: str, start_line: int, end_line: int, new_content: str) -> str:
+    """Replace lines [start_line, end_line] inclusive (1-indexed) with new_content.
+
+    Useful for structured line-range edits when the agent can identify lines
+    from `read_file` output but reproducing exact whitespace is risky.
+    """
+    try:
+        file_path = safe_path(path)
+        text = file_path.read_text()
+    except Exception as exc:
+        return f"Error: {exc}"
+    lines = text.splitlines(keepends=True)
+    total = len(lines)
+    if start_line < 1 or end_line < start_line:
+        return f"Error: invalid line range ({start_line}..{end_line})"
+    if start_line > total:
+        return f"Error: start_line {start_line} > total {total}"
+    s = start_line - 1
+    e = min(end_line, total)
+    before = "".join(lines[:s])
+    after = "".join(lines[e:])
+    if new_content and not new_content.endswith("\n"):
+        new_content_eol = new_content + "\n"
+    else:
+        new_content_eol = new_content
+    updated = before + new_content_eol + after
+    try:
+        file_path.write_text(updated)
+    except Exception as exc:
+        return f"Error: {exc}"
+    diff = _format_unified_diff(path, text, updated)
+    return f"Replaced lines {start_line}..{end_line} in {path} ({total} total)\n--- diff ---\n{diff}"
 
 
 def run_glob(pattern: str) -> str:
@@ -360,9 +504,66 @@ TOOL_REGISTRY.register(Tool(
 ))
 TOOL_REGISTRY.register(Tool(
     name="edit_file",
-    description="Replace exact text in a file once.",
+    description=(
+        "Replace a single block of text in a file. Match order: (1) exact unique "
+        "match -> apply; (2) multiple exact matches -> error (add surrounding context "
+        "to disambiguate); (3) zero matches AND old_text is >=40 chars -> difflib "
+        "fuzzy fallback at ratio>=0.85 -> apply once; (4) otherwise error. Returns "
+        "a unified diff on success. For multiple edits use `multi_edit`; for known "
+        "line numbers use `edit_lines`."
+    ),
     input_schema={"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}}, "required": ["path", "old_text", "new_text"]},
     handler=run_edit,
+))
+TOOL_REGISTRY.register(Tool(
+    name="multi_edit",
+    description=(
+        "Apply multiple edits to a single file atomically. Each edit is a dict "
+        "{old_text, new_text}. All edits use the same match rules as `edit_file` "
+        "(exact, then fuzzy if old_text>=40 chars). If ANY edit fails, the file is "
+        "left UNCHANGED and an error is returned. Returns a unified diff on success. "
+        "Use this when you have several non-overlapping edits to one file."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "edits": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "old_text": {"type": "string"},
+                        "new_text": {"type": "string"},
+                    },
+                    "required": ["old_text", "new_text"],
+                },
+            },
+        },
+        "required": ["path", "edits"],
+    },
+    handler=run_multi_edit,
+))
+TOOL_REGISTRY.register(Tool(
+    name="edit_lines",
+    description=(
+        "Replace lines [start_line, end_line] inclusive (1-indexed) with new_content. "
+        "Use this when you have read a file with `read_file` and know the line numbers "
+        "to replace, rather than reproducing the exact text. Trailing newline is added "
+        "automatically if new_content doesn't end in one. Past-EOF start_line returns "
+        "an error."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "start_line": {"type": "integer", "minimum": 1},
+            "end_line": {"type": "integer", "minimum": 1},
+            "new_content": {"type": "string"},
+        },
+        "required": ["path", "start_line", "end_line", "new_content"],
+    },
+    handler=run_edit_lines,
 ))
 TOOL_REGISTRY.register(Tool(
     name="glob",
@@ -468,8 +669,12 @@ SUB_TOOLS: list[ToolParam] = [
      "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "limit": {"type": "integer"}, "offset": {"type": "integer", "minimum": 1, "description": "1-indexed start line; omit or 0 to read from the beginning"}}, "required": ["path"]}},
     {"name": "write_file", "description": "Write content to a file.",
      "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},
-    {"name": "edit_file", "description": "Replace exact text in a file once.",
+    {"name": "edit_file", "description": "Replace exact text in a file once. Falls back to difflib fuzzy match (ratio>=0.85) if old_text>=40 chars and not found exactly. Returns error on multiple exact matches (add context).",
      "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}}, "required": ["path", "old_text", "new_text"]}},
+    {"name": "multi_edit", "description": "Apply multiple edits to one file atomically. Each edit is {old_text, new_text}. All-or-nothing: if any edit fails the file is unchanged.",
+     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "edits": {"type": "array", "items": {"type": "object", "properties": {"old_text": {"type": "string"}, "new_text": {"type": "string"}}, "required": ["old_text", "new_text"]}}}, "required": ["path", "edits"]}},
+    {"name": "edit_lines", "description": "Replace lines [start_line, end_line] inclusive (1-indexed) with new_content.",
+     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1}, "new_content": {"type": "string"}}, "required": ["path", "start_line", "end_line", "new_content"]}},
     {"name": "glob", "description": "Find files matching a glob pattern.",
      "input_schema": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}},
     {"name": "grep", "description": "Search files for a regex or literal pattern. Output is `path:line:content` per match, capped at 200 hits. Use grep BEFORE reading multiple files when looking for symbols or string usages — much cheaper than opening files one by one.",
@@ -478,7 +683,8 @@ SUB_TOOLS: list[ToolParam] = [
 
 SUB_HANDLERS = {
     "bash": run_bash, "read_file": run_read, "write_file": run_write,
-    "edit_file": run_edit, "glob": run_glob, "grep": run_grep,
+    "edit_file": run_edit, "multi_edit": run_multi_edit, "edit_lines": run_edit_lines,
+    "glob": run_glob, "grep": run_grep,
 }
 
 SUB_SYSTEM = (

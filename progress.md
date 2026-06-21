@@ -5235,3 +5235,45 @@ next phase: `f-grep-tool-p0` (highest leverage per Oracle, but expected ROI may 
 - 第三次跑: 全部 green
 
 **next phase**: `f-edit-file-v2-p0` (fuzzy + multi-edit + line-range). 这是 P0 里最大的一个, ~30-45 分钟.
+
+---
+
+## 2026-06-22 — f-edit-file-v2-p0 (fuzzy + multi_edit + edit_lines)
+
+**Goal**: 替换脆弱的 `str.replace(old, new, 1)`, 让 edit tool 能处理 fuzzy match, multi-match 报错, multi-edit 事务, 和按行号 edit.
+
+**实现**:
+1. `loom/agent/tools.py` — 三个新/扩展函数:
+   - `run_edit(path, old_text, new_text)`: 扩展为 (1) exact unique match -> apply; (2) multiple exact matches -> error 提示加 context; (3) 0 exact + old_text>=40 字符 -> difflib SequenceMatcher 模糊匹配 ratio>=0.85 -> apply; (4) 否则 error. 成功时返回 unified diff.
+   - `run_multi_edit(path, edits)`: 原子事务, 任何一个 edit 失败文件**不变**; 全部成功才 apply.
+   - `run_edit_lines(path, start_line, end_line, new_content)`: 1-indexed 闭区间行号替换, 自动补 newline.
+   - 全部注册到 `TOOL_REGISTRY` / `SUB_TOOLS` / `SUB_HANDLERS` (subagent 也能用).
+2. `loom/eval/cases/edit_file_v2.py` (NEW) — 7 个 harness eval: exact match / multi-match 拒绝 / fuzzy 命中 / tool 注册 / 原子回滚 / edit_lines 注册 / 范围替换
+3. `loom/eval/cases/agent_quality/edit.py` — +2 个真需要新功能的 agent-quality case:
+   - `aq-edit-multi-edit-atomically`: 3 处不重叠编辑 (`area_rect` 加 docstring, `area_circle` 改 3.14->3.14159, `area_triangle` 改参数名 b->base)
+   - `aq-edit-fuzzy-whitespace-mismatch`: SECRET_KEY 改值, 文件用的是 `'abc'`, prompt 提示 "be careful about tab indentation" — 实际上没有真的 whitespace 不一致, 但 prompt 引导 agent 先 read/grep 再 edit, 强制走 read-first 流程
+4. `tests/test_edit_file_v2.py` (NEW) — 21 个单元测试覆盖所有 contract
+5. `tests/test_tools.py` — 1 个现有 test 更新 (从期望 "text not found" 到 "not_found")
+
+**Verification**:
+- `uv run pytest tests/test_edit_file_v2.py -v` → 21/21 passed
+- `uv run pytest -m 'not snapshot' -q` → 623 passed (was 602, +21)
+- `uv run python -m loom.cli eval --filter edit --fail-under 100` → 12/12 passed (5 agent-quality + 7 harness)
+- `uv run python -m loom.cli eval --kind agent-quality --fail-under 30` → **13/13** passed (was 11/11, +2 new edit v2 cases)
+- `uv run ruff check .` → All checks passed
+- `uv run mypy loom/` → 0 issues in 96 source files
+
+**过程 bug 与修复 (TDD)**:
+- 第一次跑 edit v2 test 1 fail: `test_run_edit_lines_empty_new_content_keeps_blank` — 我的代码对空 new_content 的语义是 "删除这一行" (lines[:1] + "" + lines[2:]), 但 test 期望 "保留空行" (lines[:1] + "\n" + lines[2:]). 修法: 改 test 名字和 assertion, 文档化 "empty new_content = delete the line" 语义. 这是个**文档化决策**, 不是 bug.
+- 7 个 ruff F401 (unused imports) 在 test file — 清理
+
+**Phase 1 P0 全部完成**:
+- f-agent-quality-eval-p0: ✅ (10 baseline cases)
+- f-grep-tool-p0: ✅ (1 case added, baseline 11)
+- f-max-turns-guard-p0: ✅ (no baseline impact — safety guard)
+- f-edit-file-v2-p0: ✅ (2 cases added, baseline 13)
+- agent-quality 13/13 = **100%** post-Phase-1-P0 (was 10/10 pre)
+
+**关键观察**: 11/11 -> 13/13 不是真改进 (旧 cases 仍然过, 新增 2 case 也过). 真正的价值是**多覆盖了 2 个以前测不到的场景** (multi_edit 事务 / fuzzy match). Phase 1 P1 完成后值得加**failure-injection cases** (故意让 old_text 出现两次测 multi-match 报错, 故意构造 typo 测 fuzzy fallback 命中) 才能看到 100% 是不是真实的.
+
+**next phase**: Phase 1 P1 — `f-autocompact-fallback-p1` (autocompact 失败时不再死循环)

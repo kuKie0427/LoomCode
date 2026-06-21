@@ -240,14 +240,15 @@ def test_run_edit_replaces_text(monkeypatch, temp_workdir):
 
 
 def test_run_edit_text_not_found(monkeypatch, temp_workdir):
-    """run_edit returns an error when old_text is not found in the file."""
+    """run_edit returns an error when old_text is not found in the file (and too short for fuzzy)."""
     monkeypatch.setattr(main, "WORKDIR", temp_workdir)
 
     file_path = temp_workdir / "edit_test.txt"
     file_path.write_text("sample content")
 
     result = main.run_edit("edit_test.txt", "nonexistent", "replacement")
-    assert "Error: text not found" in result
+    assert "Error:" in result
+    assert "not_found" in result
 
 
 def test_run_edit_path_escape(monkeypatch, temp_workdir):
