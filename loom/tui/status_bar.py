@@ -100,7 +100,7 @@ def _build_ctx_line_components(
             prefix_parts.append(f"⎇ {git_branch}")
         prefix_parts.append(f"{turns}t·{tools}tl")
         joined = " · ".join(prefix_parts)
-        prefix = f"[$text-faint]{joined} ctx:[/] "
+        prefix = f"[$surface]{joined} ctx:[/] "
     else:
         # StatusBar row: full §9.3 hierarchy
         prefix_parts = [

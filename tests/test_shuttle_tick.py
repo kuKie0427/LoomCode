@@ -89,13 +89,11 @@ def test_shuttle_tick_overlay_prefix_matches_status_bar():
                 f"  StatusBar:   {sb_prefix!r}"
             )
 
-            # TickOverlay prefix must use single $text-faint span (ambient row)
-            assert "[$text-faint]loom" in tick_text, (
-                f"TickOverlay prefix must use single $text-faint span; got: {tick_text!r}"
+            assert "[$surface]loom" in tick_text, (
+                f"TickOverlay prefix must use single $surface span (invisible against #chrome bg); got: {tick_text!r}"
             )
-            # StatusBar prefix must NOT use single $text-faint wrap (preserves hierarchy)
-            assert "[$text-faint]loom · " not in sb_text, (
-                f"StatusBar prefix must NOT collapse to single $text-faint span (would lose §9.3 hierarchy); got: {sb_text!r}"
+            assert "[$surface]loom · " not in sb_text, (
+                f"StatusBar prefix must NOT collapse to single $surface span (would hide §9.3 hierarchy); got: {sb_text!r}"
             )
 
     asyncio.run(driver())
