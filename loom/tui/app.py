@@ -42,7 +42,7 @@ from loom.tui.messages import (
     ToolUseCompleted,
     ToolUseStarted,
 )
-from loom.tui.status_bar import EngineState, StatusBar
+from loom.tui.status_bar import EngineState, ShuttleTickOverlay, StatusBar
 
 # Mapping from agent_loop's todo status (string) to the TUI Header's
 # TodoItem.state (Literal["pending", "active", "done"]). The agent uses
@@ -337,6 +337,20 @@ class AgentTUIApp(App):
         status_bar.ctx_tokens = self.ctx_tokens
         status_bar.ctx_window = self.llm.get_context_window()
 
+    def _sync_shuttle_tick_overlay(self) -> None:
+        """P3: propagate engine_state + shuttle_phase + ctx_tokens + ctx_window
+        to ShuttleTickOverlay so ^ stays aligned with shuttle.
+        """
+        try:
+            tick = self.query_one(ShuttleTickOverlay)
+            status_bar = self.query_one(StatusBar)
+        except Exception:
+            return
+        tick.engine_state = self.engine_state
+        tick.shuttle_phase = status_bar.shuttle_phase
+        tick.ctx_tokens = self.ctx_tokens
+        tick.ctx_window = self.llm.get_context_window()
+
     def _tick_session_elapsed(self) -> None:
         try:
             status_bar = self.query_one(StatusBar)
@@ -357,6 +371,7 @@ class AgentTUIApp(App):
         except Exception:
             return
         status_bar.shuttle_phase = 1 - status_bar.shuttle_phase
+        self._sync_shuttle_tick_overlay()
 
     def _detect_git_branch(self) -> None:
         try:
@@ -370,6 +385,9 @@ class AgentTUIApp(App):
             branch = result.stdout.strip() if result.returncode == 0 else ""
         except Exception:
             branch = ""
+        # Mirror on App: _build_ctx_line_components helper reads app._git_branch
+        # (P3a shared prefix) so the TickOverlay's `^` aligns with StatusBar.
+        self._git_branch = branch
         try:
             self.query_one(StatusBar).git_branch = branch
         except Exception:
@@ -383,6 +401,7 @@ class AgentTUIApp(App):
 
     def watch_ctx_tokens(self, _old: int, _new: int) -> None:
         self._sync_status_bar()
+        self._sync_shuttle_tick_overlay()
 
     def watch_engine_state(self, _old: EngineState, new: EngineState) -> None:
         if new == "idle":
@@ -394,6 +413,7 @@ class AgentTUIApp(App):
             self.query_one(StatusBar).engine_state = new
         except Exception:
             pass
+        self._sync_shuttle_tick_overlay()
 
     def _set_engine_state(self, new: EngineState) -> bool:
         """§2.2.1 transitions are instant — no fade, no tween. Returns True if state changed."""
@@ -436,6 +456,7 @@ class AgentTUIApp(App):
         yield Header(id="header")
         yield ChatLog(id="chat-log")
         with Vertical(id="chrome"):
+            yield ShuttleTickOverlay(id="shuttle-tick")
             yield StatusBar(id="status-bar")
             yield Composer(id="composer")
 

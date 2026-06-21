@@ -4531,3 +4531,160 @@ tests/test_tool_cycle.py              | +130 -0  (new — 6 tests)
 P0 (engine state transitions) → P1a (ctx rail + shuttle) → P1b (tick-above-shuttle inline) → P2a (ToolCallMarker cycle) → P2b (HeaderSectionButton pulse + §2.2.3 验收)
 
 **Next:** P3 独立 follow-up（tick-above-shuttle 严格实现 §4.2.1 two-row visual），triggered by user dissatisfaction with inline `^N` indicator。
+
+---
+
+## P3a (Tick-above-shuttle widget + app wiring) — 2026-06-21
+
+### 改动文件 (2 source files)
+
+```
+loom/tui/app.py        |  23 ++++++++-
+loom/tui/status_bar.py | 132 +++++++++++++++++++++++++++++++++++--------------
+2 files changed, 118 insertions(+), 37 deletions(-)
+```
+
+### 实现内容
+
+1. **`_ctx_rail_render` → `_ctx_rail_components`** (status_bar.py:43-65)
+   - 单 string 返回 → `(shuttle_x, colorized_rail_str)` tuple
+   - 加入 `ratio = max(0.0, min(1.0, ratio))` clamp（防御负值/越界）
+
+2. **新 `_build_ctx_line_components` shared helper** (status_bar.py:68-110)
+   - 单点定义 prefix：`loom · model · ⎇ branch · Nt·Mtl · ctx: `
+   - 返回 `(prefix_str, rail_str, tick_str)` 三元组
+   - tick 行始终 `$text-muted`（不是 rail 的 success/warning/error 颜色）
+
+3. **`ShuttleTickOverlay` widget** (status_bar.py:159-189)
+   - 1-line `Static`，`height: 1`, `background: transparent`, `color: $text-muted`, `padding: 0 1`
+   - 4 reactive fields: `engine_state`, `shuttle_phase`, `ctx_tokens`, `ctx_window`
+   - `render()` 输出 `prefix + tick_str`（不渲染 rail 或 tokens）
+
+4. **`StatusBar.render()` 移除 inline `^N`**
+   - 改用 `_build_ctx_line_components` 共享 prefix（避免 double `ctx:`）
+   - 输出格式：`{prefix}{rail} {tokens} ({pct}%) · {engine_badge}   {key_hints}`
+   - 与 P1b 相比：少了 `^0`/`^1`，多了一个 `·` 分隔符，prefix 跨行对齐
+
+5. **App 接线** (app.py)
+   - `compose()`: `ShuttleTickOverlay` 作为 `#chrome` Vertical 第一个 child（StatusBar 之上）
+   - 新增 `_sync_shuttle_tick_overlay()`: 传播 4 个 reactive 到 TickOverlay
+   - 3 个 hook 点: `watch_engine_state`, `_tick_shuttle`, `watch_ctx_tokens`
+   - `_detect_git_branch()` 同步 `self._git_branch = branch`（让 helper 看见 branch）
+
+### 已知 P3a→P3b boundary（按 plan §'P3a 不引入新测试'）
+
+P3a 实施导致以下测试/eval/snapshot 失败，留待 P3b 修复：
+
+| 文件 | 失败原因 | P3b 修复方式 |
+|---|---|---|
+| `tests/test_ctx_rail.py` | 导入 `_ctx_rail_render`（已重命名） | 改导入为 `_ctx_rail_components` + tuple unpacking |
+| `tests/test_status_bar.py::test_status_bar_renders_shuttle_phase_indicator` | 断言 `^0`/`^1` 在 StatusBar.render() | 改测 TickOverlay：`app.query_one(ShuttleTickOverlay).render()` 包含 `^` |
+| `loom/eval/cases/tui_ctx_rail.py::TuiCtxRailShuttleHelperDefined` | 验 `_ctx_rail_render` 签名 | 改验 `_ctx_rail_components` 签名 `(ratio, shuttle_phase, state) -> tuple[int, str]` |
+| `loom/eval/cases/tui_ctx_rail.py::TuiCtxRailShuttlePositionFormula` | 检查 `_ctx_rail_render` 源码 | 改检查 `_ctx_rail_components` 源码 |
+| `tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw` | #chrome 多 1 行 layout shift | `pytest --snapshot-update` rebaseline |
+| 新增 `tests/test_shuttle_tick.py` | 缺失 | P3b 添加：TickOverlay 渲染、idle freeze、prefix alignment、3 hook 点 |
+
+### Hands-on QA 验证
+
+```python
+TickOverlay parent is #chrome: True
+StatusBar parent is #chrome: True
+TickOverlay is first child of #chrome: True
+StatusBar is second child of #chrome: True
+TickOverlay has ^: True
+StatusBar has ^: True (only ^l in esc key hint, no ^0/^1)
+```
+
+StatusBar 渲染：`loom · deepseek-v4-flash · ⎇ main · 0t·0tl ctx: ●───────── 0/1.0M (0%) · ● idle   esc ^l / 0:00`
+TickOverlay 渲染：`loom · deepseek-v4-flash · ⎇ main · 0t·0tl ctx: ^          ` ← `^` 正好在 `●` 同一列
+
+### Gate (P3a 完成)
+
+- [x] `_ctx_rail_components` 改名为 tuple return (pure helper)
+- [x] `_build_ctx_line_components` 新增，返回 `(prefix, rail, tick)` 三元组
+- [x] `ShuttleTickOverlay` class 存在 (status_bar.py 内, 1-line widget)
+- [x] `StatusBar.render()` 不再含 `^{self.shuttle_phase}` inline 字符串
+- [x] `loom/tui/app.py::compose()` yield `ShuttleTickOverlay` 在 `StatusBar` 之前
+- [x] `_sync_shuttle_tick_overlay()` 在 3 个 hook 点调用
+- [x] `git diff --stat` 仅显示 2 source files (status_bar.py + app.py)
+- [x] ruff / mypy 全 clean
+- [x] `feature_list.json` 残留 P0 follow-up 已 commit 为 `0b9c44c`（chore）保持 P3a diff 干净
+
+**P3a 整体未 commit**（按 plan §'P3a 不引入新测试' + §'P3b 接力'：P3b 负责 tests + eval + snapshot + commit）。
+
+**Next:** P3b（独立 follow-up session）— 更新 test_ctx_rail.py / test_status_bar.py、添加 tests/test_shuttle_tick.py、更新 tui_ctx_rail eval cases、rebaseline snapshots、最终 `./init.sh` 绿后 commit P3a + P3b 一起。
+
+---
+
+## P3b (Tests + eval + snapshot rebaseline + commit) — 2026-06-21
+
+### 改动文件 (15 files)
+
+```
+loom/eval/cases/__init__.py                        |   1 +
+loom/eval/cases/tui_ctx_rail.py                    |  43 +++--
+loom/eval/cases/tui_shuttle_tick.py                | 248 +++++++++++ (new)
+loom/tui/app.py                                    |  23 ++-
+loom/tui/status_bar.py                             | 132 ++++++++++----
+progress.md                                        |  82 +++++++++
+session-handoff.md                                 |  75 ++++++++
+tests/__snapshots__/test_tui_header/*.raw         | 686 (7 rebaselined)
+tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw | 198 (rebaselined)
+tests/test_ctx_rail.py                             |  28 +--
+tests/test_status_bar.py                           |  42 ++++-
+tests/test_shuttle_tick.py                         | 224 (new)
+```
+
+### 实施内容
+
+1. **tests/test_ctx_rail.py** (8 tests updated) — `_ctx_rail_render` → `_ctx_rail_components` + tuple unpacking (`_, out = ...`); docstring updated
+2. **tests/test_status_bar.py** (1 test replaced) — `test_status_bar_renders_shuttle_phase_indicator` → `test_status_bar_renders_shuttle_tick_above` (verifies TickOverlay in DOM + StatusBar `^0`/`^1` absence)
+3. **tests/test_shuttle_tick.py** (10 NEW tests):
+   - `test_shuttle_tick_overlay_importable` — class accessible
+   - `test_shuttle_tick_overlay_default_reactives` — engine_state=idle, phase=0, tokens=0, window=0
+   - `test_shuttle_tick_overlay_renders_caret_in_idle` — `^` after `ctx:`
+   - `test_shuttle_tick_overlay_prefix_matches_status_bar` — §4.2.1 char-level alignment
+   - `test_shuttle_tick_overlay_idle_freezes_position` — phase 0→1 doesn't move `^` in idle
+   - `test_shuttle_tick_overlay_active_bobs_phase` — phase 0→1 shifts `^` right by 1 (active)
+   - `test_shuttle_tick_overlay_sits_above_status_bar_in_chrome` — DOM order invariant
+   - `test_shuttle_tick_overlay_uses_text_muted_color` — NOT success/warning/error
+   - `test_sync_shuttle_tick_overlay_propagates_engine_state` — App→TickOverlay via `wait_for_state`
+   - `test_sync_shuttle_tick_overlay_propagates_ctx_tokens` — App→TickOverlay via `wait_for_state`
+4. **loom/eval/cases/tui_ctx_rail.py** (2 cases renamed) — `TuiCtxRailShuttleHelperDefined` → `TuiCtxRailShuttleComponentsDefined`; `TuiCtxRailShuttlePositionFormula` → `TuiCtxRailShuttlePositionFormulaComponents`
+5. **loom/eval/cases/tui_shuttle_tick.py** (5 NEW eval cases):
+   - `TuiShuttleTickOverlayClassDefined` — 4 reactives + DEFAULT_CSS
+   - `TuiShuttleTickOverlayAboveStatusBar` — compose() order via source.index()
+   - `TuiShuttleTickOverlayHelperExists` — `_build_ctx_line_components` 5-param sig
+   - `TuiShuttleTickOverlayUsesTextMutedColor` — tick uses `[$text-muted]`
+   - `TuiShuttleTickOverlaySyncHelperExists` — `_sync_shuttle_tick_overlay` propagates 4 reactives
+6. **loom/eval/cases/__init__.py** — register `tui_shuttle_tick` module
+7. **9 snapshot rebaseline** (7 layout-shift affected via `pytest --snapshot-update`):
+   - `tests/__snapshots__/test_tui_header/test_header_collapsed_empty.raw` (+1 row in #chrome)
+   - `tests/__snapshots__/test_tui_header/test_header_collapsed_populated.raw`
+   - `tests/__snapshots__/test_tui_header/test_header_collapsed_subagent_hidden.raw`
+   - `tests/__snapshots__/test_tui_header/test_header_expanded_mcp.raw`
+   - `tests/__snapshots__/test_tui_header/test_header_expanded_subagent.raw`
+   - `tests/__snapshots__/test_tui_header/test_header_expanded_todo.raw`
+   - `tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw`
+
+### Gate (P3 整体完成)
+
+- [x] `uv run python -m loom.cli eval --fail-under 100` → **254/254 passed** (was 249 = +5 new shuttle_tick cases)
+- [x] `uv run pytest tests/test_shuttle_tick.py tests/test_status_bar.py -v` → **32/32 passed** (10 new + 22 existing)
+- [x] `./init.sh` → **514 passed** (was 504 = +10 new shuttle_tick tests), 9 snapshots, all green
+- [x] ruff / mypy 全 clean
+- [x] `feature_list.json` 中 `f-tui-paradigm-p3` = `done` + evidence（已更新）
+
+### Subagent Sessions (delegation)
+
+- P3a impl: `ses_116788103ffepCCbQMfNaZUZe6` (3m 18s)
+- P3a verification + git_branch fix: orchestrator direct
+- P3b tests: `ses_11668daebffeLCscBlOnUrX2kH` (3m 21s)
+- P3b eval: `ses_116649abaffeVJP6128YXCiXX4` (2m 57s)
+- All subagent claims verified by orchestrator via Read + pytest + ruff + mypy
+
+### 织机范式 (looper paradigm) 全部完成
+
+P0 (engine state) → P1a (ctx rail + shuttle) → P1b (tick-above-shuttle inline) → P2a (ToolCallMarker cycle) → P2b (HeaderSectionButton pulse) → P3a (ShuttleTickOverlay widget impl) → **P3b (tests + eval + snapshots) — DONE**
+
+5 motion primitives + 2-line tick-above-shuttle spec 全部实现 + 测试 + eval + snapshots 锁定。

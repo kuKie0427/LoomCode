@@ -18,7 +18,7 @@ from textual.events import MouseScrollDown, MouseScrollUp
 
 from loom.tui.app import AgentTUIApp
 from loom.tui.chat_log import ChatLog
-from loom.tui.status_bar import StatusBar, _format_tokens, _render_engine_badge
+from loom.tui.status_bar import ShuttleTickOverlay, StatusBar, _format_tokens, _render_engine_badge
 from tests.conftest import wait_for_state
 
 
@@ -417,23 +417,47 @@ def test_status_bar_renders_rail_not_fill_bar():
     asyncio.run(driver())
 
 
-def test_status_bar_renders_shuttle_phase_indicator():
-    """P1b §4.2.1 inline phase indicator: render contains `^0` or `^1`."""
+def test_status_bar_renders_shuttle_tick_above():
+    """§4.2.1: StatusBar no longer renders inline ^N. Tick is in ShuttleTickOverlay above."""
 
     async def driver():
         app = AgentTUIApp()
         async with app.run_test(size=(120, 25)) as pilot:
             await pilot.pause(0.05)
-            status_bar = app.query_one(StatusBar)
 
+            status_bar = app.query_one(StatusBar)
+            tick_overlay = app.query_one(ShuttleTickOverlay)
+            chrome = app.query_one("#chrome")
+
+            # Verify DOM structure: TickOverlay is first child, StatusBar is inside #chrome
+            children = list(chrome.children)
+            assert tick_overlay in children, "TickOverlay must be inside #chrome"
+            assert status_bar in children, "StatusBar must be inside #chrome"
+            assert list(chrome.children).index(tick_overlay) < list(chrome.children).index(
+                status_bar
+            ), "TickOverlay must sit above StatusBar in #chrome"
+
+            # Verify StatusBar.render() no longer contains inline ^0/^1
             status_bar.shuttle_phase = 0
             await pilot.pause(0.05)
-            text = status_bar.render()
-            assert "^0" in text, f"phase 0 indicator missing: {text!r}"
+            sb_text = status_bar.render()
+            assert "^0" not in sb_text, (
+                f"StatusBar should NOT contain inline ^0 after P3a: {sb_text!r}"
+            )
+            assert "^1" not in sb_text, (
+                f"StatusBar should NOT contain inline ^1 after P3a: {sb_text!r}"
+            )
 
-            status_bar.shuttle_phase = 1
-            await pilot.pause(0.05)
-            text = status_bar.render()
-            assert "^1" in text, f"phase 1 indicator missing: {text!r}"
+            # Verify TickOverlay DOES render ^ (the tick)
+            tick_text = tick_overlay.render()
+            assert "^" in tick_text, (
+                f"TickOverlay must render ^ glyph: {tick_text!r}"
+            )
+
+            # Verify the ^ position is right after 'ctx: ' (shuttle_x offset)
+            ctx_marker = "ctx:"
+            assert ctx_marker in tick_text, (
+                f"TickOverlay must contain ctx: prefix: {tick_text!r}"
+            )
 
     asyncio.run(driver())

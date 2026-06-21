@@ -741,9 +741,9 @@
       "dependencies": [
         "f-tui-paradigm-p2"
       ],
-      "status": "active",
+      "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100 && uv run pytest tests/test_shuttle_tick.py tests/test_status_bar.py -v && ./init.sh",
-      "evidence": ""
+      "evidence": "loom/tui/status_bar.py: _ctx_rail_render → _ctx_rail_components (returns tuple[int, str]) + new _build_ctx_line_components(app, ctx_tokens, ctx_window, engine_state, shuttle_phase) → (prefix, rail, tick) shared helper + new ShuttleTickOverlay class (1-line Static, 4 reactives: engine_state, shuttle_phase, ctx_tokens, ctx_window, render() outputs prefix + tick_str). StatusBar.render() removed inline ^N (TickOverlay now handles tick). loom/tui/app.py: import ShuttleTickOverlay, compose() yields TickOverlay as first child of #chrome Vertical (above StatusBar), new _sync_shuttle_tick_overlay() helper called from 3 hook points (watch_engine_state, _tick_shuttle, watch_ctx_tokens), _detect_git_branch mirrors self._git_branch for shared helper. tests/test_ctx_rail.py: 8 tests updated for _ctx_rail_components tuple unpacking (all pass). tests/test_status_bar.py: broken test_status_bar_renders_shuttle_phase_indicator replaced with test_status_bar_renders_shuttle_tick_above (verifies TickOverlay in DOM + StatusBar ^0/^1 absence). tests/test_shuttle_tick.py NEW (10 tests): import, default reactives, ^ in idle, prefix alignment, idle freeze, active phase bob, DOM order, $text-muted invariant, App→TickOverlay engine_state propagation, App→TickOverlay ctx_tokens propagation. loom/eval/cases/tui_ctx_rail.py: 2 cases updated (TuiCtxRailShuttleComponentsDefined + TuiCtxRailShuttlePositionFormulaComponents). loom/eval/cases/tui_shuttle_tick.py NEW (5 cases): class defined, above status bar, helper exists, $text-muted color, sync helper exists. eval 254/254 (was 249 = +5 new shuttle_tick cases). ./init.sh: 514 passed (was 504 = +10 new shuttle_tick tests), 9 snapshots passed (all 7 layout-shift affected rebaselined via pytest --snapshot-update), 0 ruff / 0 mypy. Verification command output: 254/254 eval + 32/32 tests/test_shuttle_tick.py+test_status_bar.py + 514/514 init.sh all green."
     }
   ]
 }

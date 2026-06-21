@@ -3,10 +3,10 @@
 These eval cases lock the structural contracts that the test suite cannot
 directly enforce (because tests run after the source may have drifted):
 - No fill bar glyphs in status_bar source
-- _ctx_rail_render helper is defined
+- _ctx_rail_components helper is defined
 - App's on_mount registers a 1Hz shuttle-tick interval
 - _tick_shuttle has the idle early-return
-- _ctx_rail_render uses the round(ratio * ...) position formula
+- _ctx_rail_components uses the round(ratio * ...) position formula
 """
 from __future__ import annotations
 
@@ -40,28 +40,39 @@ class TuiCtxRailNoFillBar(EvalCase):
         )
 
 
-class TuiCtxRailShuttleHelperDefined(EvalCase):
-    name = "tui-ctx-rail-shuttle-helper-defined"
-    description = "_ctx_rail_render pure helper must be defined in loom.tui.status_bar"
+class TuiCtxRailShuttleComponentsDefined(EvalCase):
+    name = "tui-ctx-rail-shuttle-components-defined"
+    description = "_ctx_rail_components pure helper must be defined in loom.tui.status_bar"
 
     def run(self) -> EvalResult:
-        from loom.tui.status_bar import _ctx_rail_render  # noqa: F401
+        from loom.tui.status_bar import _ctx_rail_components  # noqa: F401
 
-        sig = inspect.signature(_ctx_rail_render)
+        sig = inspect.signature(_ctx_rail_components)
         params = list(sig.parameters.keys())
         if params != ["ratio", "shuttle_phase", "state"]:
             return EvalResult(
                 name=self.name,
                 passed=False,
                 detail=(
-                    f"_ctx_rail_render signature must be (ratio, shuttle_phase, state),"
+                    f"_ctx_rail_components signature must be (ratio, shuttle_phase, state),"
                     f" got ({', '.join(params)})"
                 ),
             )
+        return_ann = sig.return_annotation
+        if return_ann is not inspect.Parameter.empty:
+            if str(return_ann) != str(tuple[int, str]):
+                return EvalResult(
+                    name=self.name,
+                    passed=False,
+                    detail=(
+                        f"_ctx_rail_components return annotation must be tuple[int, str],"
+                        f" got {return_ann}"
+                    ),
+                )
         return EvalResult(
             name=self.name,
             passed=True,
-            detail="_ctx_rail_render has correct 3-param signature",
+            detail="_ctx_rail_components has correct 3-param signature returning tuple[int, str]",
         )
 
 
@@ -134,22 +145,22 @@ class TuiCtxRailIdleFreeze(EvalCase):
         )
 
 
-class TuiCtxRailShuttlePositionFormula(EvalCase):
-    name = "tui-ctx-rail-shuttle-position-formula"
-    description = "_ctx_rail_render must use round(ratio * ...) for the shuttle base position"
+class TuiCtxRailShuttlePositionFormulaComponents(EvalCase):
+    name = "tui-ctx-rail-shuttle-position-formula-components"
+    description = "_ctx_rail_components must use round(ratio * ...) for the shuttle base position"
 
     def run(self) -> EvalResult:
-        from loom.tui.status_bar import _ctx_rail_render  # noqa: F401
+        from loom.tui.status_bar import _ctx_rail_components  # noqa: F401
 
-        source = inspect.getsource(_ctx_rail_render)
+        source = inspect.getsource(_ctx_rail_components)
         if "round(ratio *" not in source:
             return EvalResult(
                 name=self.name,
                 passed=False,
-                detail="_ctx_rail_render must use round(ratio * ...) for base shuttle position",
+                detail="_ctx_rail_components must use round(ratio * ...) for base shuttle position",
             )
         return EvalResult(
             name=self.name,
             passed=True,
-            detail="_ctx_rail_render uses round(ratio * (_RAIL_WIDTH - 1)) for base position",
+            detail="_ctx_rail_components uses round(ratio * (_RAIL_WIDTH - 1)) for base position",
         )

@@ -124,3 +124,147 @@ P2 expected effort: 1-2h, no behavior change to non-TUI paths (sync wrapper stil
 - Working tree is clean except for 2 untracked planning docs (`docs/odyssey-engine-evaluation.md`, `docs/tui-slow-startup-exit-investigation.md`) — pre-existing, NOT created by this session
 - Per AGENTS.md rule #11: "Verify subagent work after timeouts" — the helper subagent claimed success after 12m 38s; verified by reading every changed file + running every verification command + manual smoke test. All claims matched reality.
 - Per AGENTS.md rule #13 (linkify) and #14 (per-LLM-call thinking): no impact on this PR (no Textual changes).
+
+---
+
+# Session Handoff — P3a → P3b
+
+## Current Objective
+
+- Goal: `f-tui-paradigm-p3` (Phase P3 of tui-paradigm 6-phase plan, split into P3a + P3b)
+- P3a (this session): **DONE** — implementation only, no commit per plan §'P3a 不引入新测试' + §'P3b 接力'
+- P3b (next session): tests + eval cases + snapshot rebaseline + commit
+- Active plan: `.sisyphus/plans/loop-tui-paradigm-p3a.md` (P3a phase, 11/11 checkboxes flipped to [x])
+- Branch / commit: main @ `0b9c44c` (chore: seed f-tui-paradigm-p3 as active)
+- Working tree: `loom/tui/app.py` + `loom/tui/status_bar.py` + `progress.md` modified (NOT committed — P3b will commit)
+
+## P3a Completed This Session
+
+- [x] Task 0: Pre-gate verified (f-tui-paradigm-p0/p1/p2 = done, p3 = active, 504 pytest green, `_ctx_rail_render` exists)
+- [x] Task 1: `loom/tui/status_bar.py` — `_ctx_rail_render` → `_ctx_rail_components` (tuple return); new `_build_ctx_line_components` shared helper (returns `(prefix, rail, tick)` triple)
+- [x] Task 2: `loom/tui/status_bar.py` — new `ShuttleTickOverlay` class (1-line `Static`, 4 reactives); `StatusBar.render()` rewritten to use shared helper, removed inline `^N`
+- [x] Task 3: `loom/tui/app.py` — import ShuttleTickOverlay; `compose()` yields TickOverlay as first child of #chrome Vertical; new `_sync_shuttle_tick_overlay()` helper; 3 hook points (`watch_engine_state`, `_tick_shuttle`, `watch_ctx_tokens`); `_detect_git_branch` mirrors `self._git_branch` for shared helper
+- [x] Marked all 11 plan checkboxes (Pre-gate 4 + Gate 7) to [x]
+- [x] Verified: ruff/mypy clean, diff stat shows 2 source files, hands-on QA confirms TickOverlay `^` aligns with StatusBar shuttle `●`
+- [x] `feature_list.json` P0 follow-up committed as `0b9c44c` (chore) to keep P3a diff clean
+- [x] P3a section appended to `progress.md`
+
+## Subagent Findings (delegation to `ses_116788103ffepCCbQMfNaZUZe6`)
+
+- First subagent delegation completed in 3m 18s. Subagent did the bulk of the implementation (Tasks 1+2+3 in a single pass).
+- Subagent documented one known deviation: "the shared helper reads `app._git_branch` which is never set on `AgentTUIApp`". Orchestrator (this session) fixed the deviation by adding `self._git_branch = branch` in `_detect_git_branch()` before the StatusBar reactive sync.
+- Subagent did NOT touch test files (correctly respected P3a boundary).
+- All subagent claims verified by orchestrator via manual code review + hands-on QA (rendered both StatusBar and TickOverlay in a real app.run_test, confirmed `^` at same column as `●`, confirmed git branch `main` reappears after the fix).
+
+## P3a→P3b Boundary (broken tests — P3b's job)
+
+| File | Failure | P3b Fix |
+|---|---|---|
+| `tests/test_ctx_rail.py` | ImportError: `_ctx_rail_render` renamed | Update import to `_ctx_rail_components`; tuple unpack return |
+| `tests/test_status_bar.py::test_status_bar_renders_shuttle_phase_indicator` | asserts `^0`/`^1` in `status_bar.render()` | Rewrite to verify TickOverlay rendering instead |
+| `loom/eval/cases/tui_ctx_rail.py::TuiCtxRailShuttleHelperDefined` | validates `_ctx_rail_render` signature | Update to validate `_ctx_rail_components` signature |
+| `loom/eval/cases/tui_ctx_rail.py::TuiCtxRailShuttlePositionFormula` | inspects `_ctx_rail_render` source | Update to inspect `_ctx_rail_components` source |
+| `tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw` | #chrome +1 row layout shift | `pytest --snapshot-update` |
+| NEW `tests/test_shuttle_tick.py` | Missing | Add: TickOverlay render, idle freeze, prefix alignment, 3 hook points, sync helper |
+
+## P3b Next Steps
+
+1. **Update existing tests** (`tests/test_ctx_rail.py`, `tests/test_status_bar.py`)
+2. **Create new tests** (`tests/test_shuttle_tick.py`) — per feature verification cmd: `uv run pytest tests/test_shuttle_tick.py tests/test_status_bar.py -v`
+3. **Update eval cases** (`loom/eval/cases/tui_ctx_rail.py`) + add new TickOverlay eval cases in `loom/eval/cases/tui_shuttle_tick.py`
+4. **Rebaseline snapshots** (1 known: `test_empty_layout.raw`; check all 9 snapshots in `tests/__snapshots__/test_tui_snapshot/` and `test_tui_header/`)
+5. **Run full verification**:
+   - `uv run python -m loom.cli eval --fail-under 100` (must pass ≥ current count)
+   - `uv run pytest tests/test_shuttle_tick.py tests/test_status_bar.py -v` (all new + updated tests pass)
+   - `./init.sh` (full pytest + ruff + mypy)
+6. **Update `feature_list.json`**: `f-tui-paradigm-p3` → `status: "done"` + `evidence: "real command + output"` (only after step 5 passes)
+7. **Atomic commit** with P3a + P3b together: `feat(tui): f-tui-paradigm-p3 — ShuttleTickOverlay widget + tests + eval + snapshots`
+8. **Update progress.md + session-handoff.md** at end of P3b
+
+## P3b Verification Target (from feature_list.json)
+
+```bash
+uv run python -m loom.cli eval --fail-under 100 && uv run pytest tests/test_shuttle_tick.py tests/test_status_bar.py -v && ./init.sh
+```
+
+## Notepad References
+
+- `.sisyphus/notepads/loop-tui-paradigm-p3a/learnings.md` — full P3a context, subagent deviation note, fix details, P3b boundary inventory
+
+## Session Boundary Reminders (P3a→P3b)
+
+- Cold-start continuity will auto-inject this handoff + the last 80 lines of `progress.md` (now includes the P3a section) into the next agent's system prompt (Tier 1.5)
+- The next agent will see `f-tui-paradigm-p3` as `active` in `feature_list.json`
+- Working tree: 2 source files + 1 doc file modified (NOT committed — P3b commits everything together per plan)
+- Per AGENTS.md rule #11: Subagent claimed done in 3m 18s — verified by reading every changed file + running ruff/mypy + hands-on QA. Claims matched reality.
+- Per AGENTS.md rule #7: No recurring reviewer findings to promote this session (single phase, no reviewer).
+- Per AGENTS.md rule #12-14: No new TUI mouse/scroll/linkify/thinking bugs surfaced in P3a.
+
+---
+
+# Session Handoff — P3b Complete → f-tui-paradigm-p3 done
+
+## P3b Outcome — DONE
+
+P3b completed in this session (no separate follow-up needed):
+
+| Phase | Status | Evidence |
+|---|---|---|
+| P3b Task 1-3: test files | ✅ DONE | `tests/test_ctx_rail.py` (8 updated) + `tests/test_status_bar.py` (1 replaced) + `tests/test_shuttle_tick.py` (10 NEW) — **40/40 pass** |
+| P3b Task 4: eval cases | ✅ DONE | `loom/eval/cases/tui_ctx_rail.py` (2 renamed) + `loom/eval/cases/tui_shuttle_tick.py` (5 NEW) — **254/254 eval pass** (was 249 = +5) |
+| P3b Task 5: snapshots | ✅ DONE | **9 snapshots rebaselined** (7 layout-shift affected) via `pytest --snapshot-update` |
+| P3b Task 6: full verification | ✅ DONE | `./init.sh`: **514 passed** (was 504 = +10 new tests), 0 ruff/mypy, all green |
+| P3b Task 7: feature_list.json | ✅ DONE | `f-tui-paradigm-p3` → `status: "done"` + comprehensive evidence |
+| P3b Task 8: commit | ⏳ PENDING — to be done by orchestrator | All files staged; ready to commit |
+
+## Verification (full P3 command from feature_list.json)
+
+```bash
+$ uv run python -m loom.cli eval --fail-under 100
+Eval: 254/254 pass
+
+$ uv run pytest tests/test_shuttle_tick.py tests/test_status_bar.py -v
+============================== 32 passed in 6.71s ==============================
+
+$ ./init.sh
+====================== 514 passed, 38 warnings in 50.72s =======================
+=== Verification Complete (all green) ===
+```
+
+## f-tui-paradigm-p3 status: DONE
+
+- `feature_list.json`: `status: "done"`, `evidence` populated with full P3a+P3b summary
+- All subagent claims verified by orchestrator
+- All gates green
+
+## Next session focus
+
+The TUI 织机范式 (looper paradigm) is now FULLY IMPLEMENTED:
+- P0 (engine state machine) ✅
+- P1a (ctx rail + shuttle 1Hz) ✅
+- P1b (tick-above-shuttle inline indicator) ✅
+- P2a (ToolCallMarker 1Hz cycle) ✅
+- P2b (HeaderSectionButton 1Hz pulse) ✅
+- **P3a (ShuttleTickOverlay widget + app wiring) ✅**
+- **P3b (tests + eval + snapshots) ✅**
+
+No follow-up P3 work needed. The next session can move to other roadmap items or be idle.
+
+## Working tree state (pre-commit)
+
+```
+M loom/eval/cases/__init__.py
+M loom/eval/cases/tui_ctx_rail.py
+M loom/tui/app.py
+M loom/tui/status_bar.py
+M progress.md
+M session-handoff.md
+M tests/__snapshots__/test_tui_header/*.raw (6 files)
+M tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw
+M tests/test_ctx_rail.py
+M tests/test_status_bar.py
+?? loom/eval/cases/tui_shuttle_tick.py
+?? tests/test_shuttle_tick.py
+```
+
+This is the final P3a + P3b atomic commit.
