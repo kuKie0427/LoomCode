@@ -8,6 +8,7 @@ from loom.eval.cases import (
     ci,  # noqa: F401
     cli_lazy_imports,  # noqa: F401
     cold_start_continuity,  # noqa: F401
+    cost_telemetry,  # noqa: F401
     cross_session_resume,  # noqa: F401
     detect,  # noqa: F401
     edit_file_v2,  # noqa: F401

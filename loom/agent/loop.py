@@ -251,6 +251,8 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
             tr = trace_mod.current()
             if tr is not None:
                 tr.record("session_start", workdir=str(WORKDIR), initial_messages=len(messages))
+            from loom.agent.cost import reset_session_cost
+            reset_session_cost()
             tool_call_count = 0
             tokens_at_last_checkpoint = context.current_tokens(messages)
             max_turns = _active_config.max_turns
@@ -320,16 +322,29 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                     )
                 context.update(len(messages), response)
                 if tr is not None:
+                    from loom.agent.cost import usage_from_response, record_turn
+                    usage = usage_from_response(response.usage)
+                    cost = record_turn(usage, llm_client.model)
                     tr.record("llm_response", stop_reason=response.stop_reason,
-                              tokens_in=getattr(response.usage, "input_tokens", 0),
-                              tokens_out=getattr(response.usage, "output_tokens", 0))
+                              tokens_in=usage.input_tokens,
+                              tokens_out=usage.output_tokens,
+                              cache_read=usage.cache_read_tokens,
+                              cache_creation=usage.cache_creation_tokens,
+                              cost_usd=round(cost.total_usd, 6))
                 messages.append({"role": "assistant", "content": response.content})
 
                 if response.stop_reason != "tool_use":
                     hooks.trigger_hooks("AgentStop", messages)
                     checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
                     if tr is not None:
-                        tr.record("session_end", tool_calls=tool_call_count, turns=len(messages))
+                        from loom.agent.cost import get_session_cost
+                        sess = get_session_cost()
+                        if sess is not None:
+                            d = sess.as_dict()
+                            d.pop("turns", None)
+                            tr.record("session_end", tool_calls=tool_call_count, turns=len(messages), **d)
+                        else:
+                            tr.record("session_end", tool_calls=tool_call_count, turns=len(messages))
                     if cb["on_message_end"] is not None:
                         cb["on_message_end"](tool_call_count, len(messages))
                     trace_mod.stop()
@@ -360,8 +375,16 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                     tokens_at_last_checkpoint = context.current_tokens(messages)
             else:
                 if tr is not None:
-                    tr.record("loop_limit_reached", turn=turn + 1, tool_calls=tool_call_count,
-                              max_turns=max_turns)
+                    from loom.agent.cost import get_session_cost
+                    sess = get_session_cost()
+                    if sess is not None:
+                        d = sess.as_dict()
+                        d.pop("turns", None)
+                        tr.record("loop_limit_reached", turn=turn + 1, tool_calls=tool_call_count,
+                                  max_turns=max_turns, **d)
+                    else:
+                        tr.record("loop_limit_reached", turn=turn + 1, tool_calls=tool_call_count,
+                                  max_turns=max_turns)
                 messages.append({
                     "role": "user",
                     "content": (

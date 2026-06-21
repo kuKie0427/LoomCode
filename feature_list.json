@@ -906,6 +906,14 @@
       "dependencies": [],
       "status": "done",
       "evidence": "uv run pytest tests/test_prompt_caching.py -v -> 8/8 passed. uv run python -m loom.cli eval --filter prompt-caching --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 674 passed (was 666, +8). uv run ruff + mypy -> 0 issues in 101 source files. loom/agent/llm.py: with_cache_control(system) wraps string as single text block with cache_control: ephemeral; with_tool_cache_control(tools) marks last tool with cache_control. both wired into stream_iter (async) and the sync messages.create call site in loop.py. Pre-fix: zero cache hits because client.messages.create never sent cache_control. Post-fix: static tier + tools list cache across turns (estimated 50-80% token cost reduction on long sessions; depends on Anthropic's actual cache hit rate at this model's price tier). Note: cache hit rate requires the configured endpoint to support prompt caching; the DeepSeek-Anthropic-compatible endpoint may or may not honor it — verified the API contract is correct regardless."
+    },
+    {
+      "id": "f-cost-telemetry-p2",
+      "name": "Phase 2: Token cost telemetry (per-turn + cumulative)",
+      "description": "Track token usage per LLM turn + cumulative session cost. Surface in trace events so /cost and StatusBar can show real spend.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "uv run pytest tests/test_cost_telemetry.py -v -> 13/13 passed. uv run python -m loom.cli eval --filter cost-telemetry --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 687 passed (was 674, +13). uv run ruff + mypy -> 0 issues in 103 source files. loom/agent/cost.py (NEW): TokenUsage dataclass (input/output/cache_read/cache_creation), CostBreakdown (4 cost components + total), compute_cost(model, usage) with per-model pricing tables for claude-opus-4-1, claude-sonnet-4-5, claude-haiku-3-5, deepseek-v4-flash, deepseek-v4-pro. Anthropic's cache-aware pricing: cache_read 10% of input, cache_write 125% of input. SessionCostAccumulator maintains running total. Global record_turn() lazily creates the accumulator; reset_session_cost() clears it. loom/agent/loop.py: llm_response trace event now includes cost_usd + cache_read + cache_creation; session_end and loop_limit_reached events include total_usd, total_input_tokens, total_output_tokens, total_cache_read_tokens, total_cache_creation_tokens. reset_session_cost() called at session_start."
     }
   ]
 }
