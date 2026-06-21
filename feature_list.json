@@ -837,6 +837,17 @@
       "status": "done",
       "verification": "uv run python -m loom.cli eval --kind agent-quality --fail-under 30",
       "evidence": "uv run python -m loom.cli eval --kind agent-quality --fail-under 30 → 'Eval results: 10/10 passed' (75 LLM calls, 74 tool calls, 21,212 input + 8,293 output tokens across the 10-case baseline). Each case spawns `loom run` as a subprocess against an isolated git-initialized tmp workdir under /tmp/loop-eval/agent-quality/<case-name>/, captures the resulting git diff, and runs deterministic judge asserts on file state + executable behavior. Categories: 3 targeted-edit (aq-edit-*), 3 cross-file search-and-modify (aq-search-*), 2 bug investigation from error message (aq-bug-*), 2 test-driven fix (aq-tdd-*). 18 new pytest tests in tests/test_agent_quality_framework.py verify the framework mechanics without LLM cost. 573/573 non-snapshot pytest pass. 255/255 harness evals still pass. ruff + mypy clean. The baseline is more positive than the Oracle 'thin SDK wrapper' analysis predicted (10/10 vs expected 30-50%): this means Phase 1 P0 fixes (grep/edit-v2) must be measured against the HARDER cases (ambiguous prompts, 50+ tool-call sessions, multi-file refactors) which a future round of agent-quality cases should target."
+    },
+    {
+      "id": "f-grep-tool-p0",
+      "name": "Phase 1 P0: Native grep tool (structured search)",
+      "description": "Most-needed missing tool. Add a structured-output grep tool to the agent's native toolset so the agent can search the codebase for patterns. Implementation: prefer `rg` (ripgrep) if on PATH, fall back to Python `re` + `Path.rglob`. Signature: grep(pattern, path='.', glob=None, case_insensitive=False). Output: each match formatted as `path:line:content` (content truncated to 200 chars), capped at 200 matches with explicit `[...N more matches]` footer. Workspace-bound. is_read_only=True, is_concurrent_safe=True. Must also expose to SUB_TOOLS so subagents can search. Tool description must teach the agent to use grep BEFORE reading files when looking for symbols. Must improve the agent-quality baseline measurably (add at least 1 new harder case that requires grep to pass).",
+      "dependencies": [
+        "f-agent-quality-eval-p0"
+      ],
+      "status": "done",
+      "verification": "uv run pytest tests/test_grep_tool.py -q && uv run python -m loom.cli eval --filter grep && uv run python -m loom.cli eval --kind agent-quality --fail-under 50",
+      "evidence": "uv run pytest tests/test_grep_tool.py -q -> 18/18 passed. uv run python -m loom.cli eval --filter grep --fail-under 100 -> 5/5 passed (4 new harness cases + 1 new agent-quality case 'aq-search-find-callers-across-many-files'). uv run pytest -m 'not snapshot' -q -> 591 passed (was 573, +18). uv run python -m loom.cli eval --kind agent-quality --fail-under 30 -> 11/11 passed (was 10/10, +1 new grep-requiring case). loom/agent/tools.py: run_grep() ~120 lines + ripgrep/Python fallback dispatch + TOOL_REGISTRY/SUB_TOOLS/SUB_HANDLERS registration. Test surface: structured output (path:line:content), workspace boundary, glob filter, case insensitivity, content truncation, dotfile skip, oversized file skip, ripgrep-vs-Python parity, subagent exposure, registry presence. Side effect fix: safe_path() now .resolve()'s WORKDIR to handle macOS /var/folders -> /private/var/folders symlink discrepancy (would have been a pre-existing bug if anyone ran from a symlinked cwd). Implementation time: ~25 min including bug-finding via test failures."
     }
   ]
 }

@@ -84,3 +84,45 @@ class AQSearchDeleteDeadCode(AgentQualityCase):
         if not ok:
             return ok, detail
         return file_contains(outcome, "utils.py", "def used_helper(x)", "def another_used(y)")
+
+
+class AQSearchFindCallersAcrossManyFiles(AgentQualityCase):
+    name = "aq-search-find-callers-across-many-files"
+    description = "Find every file that calls a function and report them (grep-requiring)."
+    files = {
+        "lib.py": "def send_email(to, subject):\n    pass\n",
+        "a.py": "from lib import send_email\nsend_email('a@x', 'A')\n",
+        "b.py": "from lib import send_email\nsend_email('b@x', 'B')\n",
+        "c.py": "import lib\nlib.send_email('c@x', 'C')\n",
+        "d.py": "x = 1\n",
+        "e.py": "from lib import send_email\n# send_email disabled in this module\n",
+    }
+    user_prompt = (
+        "List every Python file in this project that ACTUALLY CALLS the function `send_email` "
+        "(i.e. the call is not commented out). Write the list — one filename per line — to a "
+        "new file called `callers.txt`. Exclude files that only import send_email or have the "
+        "call commented out."
+    )
+    timeout_s = 180
+
+    def judge(self, outcome: AgentRunOutcome) -> tuple[bool, str]:
+        text = outcome.files_after.get("callers.txt", "")
+        if not text:
+            return False, "callers.txt was not created"
+        expected = {"a.py", "b.py", "c.py"}
+        unexpected_present = set()
+        missing = set()
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped in expected:
+                missing.discard(stripped)
+            elif stripped in {"d.py", "e.py"}:
+                unexpected_present.add(stripped)
+        missing = expected - {line.strip() for line in text.splitlines() if line.strip()}
+        if missing:
+            return False, f"callers.txt missing files: {sorted(missing)}"
+        if unexpected_present:
+            return False, f"callers.txt has unexpected: {sorted(unexpected_present)}"
+        return True, "callers.txt lists exactly a.py, b.py, c.py"

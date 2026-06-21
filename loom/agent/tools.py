@@ -1,3 +1,5 @@
+import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -101,7 +103,7 @@ def run_bash(command: str) -> str:
 
 def safe_path(p: str) -> Path:
     path = (WORKDIR / p).resolve()
-    if not path.is_relative_to(WORKDIR):
+    if not path.is_relative_to(WORKDIR.resolve()):
         raise ValueError(f"Path escapes workspace: {p}")
     return path
 
@@ -164,6 +166,125 @@ def run_glob(pattern: str) -> str:
         return "\n".join(results) if results else "(no matches)"
     except Exception as e:
         return f"Error: {e}"
+
+
+GREP_MAX_MATCHES = 200
+GREP_CONTENT_MAX_CHARS = 200
+GREP_LARGE_FILE_BYTES = 1_000_000
+
+
+def _format_grep_hit(rel_path: str, line_no: int, content: str) -> str:
+    snippet = content[:GREP_CONTENT_MAX_CHARS]
+    if len(content) > GREP_CONTENT_MAX_CHARS:
+        snippet += "..."
+    return f"{rel_path}:{line_no}:{snippet}"
+
+
+def _iter_files(root: Path, glob_pat: str | None) -> list[Path]:
+    if glob_pat is not None:
+        candidates = list(root.rglob(glob_pat))
+    else:
+        candidates = [p for p in root.rglob("*") if p.is_file()]
+    return [p for p in candidates if p.is_file() and not any(part.startswith(".") for part in p.parts)]
+
+
+def _grep_python(pattern: str, root: Path, glob_pat: str | None,
+                 case_insensitive: bool) -> tuple[list[tuple[Path, int, str]], int]:
+    flags = re.IGNORECASE if case_insensitive else 0
+    try:
+        compiled = re.compile(pattern, flags)
+    except re.error as exc:
+        return [], 0
+    hits: list[tuple[Path, int, str]] = []
+    truncated = 0
+    for fpath in _iter_files(root, glob_pat):
+        try:
+            if fpath.stat().st_size > GREP_LARGE_FILE_BYTES:
+                continue
+            text = fpath.read_text(encoding="utf-8", errors="replace")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            if compiled.search(line):
+                if len(hits) < GREP_MAX_MATCHES:
+                    hits.append((fpath, line_no, line))
+                else:
+                    truncated += 1
+    return hits, truncated
+
+
+def _grep_ripgrep(pattern: str, root: Path, glob_pat: str | None,
+                  case_insensitive: bool) -> tuple[list[tuple[Path, int, str]], int] | None:
+    if not shutil.which("rg"):
+        return None
+    cmd = ["rg", "--no-heading", "--line-number", "--no-config"]
+    if case_insensitive:
+        cmd.append("-i")
+    if glob_pat is not None:
+        cmd.extend(["--glob", glob_pat])
+    cmd.extend(["--max-count", "10000", pattern, str(root)])
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True,
+            timeout=30, check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    if proc.returncode not in (0, 1):
+        return None
+    hits: list[tuple[Path, int, str]] = []
+    truncated = 0
+    for raw in proc.stdout.splitlines():
+        parts = raw.split(":", 2)
+        if len(parts) < 3:
+            continue
+        try:
+            line_no = int(parts[1])
+        except ValueError:
+            continue
+        abs_path = Path(parts[0])
+        if not abs_path.is_absolute():
+            abs_path = (root / parts[0]).resolve()
+        if len(hits) < GREP_MAX_MATCHES:
+            hits.append((abs_path, line_no, parts[2]))
+        else:
+            truncated += 1
+    return hits, truncated
+
+
+def run_grep(pattern: str, path: str = ".", glob: str | None = None,
+             case_insensitive: bool = False) -> str:
+    """Search files under WORKDIR for `pattern` and return structured matches.
+
+    Output is `path:line:content` per match, capped at GREP_MAX_MATCHES hits.
+    `glob` filters the file set (e.g. "*.py"). `case_insensitive` is a bool.
+    """
+    if not pattern:
+        return "Error: pattern is required"
+    try:
+        root = safe_path(path)
+    except ValueError as exc:
+        return f"Error: {exc}"
+    if not root.exists():
+        return f"Error: path does not exist: {path}"
+
+    result = _grep_ripgrep(pattern, root, glob, case_insensitive)
+    if result is None:
+        hits, truncated = _grep_python(pattern, root, glob, case_insensitive)
+    else:
+        hits, truncated = result
+
+    if not hits:
+        return "(no matches)"
+    workdir_resolved = WORKDIR.resolve()
+    rendered = [
+        _format_grep_hit(str(p.relative_to(workdir_resolved)), n, c)
+        for p, n, c in hits
+    ]
+    if truncated:
+        rendered.append(f"[...{truncated} more matches truncated at limit {GREP_MAX_MATCHES}]")
+    return "\n".join(rendered)
+
 
 def run_todo_write(todos: list) -> str:
     global CURRENT_TODOS
@@ -251,6 +372,31 @@ TOOL_REGISTRY.register(Tool(
     is_read_only=True,
     is_concurrent_safe=True,
 ))
+TOOL_REGISTRY.register(Tool(
+    name="grep",
+    description=(
+        "Search files under the workspace for a regex or literal pattern. "
+        "Output is STRUCTURED: each match on its own line as `path:line:content` "
+        "with content truncated to 200 chars, capped at 200 matches. Use grep "
+        "BEFORE reading multiple files when looking for symbols, imports, or "
+        "string usages — far cheaper than opening files one by one. `glob` "
+        "filter narrows the file set (e.g. '*.py'). `case_insensitive=true` for "
+        "case-insensitive search. Returns '(no matches)' when nothing found."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "pattern": {"type": "string", "description": "Regex or literal pattern to search for."},
+            "path": {"type": "string", "description": "Workspace-relative root to search (default: '.')."},
+            "glob": {"type": "string", "description": "File glob filter, e.g. '*.py'."},
+            "case_insensitive": {"type": "boolean", "description": "Case-insensitive search (default: false)."},
+        },
+        "required": ["pattern"],
+    },
+    handler=run_grep,
+    is_read_only=True,
+    is_concurrent_safe=True,
+))
 TODO_WRITE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -326,11 +472,13 @@ SUB_TOOLS: list[ToolParam] = [
      "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}}, "required": ["path", "old_text", "new_text"]}},
     {"name": "glob", "description": "Find files matching a glob pattern.",
      "input_schema": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}},
+    {"name": "grep", "description": "Search files for a regex or literal pattern. Output is `path:line:content` per match, capped at 200 hits. Use grep BEFORE reading multiple files when looking for symbols or string usages — much cheaper than opening files one by one.",
+     "input_schema": {"type": "object", "properties": {"pattern": {"type": "string"}, "path": {"type": "string"}, "glob": {"type": "string"}, "case_insensitive": {"type": "boolean"}}, "required": ["pattern"]}},
 ]
 
 SUB_HANDLERS = {
     "bash": run_bash, "read_file": run_read, "write_file": run_write,
-    "edit_file": run_edit, "glob": run_glob,
+    "edit_file": run_edit, "glob": run_glob, "grep": run_grep,
 }
 
 SUB_SYSTEM = (

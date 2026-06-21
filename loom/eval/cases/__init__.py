@@ -11,6 +11,7 @@ from loom.eval.cases import (
     detect,  # noqa: F401
     eval_benchmark_cli,  # noqa: F401
     failure_modes,  # noqa: F401
+    grep_tool,  # noqa: F401
     harness_toml,  # noqa: F401
     init,  # noqa: F401  — triggers case class definitions
     init_sh_session_end,  # noqa: F401

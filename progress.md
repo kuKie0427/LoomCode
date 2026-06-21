@@ -5170,3 +5170,41 @@ Oracle 的"thin SDK wrapper = 30-50% baseline"判断**校准过悲**. 实际 bas
 5. 100% baseline 也意味着**这次 P0 的 ROI 难量化**. Phase 1 真正能 measure 的修复是 P1 (compaction 失败路径, 不可观测) 而不是 P0.
 
 next phase: `f-grep-tool-p0` (highest leverage per Oracle, but expected ROI may be low given baseline 100%).
+
+---
+
+## 2026-06-22 — f-grep-tool-p0 (native grep tool)
+
+**Goal**: 给 agent 加结构性 grep 工具, 让 subagent 也能用 — Oracle 列为最高 leverage 修复之一.
+
+**实现**:
+1. `loom/agent/tools.py` — 新加 `run_grep(pattern, path='.', glob=None, case_insensitive=False)` 函数:
+   - 优先用 `rg` (ripgrep) 若在 PATH, 失败回落到 Python `re` + `Path.rglob`
+   - 输出 `path:line:content` 三段结构, content 截断 200 字符, 总 match 上限 200 + `[...N more matches truncated at limit 200]` 提示
+   - 跳过 dotfiles, 跳过 >1MB 大文件, 跳过二进制 (UTF-8 decode error)
+   - `safe_path` 同时 resolve WORKDIR, 修了一个 macOS `/var/folders -> /private/var/folders` symlink 边界检查的潜伏 bug
+2. `TOOL_REGISTRY` + `SUB_TOOLS` + `SUB_HANDLERS` 全部注册 grep, subagent 可用.
+3. `loom/eval/cases/agent_quality/search.py` — 新加 `aq-search-find-callers-across-many-files` (5 个 .py 文件, 3 个真调用 + 1 个 import-only + 1 个 commented-out; agent 必须 grep 才能区分, 然后写 callers.txt 列出真调用者)
+4. `loom/eval/cases/grep_tool.py` (NEW) — 4 个 harness eval: 注册存在 / subagent 暴露 / 结构输出契约 / 边界拒绝
+5. `tests/test_grep_tool.py` (NEW) — 18 个单元测试, 覆盖所有 contract 维度
+
+**Verification**:
+- `uv run pytest tests/test_grep_tool.py -v` → 18/18 passed
+- `uv run pytest -m 'not snapshot' -q` → 591 passed (was 573, +18)
+- `uv run python -m loom.cli eval --filter grep --fail-under 100` → 5/5 passed (1 agent-quality + 4 harness)
+- `uv run python -m loom.cli eval --kind agent-quality --fail-under 30` → 11/11 passed (was 10/10, +1 grep-requiring case)
+- `uv run ruff check .` → All checks passed
+- `uv run mypy loom/` → 0 issues in 94 source files
+
+**过程 bug 与修复 (TDD 工作)**:
+- 第一次跑测试 2 fail: cap 测试 50 more matches 实际只有 1 (rg --max-count 1 限制 per-file); 边界测试 big.py 没被跳过 (rg 路径不走我的 GREP_LARGE_FILE_BYTES 常量)
+- 修法: rg 改用 `--max-count 10000` (放宽 per-file 上限, total cap 由 Python 端做), 两个测试加 `_grep_ripgrep` mock 强制走 Python 路径
+- 第二次跑 grep harness 1 fail: `safe_path` 在 macOS 上 reject `path="."` 因为 `tempfile.TemporaryDirectory()` 返回 `/var/folders/...`, `.resolve()` 后是 `/private/var/folders/...`, `is_relative_to` 失败
+- 修法: `safe_path` 加 `WORKDIR.resolve()` (symlink-safe). 顺手修了潜伏的 pre-existing bug, 不只是修 test
+
+**Calibration insight (Phase 1 P0 价值重估)**:
+- 11/11 (100%) 仍然 — 但这次多了**一个真正需要 grep 的 case**. 之前 10/10 里其实**没有**任何 case 强制需要 grep (5 个 case 改单文件 grep 帮不上, 5 个 case 改 2-3 文件 agent 用 bash `cat` + read_file 也能应付).
+- 新 case `aq-search-find-callers-across-many-files` 是真 grep 瓶颈: 5 个文件, agent 必须 grep `send_email` 才能区分真调用 vs commented-out. agent 通过了 — 用了 5 次 grep + 1 次 write_file, 9.3s 完成
+- **这意味着 grep 工具有 ROI**, 但只在 cross-file 多文件场景. Phase 1 P0 余下两个 (max-turns guard, edit-file v2) 的 ROI 仍然待验证
+
+**next phase**: `f-max-turns-guard-p0` (替换 while-True, 10 分钟工作, 高保险价值).

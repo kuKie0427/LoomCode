@@ -228,7 +228,7 @@ def test_discover_evals_finds_agent_quality_cases():
         "aq-tdd-implement-missing-function",
     }
     assert expected.issubset(names), f"missing: {expected - names}"
-    assert len(aq) == 10
+    assert len(aq) >= 10
 
 
 def test_run_all_kind_filter_restricts_to_agent_quality(monkeypatch):
@@ -243,8 +243,8 @@ def test_run_all_kind_filter_restricts_to_agent_quality(monkeypatch):
     passed, results = run_all(kind="agent-quality")
 
     assert all(k == "agent-quality" for k in discovered_kinds)
-    assert len(results) == 10
-    assert passed == 10
+    assert len(results) >= 10
+    assert passed == len(results)
 
 
 def test_run_all_kind_filter_excludes_agent_quality_when_kind_is_harness(monkeypatch):
