@@ -4831,3 +4831,61 @@ P0 (engine state) → P1a (ctx rail + shuttle) → P1b (tick-above-shuttle inlin
 6. **subagent 漏改**: 第一个 subagent 改 `tests/test_status_bar.py` 的 badge parametrize 但漏了 `tests/test_engine_state.py` 同模式的 parametrize test。第二个 subagent (quick) 修复了 4 个 active-state cases。
 
 **下一步**: `/handoff` → 加载 `statusbar-revamp-p2.md` (验证收口: 快照 re-baseline + §9.3 字符数实测填入 + 窄终端预算核算)。
+
+## 2026-06-21 — StatusBar 改造 Phase SP2 收官 (验证 + 快照 + 93列预算)
+
+### Summary
+SP2 完成 statusbar-revamp-roadmap 全部 3 phase 收官 (SP0 契约 → SP1 实现 → SP2 验证)。StatusBar 现在用齿轮传动式 ctx 进度条 + 6 态 engine badge,无 loom 前缀 / 无 esc ^l key hint,无 ShuttleTickOverlay,#chrome 从 3 行收缩到 2 行。
+
+### Deliverables
+- **测试更新** (SP1 已完成,SP2 验证): 32/32 test_ctx_rail + test_status_bar 测真实渲染产物,无占位断言
+- **93 列预算核算** (实测 default model `deepseek-v4-flash`):
+  - idle-empty: 80 cols ✓
+  - idle-99t: 87 cols ✓
+  - thinking-3t: 90 cols ✓
+  - streaming-3t: 91 cols ✓
+  - executing-3t: 91 cols ✓
+  - compacting-3t: 92 cols ✓
+  - **compacting-99t: 93 cols** (worst case, exactly at §7 budget)
+  - error-3t: 87 cols ✓
+  - **13 scenarios all ≤93 cols**
+- **3 处 cosmetic trim** (`loom/tui/status_bar.py`):
+  - `_build_ctx_line_components` L146: 移除 `prefix` 的 leading `" "` (-1 col,margin 改由 `#chrome { margin: 0 2 1 2 }` 提供)
+  - 同上: 移除 trailing `" "` (-1 col)
+  - `StatusBar.render` L227: 3-space gap → 1-space gap,移除 trailing space (-3 cols)
+  - **Total: -5 cols**, 把 worst case 从 98 压到 93
+- **快照重录** (7 个 .raw 基线):
+  - `tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw`
+  - `tests/__snapshots__/test_tui_header/test_header_{collapsed_empty,collapsed_populated,collapsed_subagent_hidden,expanded_mcp,expanded_subagent,expanded_todo}.raw`
+  - Working Rule 10 验证: 旧快照 vs 新渲染的 `<text>` 段比对确认真实视觉变化 (loom 前缀删除 / shuttle `●─────` → gear `❋┄┄┄┄┄┄┄┄┄┄┄┄┄` / ShuttleTickOverlay caret tick 行删除 / `esc ^l` key hint 删除)
+- **文档更新** (`docs/tui-design-language.md`):
+  - §7 L504 inline annotation (`— **re-verified by f-statusbar-revamp-sp2** ...`)
+  - §9.3 L722 placeholder `待 SP2 实测填入` → 实测值 (80/87/93 cols)
+  - Appendix B L785 新增 2026-06-21 SP2 close entry
+
+### Verification
+| Step | Command | Result |
+|---|---|---|
+| Snapshot re-baseline | `uv run pytest tests/test_tui_snapshot.py tests/test_tui_header.py -q` | 51 passed, 8 snapshots |
+| Full pytest | `uv run pytest -q` | **554 passed**, 42 warnings |
+| ruff | `uv run ruff check .` | All checks passed |
+| mypy | `uv run mypy loom/` | Success: 87 source files, no issues |
+| eval | `uv run python -m loom.cli eval --fail-under 100` | **253/253 passed** |
+| init.sh | `./init.sh` | EXIT=0, "Verification Complete (all green)" |
+
+### Files changed
+- `loom/tui/status_bar.py` (+2 -2)
+- `docs/tui-design-language.md` (+9 -3)
+- `tests/__snapshots__/test_tui_snapshot/test_empty_layout.raw` (+97 -100)
+- `tests/__snapshots__/test_tui_header/test_header_*.raw` × 6 files
+
+### StatusBar 改造完整收官
+statusbar-revamp-roadmap SP0 + SP1 + SP2 三阶段全部完成。StatusBar 现在:
+- 信息密度提升: 砍 `loom` 前缀 (-5) + 砍 `esc ^l` key hint (-9) = +14 cols 信息预算空间
+- 可见性增强: 齿轮传动条 (WIDTH=14, frames `❋✻✜` 1Hz 换帧) 替代 shuttle 刻度点
+- 状态细分: 6 态 badge (idle/thinking/streaming/executing/compacting/error) 各显字形+语义色 token
+- 视觉节奏: idle muted 降档,active boost 一档; 危险态 (ratio≥0.6 黄 / ≥0.85 红) 链带+数字+pct 同步染色
+- 垂直预算回收: ShuttleTickOverlay 删除,#chrome 3 行 → 2 行
+- 93 列窄终端预算: 所有状态实测 ≤ 93 cols
+
+next phase: 不在此 phase 内,后续 follow-up (如有) 走 `scope-wip1-enforcement.md` 或新 plan。

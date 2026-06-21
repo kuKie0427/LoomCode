@@ -143,7 +143,7 @@ def _build_ctx_line_components(
             f"{branch_glyph_tier}⎇[/] {branch_name_tier}{git_branch}[/]"
         )
     prefix_parts.append(f"{stats_tier}{turns}t·{tools}tl[/]")
-    prefix = " " + " · ".join(prefix_parts) + " [$text-muted]ctx:[/] "
+    prefix = " · ".join(prefix_parts) + " [$text-muted]ctx:[/]"
 
     ctx_window = ctx_window or 1
     ratio = ctx_tokens / ctx_window if ctx_window > 0 else 0.0
@@ -224,4 +224,4 @@ class StatusBar(Static):
         engine_badge = _render_engine_badge(self.engine_state)
         elapsed = f"[$text-muted]{_format_elapsed(self.elapsed_seconds)}[/]"
 
-        return f"{prefix}{ctx_tail} {_SEP} {engine_badge}   {elapsed} "
+        return f"{prefix}{ctx_tail} {_SEP} {engine_badge} {elapsed}"

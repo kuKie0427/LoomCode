@@ -268,3 +268,11 @@ M tests/test_status_bar.py
 ```
 
 This is the final P3a + P3b atomic commit.
+
+---
+
+## statusbar-revamp ✅ COMPLETE
+- Status: **done** (SP0 ✓, SP1 ✓, SP2 ✓ — 2026-06-21)
+- All 3 phases complete; roadmap closed.
+- Final state: StatusBar uses gear-rack ctx rail (WIDTH=14), 6-state engine badge, no `loom`/`esc ^l`, no ShuttleTickOverlay. #chrome 3→2 rows. 93-col budget verified for all states.
+- Evidence: `feature_list.json` (f-statusbar-revamp-sp2 status=done); `progress.md` (SP2 close section); `./init.sh` exits 0 with 554 pytest + 253/253 eval.
