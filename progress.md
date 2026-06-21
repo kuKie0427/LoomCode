@@ -5396,3 +5396,54 @@ next phase: `f-grep-tool-p0` (highest leverage per Oracle, but expected ROI may 
 - 0 regression: 全部现有 test 仍 pass (除 2 个 test_context.py 旧 test 被有意更新到新正确行为)
 - agent-quality 13/13 (100%) — baseline 不退步
 - 9 个 commit 历史干净, 每次都遵守 Working Rule #2 (./init.sh 0 退出 + real evidence)
+
+---
+
+## 2026-06-22 — Phase 2 + Chore + Phase 3 minimal (8 features, all done)
+
+**Goal**: Complete the remaining 8 of 23 roadmap features (Phase 2 × 7 + Chore + Phase 3 minimal).
+
+**实现** (one atomic commit per feature, all Working Rule #2 compliant):
+
+1. **f-prompt-caching-p2**: loom/agent/llm.py `with_cache_control(system)` wraps string as text block with `cache_control: ephemeral`. `with_tool_cache_control(tools)` marks last tool. Wired into stream_iter (async) and messages.create (sync) call sites. Expected: 50%+ token cost reduction on long sessions (depending on endpoint honoring cache_control).
+
+2. **f-cost-telemetry-p2**: loom/agent/cost.py NEW. TokenUsage + CostBreakdown + per-model pricing (claude-opus-4-1, sonnet-4-5, haiku-3-5, deepseek-v4-flash/pro). Anthropic cache-aware rates: cache_read 10% of input, cache_write 125% of input. SessionCostAccumulator for running totals. Wired into loop.py: llm_response event includes cost_usd + cache_read + cache_creation; session_end and loop_limit_reached include cumulative totals. TDD caught 2 real bugs: floating-point accumulation (0.010559999999999998 * 2 ≠ 0.02112) and the reset_session_cost() return-type contract.
+
+3. **f-conversation-export-p2**: loom/agent/export.py NEW. ExportMetadata dataclass; to_markdown(messages, meta) renders role headers, thinking collapsed in <details>, tool calls as JSON, tool results truncated, cost footer. to_json(messages, meta) lossless JSON. redact_pii() strips sk-xxx / env vars / emails. New `loom export` CLI subcommand with --format md/json and --redact.
+
+4. **f-permission-persistence-p2**: loom/agent/permission_store.py NEW. JSON store at .minicode/permissions.json with TTL (default 30 days). Per-tool canonicalization: bash (whitespace-collapse), path tools, fallback JSON. CRITICAL SAFETY: WORKSPACE_WRITE_TOOLS frozenset is NEVER auto-allowed — write/edit always re-prompt. TDD caught loguru %s vs {}.
+
+5. **f-tool-error-semantics-p2**: loom/agent/tool_errors.py NEW. detect_repeated_failures() walks last N messages, tracks (tool, input) key + consecutive error count, returns on threshold (default 3). build_retry_guidance() injects system-reminder with 3 action paths. Wired into loop.py every iteration; also added a "Tool Failure Handling" section to system prompt teaching the agent to read errors and self-correct. TDD bug: first algorithm reset count on every tool_use, so 3 consecutive same-tool errors never accumulated. Rewrote state machine.
+
+6. **f-subagent-grep-patterns-p2**: loom/agent/subagent_templates.py NEW. 3 templates with focused system prompts: investigate_code (read-only search specialist, emphasizes grep), refactor_across_files (4-step: search→plan→multi_edit→verify, emphasizes non-overlapping edits), fix_failing_test (TDD-driven bug-fixer, anti-skip/anti-xfail in prompt to prevent reward-hacking). Each registered as a first-class tool (task_investigate_code etc.) with required arg schema.
+
+7. **f-trace-batch-io-p2**: loom/agent/trace.py. Replaced open+write+close per record with lazy open once + line-buffered + flush per record + close on stop. 1 open + N writes + 1 close per session instead of 3N syscalls. TDD caught: 4 ruff E741 (ambiguous `l`), 1 mypy None.get, and verified thread-safety with 5 threads x 10 records = 50 valid JSONL lines.
+
+8. **f-readme-update-chore**: README rewritten. Dropped "300 LOC" claim (actual ~17K). Added "What loom does well" + "What loom does NOT do well (yet)" sections. New size table. Quick Start updated with all 4 main subcommands. Links to feature_list_roadmap.json.
+
+9. **f-tui-diff-viewer-p3 (minimal scope)**: loom/tui/diff_pane.py NEW. DiffPane(Static) widget with reactive diff_text. colorize_diff() wraps +/-, @@ in green/red/yellow. Placeholder for empty. ~50 lines, no approval UI, no side-by-side, no chat_log integration. Deliberate scope cut: the widget is independently testable + the chat_log integration is a 1-2 hour follow-up. TDD caught 2 real bugs before commit: (1) my test sample had a non-existent '-def add' line; (2) Textual reactive updates call update() twice (mount + change), test had to assert 'last call has new content'.
+
+**Verification (final state)**:
+- `uv run pytest -m 'not snapshot' -q` → **774 passed** (was 555 at session start; +219 tests across 17 features)
+- `uv run python -m loom.cli eval --kind agent-quality --fail-under 30` → **13/13 passed** (100% baseline preserved)
+- `uv run python -m loom.cli eval --kind harness --fail-under 100` → 100% (no regression)
+- `uv run ruff check .` → All checks passed
+- `uv run mypy loom/` → 0 issues in 115 source files
+
+**Phase 1 P0 (4) + P1 (4) + Phase 2 (7) + Chore (1) + Phase 3 minimal (1) = 17 features done.**
+
+**Remaining (6 features)** — out of realistic single-session scope:
+- f-mcp-client-p3 (multi-day: stdio + SSE transports + 3 reference servers)
+- f-lsp-integration-p3 (multi-day: pylsp subprocess + goto/find/rename)
+- f-long-context-stability-p3 (multi-day: cold storage + lookback cache)
+- f-repomap-p4 (multi-day: tree-sitter AST + PageRank)
+- f-tdd-agent-mode-p4 (multi-day: pytest subprocess + anti-reward-hacking)
+- f-harness-as-product-polish-p4 (multi-day: `loom eval init` + GitHub Action)
+
+**Overall statistics across this session + the previous one**:
+- 17 atomic feature commits + 2 chore commits (catch-up + P0)
+- ~250 new tests (+219 since session start)
+- 30+ new harness eval cases (added across features)
+- 4 new agent-quality cases (3 of which require new capabilities)
+- agent-quality: 10/10 → 13/13 (+3 new cases)
+- 0 regression: every prior test still passes
