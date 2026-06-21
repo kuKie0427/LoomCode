@@ -43,6 +43,7 @@ from loom.eval.cases import (
     session_mutable_prompt,  # noqa: F401
     stop_event_helper,  # noqa: F401
     subagent_templates,  # noqa: F401
+    tdd,  # noqa: F401
     telemetry_sink,  # noqa: F401
     tool_error_semantics,  # noqa: F401
     trace_batch_io,  # noqa: F401

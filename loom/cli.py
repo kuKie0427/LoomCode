@@ -83,6 +83,13 @@ def _build_parser() -> argparse.ArgumentParser:
     eval_p.add_argument("--filter", dest="case_filter", default=None, help="Substring match against case name/description (case-insensitive). Runs only matching cases — for fast dev cycles.")
     eval_p.add_argument("--kind", choices=["harness", "agent-quality"], default=None, help="Run only one kind of eval. 'harness' = infrastructure mechanics (default mix), 'agent-quality' = end-to-end agent behavior (real LLM calls).")
 
+    tdd_p = sub.add_parser("tdd", help="Run a single failing test in TDD mode and print the focused prompt")
+    tdd_p.add_argument("test_path", type=Path, help="Path to the failing test (e.g. tests/test_foo.py)")
+    tdd_p.add_argument("--max-iterations", type=int, default=5, help="Max fix iterations to suggest in the prompt (default 5)")
+    tdd_p.add_argument("--timeout", type=float, default=120.0, help="Pytest subprocess timeout in seconds (default 120)")
+    tdd_p.add_argument("--workdir", type=Path, default=Path("."), help="Project workdir for pytest invocation")
+    tdd_p.add_argument("--run", action="store_true", help="Run pytest once and exit (don't print the prompt)")
+
     export_p = sub.add_parser("export", help="Export the latest checkpoint session transcript")
     export_p.add_argument("--workdir", type=Path, default=Path("."), help="Project workdir")
     export_p.add_argument("--output", "-o", type=Path, required=True, help="Output file path")
@@ -184,6 +191,35 @@ def main(argv: list[str] | None = None) -> int:
         if score < args.fail_under:
             return 1
         return 0
+
+    if args.command == "tdd":
+        from loom.agent.tdd import build_focused_prompt, is_test_file, run_pytest
+        if not is_test_file(args.test_path):
+            print(
+                f"Error: {args.test_path} does not look like a test file. "
+                "TDD mode requires a single failing test path.",
+                file=__import__("sys").stderr,
+            )
+            return 1
+        run = run_pytest(args.test_path, cwd=args.workdir, timeout=args.timeout)
+        if run.passed:
+            print(f"Test already passes: {args.test_path} (exit={run.exit_code})")
+            return 0
+        if args.run:
+            print(f"FAIL ({'timeout' if run.timed_out else f'exit={run.exit_code}'})")
+            print(run.tail)
+            return 1
+        prompt = build_focused_prompt(
+            args.test_path,
+            run.tail,
+            max_iterations=args.max_iterations,
+        )
+        print(f"# Test failed: {args.test_path}")
+        print(f"# Exit code: {run.exit_code} (timed_out={run.timed_out})")
+        print(f"# Pytest tail ({len(run.tail.splitlines())} lines):")
+        print()
+        print(prompt)
+        return 1
 
     if args.command == "export":
         from loom.agent.checkpoint import exists, load

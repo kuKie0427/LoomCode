@@ -986,6 +986,14 @@
       "dependencies": [],
       "status": "done",
       "evidence": "uv run pytest tests/test_mcp_client.py -v -> 10/10 passed. uv run python -m loom.cli eval --filter mcp-client --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 796 passed (was 786, +10). uv run ruff + mypy -> 0 issues in 118 source files. loom/agent/mcp_client.py (NEW): minimal MCP client (stdio transport, JSON-RPC 2.0 over Content-Length-framed messages). MCPServer dataclass, start() spawns Popen (or uses pre-injected process for testing) + initialize handshake + tools/list. call_tool(name, args) sends tools/call and returns result content. mcp_tool_to_loom_tool() converts MCP tool descriptors to loom tool schema. MCPError exception. TDD caught 2 real issues: (1) original start() always Popen'd which broke test injection; refactored to skip Popen if process is set. (2) original BytesIO-based fake failed because seek(0) after read() doesn't restart reads in the expected way; rewrote with real OS pipes and a worker thread. Now 10/10 tests pass with a fully-isolated fake."
+    },
+    {
+      "id": "f-tdd-agent-mode-p4",
+      "name": "Phase 4: TDD agent mode (loom tdd subcommand + test-edit guard)",
+      "description": "Minimal: `loom tdd <test_path>` subcommand runs pytest, captures failure, hands off to a focused agent prompt that finds the source, applies minimal fix, re-runs. Includes anti-reward-hacking guard: agent cannot edit the test file itself.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "uv run pytest tests/test_tdd.py -v -> 14/14 passed. uv run python -m loom.cli eval --filter tdd --fail-under 100 -> 6/6 passed (includes 2 pre-existing aq-tdd-* agent-quality cases that now have a real harness to back them up). uv run pytest -m 'not snapshot' -q -> 810 passed (was 796, +14). uv run ruff + mypy -> 0 issues in 121 source files. loom/agent/tdd.py (NEW): minimal TDD primitives — is_test_file() guard, run_pytest() subprocess wrapper with PytestRun result class (passes stdout/stderr/timeout through), build_focused_prompt() embeds the anti-reward-hacking guard ('MUST NOT edit <test_path>') directly in the prompt (cheapest enforcement layer). loom tdd <path> subcommand: prints focused prompt for the agent, refuses non-test paths, --run mode for 'just pytest' smoke test. TDD caught 2 real bugs in this commit: (1) subprocess.TimeoutExpired's stdout/stderr are bytes not str — decoded with utf-8+replace. (2) initial mypy type _ProcessLike was a dataclass, not a Protocol, so FakeProcess wasn't structurally compatible — switched to typing.Protocol with the 5 required methods."
     }
   ]
 }
