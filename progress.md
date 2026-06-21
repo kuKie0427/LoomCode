@@ -4712,3 +4712,27 @@ P0 (engine state) → P1a (ctx rail + shuttle) → P1b (tick-above-shuttle inlin
 - Case 3 选用 `_complete`/`_is_error`/`has_class()` 而非渲染文本字符串匹配 — 直接验证行为契约，比解析 Rich `Text` 输出更鲁棒
 - `ToolCallMarker.has_class()` 在无 DOM 时正常工作（`DOMNode.__init__` 初始化 `self._classes = set()`，`add_class`/`has_class` 操作此 set），无需 `App` 实例
 - Cases 1/4/5 未动 — 它们不引用 `ToolCallCard`
+
+## f-tool-display-p1 — Marker 参数预览 (2026-06-21)
+
+**目标**: `ToolCallMarker` 显示按工具类型定制的参数摘要而不是 `· running/done/error`。
+
+**改动文件（5 个）**:
+- `loom/tui/chat_log.py` — +`_normalize_tool_name()`（`read_file`→`read` 等）、`_truncate_summary()`（50 字符 + U+2026 省略号）、`_summarize_tool_args()`（按工具名提取摘要）；`ToolCallMarker.__init__` 新增 `tool_input: dict | None = None` kwarg（向后兼容）；`_refresh_glyph`/`set_complete` 使用 `_summary` 替代 bare "running"/"done"；`add_tool_call_inline` 传递 `tool_input=inp` 保持 dict 传递而 `args_str`（JSON）仅留 modal
+- `tests/test_chat_log_p1_marker_summary.py` — NEW（49 个测试覆盖 `_truncate_summary`/`_normalize_tool_name`/`_summarize_tool_args` 所有分支 + `ToolCallMarker` 集成 + 向后兼容）
+- `loom/eval/cases/tui_marker_summary.py` — NEW（4 个 eval case 锁定：按工具名分发摘要、缺字段返回空字符串、marker 在 running/done 含摘要、error 仍可通过 ⊗ + tool-error 区分）
+- `loom/eval/cases/__init__.py` — 注册 `tui_marker_summary` 模块
+- `feature_list.json` — f-tool-display-p1 实体（依赖 p0，verify: p0+p1 pytest + eval --fail-under 100 + init.sh）
+
+**关键设计决策**:
+- 向后兼容：`tool_input` 是 keyword-only 参数（`*` 分隔）；不传时 marker 行为不变（仍显示 `· running`/`· done`/`· error`）
+- `_summarize_tool_args` 是纯函数（模块级），对所有字段访问用 `.get()` 防御；未知工具返回 `""`
+- `textual.renderables.Content` 不支持 `in` 操作符做子串匹配 — 测试中用 `str(marker.render())` 转换
+- Tool 名显示：`read_file`/`write_file`/`edit_file` 在 marker 行显示为 `read`/`write`/`edit`（同 opencode 风格）
+
+**验证**:
+- `uv run pytest tests/test_chat_log_p0.py tests/test_chat_log_p1_marker_summary.py -q` → 89/89 passed（40 + 49）
+- `uv run python -m loom.cli eval --fail-under 100` → **258/258 passed**（基线 254 + 4）
+- `uv run ruff check .` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in 88 source files
+- `./init.sh` → **562 passed, 35 warnings, 8 snapshots** → "Verification Complete (all green)"

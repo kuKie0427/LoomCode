@@ -753,6 +753,17 @@
       "status": "done",
       "verification": "uv run pytest tests/test_tui_snapshot.py loom/eval/cases/tui_permission.py -q",
       "evidence": "uv run pytest tests/test_tui_snapshot.py loom/eval/cases/tui_permission.py -q → 2/2 passed (2 snapshots); uv run python -m loom.cli eval --fail-under 100 → 254/254 passed (tui-tool-call-marker-exists + tui-tool-marker-three-states-contract both PASS); ./init.sh → 513 passed, 8 snapshots, all green (was 514/9, -1 test + -1 snapshot = deleted test_tool_card_completed). grep -rn ToolCallCard loom/ tests/ returns ZERO results."
+    },
+    {
+      "id": "f-tool-display-p1",
+      "name": "ToolCallMarker 参数预览 (marker summary)",
+      "description": "ToolCallMarker shows concise tool-specific arg summary instead of just · running/done/error. New _summarize_tool_args pure function, ToolCallMarker accepts tool_input dict, marker text shows summary in running/done/error states. height:1 preserved. §8.3 glyph contract intact.",
+      "dependencies": [
+        "f-tool-display-p0"
+      ],
+      "status": "done",
+      "verification": "uv run pytest tests/test_chat_log_p0.py tests/test_chat_log_p1_marker_summary.py -q && uv run python -m loom.cli eval --fail-under 100 && ./init.sh",
+      "evidence": "uv run pytest tests/test_chat_log_p0.py tests/test_chat_log_p1_marker_summary.py -q → 89/89 passed (40 p0 + 49 new); uv run python -m loom.cli eval --fail-under 100 → 'Eval results: 258/258 passed' (+4 new marker-summary cases); ./init.sh → '562 passed, 35 warnings, 8 snapshots' + 'Verification Complete (all green)'; uv run ruff check . → All checks passed; uv run mypy loom/ → Success: no issues found in 88 source files. Changes: loom/tui/chat_log.py (+_normalize_tool_name, +_truncate_summary, +_summarize_tool_args; ToolCallMarker.__init__ accepts tool_input= kwarg; _refresh_glyph/set_complete use summary; add_tool_call_inline passes tool_input dict), tests/test_chat_log_p1_marker_summary.py (NEW, 49 tests), loom/eval/cases/tui_marker_summary.py (NEW, 4 eval cases), loom/eval/cases/__init__.py (register cases)."
     }
   ]
 }

@@ -10,6 +10,7 @@ import json
 import re
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Literal
 
 from textual.app import ComposeResult
@@ -101,6 +102,67 @@ def _truncate(text: str) -> str:
 
 
 _MD_SYNTAX_RE = re.compile(r'[#*`|\[>\-_~]|\n\n|^\d+\. |\n\d+\. ')
+
+
+def _normalize_tool_name(name: str) -> str:
+    """Shorten tool names for display in the marker line.
+
+    read_file → read, write_file → write, edit_file → edit.
+    Other names pass through unchanged.
+    """
+    _TOOL_DISPLAY_NAMES = {"read_file": "read", "write_file": "write", "edit_file": "edit"}
+    return _TOOL_DISPLAY_NAMES.get(name, name)
+
+
+def _truncate_summary(text: str, max_len: int = 50) -> str:
+    """Truncate *text* to *max_len* characters, appending ``…`` (U+2026) if truncated.
+
+    Whitespace at both ends is stripped first.
+    """
+    text = text.strip()
+    if len(text) <= max_len:
+        return text
+    return text[:max_len].rstrip() + "\u2026"
+
+
+def _summarize_tool_args(tool_name: str, tool_input: dict) -> str:
+    """Return a short (≤50 chars) textual summary of *tool_input* for *tool_name*.
+
+    Look-up by tool name:
+
+    * ``bash``          — ``tool_input["command"]``
+    * ``read_file``,
+      ``write_file``,
+      ``edit_file``     — ``Path(path).name``
+    * ``glob``          — ``tool_input["pattern"]``
+    * ``todo_write``    — ``f"{len(todos)} tasks"``
+
+    Defensive: all field accesses use ``.get()``.  Missing/None/unknown → ``""``.
+    Never raises.
+    """
+    if not isinstance(tool_input, dict):
+        return ""
+    if tool_name == "bash":
+        cmd = tool_input.get("command", "")
+        if isinstance(cmd, str):
+            return _truncate_summary(cmd)
+        return ""
+    if tool_name in ("read_file", "write_file", "edit_file"):
+        path = tool_input.get("path", "")
+        if isinstance(path, str) and path:
+            return _truncate_summary(Path(path).name)
+        return ""
+    if tool_name == "glob":
+        pattern = tool_input.get("pattern", "")
+        if isinstance(pattern, str):
+            return _truncate_summary(pattern)
+        return ""
+    if tool_name == "todo_write":
+        todos = tool_input.get("todos")
+        if isinstance(todos, list):
+            return _truncate_summary(f"{len(todos)} tasks")
+        return ""
+    return ""
 
 
 def _has_markdown_syntax(text: str) -> bool:
@@ -544,10 +606,15 @@ class ToolCallMarker(Static):
     engine_state: reactive[str] = reactive("idle")
     _cycle_idx: reactive[int] = reactive(0)
 
-    def __init__(self, tool_name: str, args_str: str, **kwargs: Any) -> None:
-        super().__init__(f"{self._RUNNING_GLYPHS[0]} {tool_name} · running", **kwargs)
+    def __init__(self, tool_name: str, args_str: str, *, tool_input: dict | None = None, **kwargs: Any) -> None:
+        super().__init__(
+            f"{self._RUNNING_GLYPHS[0]} {_normalize_tool_name(tool_name)} · running",
+            **kwargs,
+        )
         self._tool_name = tool_name
         self._args_str = args_str
+        self._tool_input = tool_input or {}
+        self._summary = _summarize_tool_args(tool_name, tool_input) if tool_input else ""
         self._output_str = ""
         self._is_error = False
         self._complete = False
@@ -587,7 +654,8 @@ class ToolCallMarker(Static):
         if self._complete:
             return
         glyph = self._RUNNING_GLYPHS[self._cycle_idx]
-        self.update(f"{glyph} {self._tool_name} · running")
+        display_name = _normalize_tool_name(self._tool_name)
+        self.update(f"{glyph} {display_name} · {self._summary or 'running'}")
 
     def on_click(self, event: Click) -> None:
         if event.chain == 2:
@@ -619,7 +687,8 @@ class ToolCallMarker(Static):
         self._is_error = is_error
         glyph = "⊗" if is_error else "⊙"
         status = "error" if is_error else "done"
-        self.update(f"{glyph} {self._tool_name} · {status}")
+        display_name = _normalize_tool_name(self._tool_name)
+        self.update(f"{glyph} {display_name} · {self._summary or status}")
         self.add_class("tool-error" if is_error else "tool-done")
 
 
@@ -826,7 +895,7 @@ class ChatLog(VerticalScroll):
         self._dismiss_thinking_widget()
         self._finalize_streaming()
         args_str = json.dumps(inp, ensure_ascii=False, indent=2) if inp else ""
-        marker = ToolCallMarker(name, args_str)
+        marker = ToolCallMarker(name, args_str, tool_input=inp)
         marker.engine_state = self.engine_state  # §2.2.3 primitive 2: sync before mount
         output = CollapsibleToolOutput("")
         marker.set_output_widget(output)
