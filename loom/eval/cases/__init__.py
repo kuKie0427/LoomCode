@@ -12,6 +12,7 @@ from loom.eval.cases import (
     cost_telemetry,  # noqa: F401
     cross_session_resume,  # noqa: F401
     detect,  # noqa: F401
+    diff_pane,  # noqa: F401
     edit_file_v2,  # noqa: F401
     eval_benchmark_cli,  # noqa: F401
     failure_modes,  # noqa: F401
