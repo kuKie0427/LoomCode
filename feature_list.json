@@ -930,6 +930,14 @@
       "dependencies": [],
       "status": "done",
       "evidence": "uv run pytest tests/test_permission_persistence.py -v -> 20/20 passed. uv run python -m loom.cli eval --filter permission-store --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 726 passed (was 706, +20). uv run ruff + mypy -> 0 issues in 107 source files. loom/agent/permission_store.py (NEW): grant/is_granted/revoke/list_grants + load_grants/save_grants + PermissionGrant dataclass. Stored at .minicode/permissions.json. Per-tool canonicalization: bash -> command with whitespace collapsed; path tools -> path arg; unknown -> sorted JSON. Default TTL 30 days; expired grants are silently filtered on load. SAFETY: WORKSPACE_WRITE_TOOLS frozenset (write_file, edit_file, multi_edit, edit_lines) is NEVER auto-allowed -- grant() returns None and is_granted() returns False. Workspace writes always re-prompt the user. TDD bug: loguru formatter doesn't accept {} -- had to use %s. Fixed."
+    },
+    {
+      "id": "f-tool-error-semantics-p2",
+      "name": "Phase 2: Tool error semantics (read errors + retry detection)",
+      "description": "Tool returns 'Error: ...' but agent often retries the same failing call N times. Add (1) system-prompt section teaching error-reading + (2) detect_repeated_failures() that injects guidance after 3 same-tool errors.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "uv run pytest tests/test_tool_error_semantics.py -v -> 13/13 passed. uv run python -m loom.cli eval --filter tool-errors --fail-under 100 -> 4/4 passed. uv run pytest -m 'not snapshot' -q -> 739 passed (was 726, +13). uv run ruff + mypy -> 0 issues in 109 source files. loom/agent/tool_errors.py (NEW): extract_tool_use_blocks / extract_tool_result_blocks for parsing messages; detect_repeated_failures(messages, max_failures=3, lookback=6) walks last N messages, tracks (tool, input) key + consecutive error count, returns dict on threshold. build_retry_guidance(detection) produces a <system-reminder> mentioning the tool name, the count, and 3 action paths (diagnose / gather context / explain to user). loom/agent/loop.py: each iteration calls detect; if triggered and the last message isn't already a guidance reminder, appends the reminder to messages. loom/agent/system_prompt.py: added a 'Tool Failure Handling' static section teaching the agent to read errors and self-correct. TDD bug: first detection algorithm reset count on every assistant tool_use (regardless of key match), so 3 consecutive same-tool errors never accumulated. Rewrote with explicit key-match + last_was_error state tracking. Caught by tests."
     }
   ]
 }

@@ -257,6 +257,11 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
             tokens_at_last_checkpoint = context.current_tokens(messages)
             max_turns = _active_config.max_turns
             for turn in range(max_turns):
+                from loom.agent.tool_errors import detect_repeated_failures, build_retry_guidance
+                detection = detect_repeated_failures(messages)
+                if detection is not None and (not messages or messages[-1].get("role") != "user" or "<system-reminder>" not in str(messages[-1].get("content", ""))[:200]):
+                    messages.append({"role": "user", "content": build_retry_guidance(detection)})
+                    logger.warning("tool_errors: detected {}-time failure of {}", detection["failure_count"], detection["tool"])
                 if context.should_compact(messages, llm_client.get_context_window(), llm_client.model):
                     hooks.trigger_hooks("PreCompact", messages, context.last_input_tokens)
                     msg_count_before = len(messages)

@@ -70,6 +70,15 @@ def build_fresh(workdir: Path) -> str:
     sp.add_static("你是MiniCode,一个编程助手,协助用户进行开发任务。")
     sp.add_static("行为准则：小心操作，不破坏系统，不泄露数据。")
     sp.add_static("语言风格：简洁、直接、无废话。")
+    sp.add_static(
+        "Tool Failure Handling:\n"
+        "When a tool returns an error, READ the error message carefully before retrying.\n"
+        "Diagnose the root cause (file not found? permission denied? syntax error?) and\n"
+        "adjust the input. If a tool fails 3 times in a row with the same input, STOP\n"
+        "and reconsider your approach: gather more context with read_file/grep/glob,\n"
+        "or explain the blocker to the user. Never retry the same failing call without\n"
+        "changing something."
+    )
 
     from loom.agent.prompt import AGENTS_MD_STATIC_LIMIT
     agents_md_path = workdir / "AGENTS.md"
