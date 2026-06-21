@@ -25,7 +25,7 @@ from loom.eval.cases import (
     loop_call_depth,  # noqa: F401
     max_output_tokens_config,  # noqa: F401
     max_turns_guard,  # noqa: F401
-    memory_skills,  # noqa: F401
+    mcp_client,  # noqa: F401
     microcompact_counter,  # noqa: F401
     permission_canonicalize,  # noqa: F401
     permission_deny_expanded,  # noqa: F401

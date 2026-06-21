@@ -978,6 +978,14 @@
       "dependencies": [],
       "status": "done",
       "evidence": "uv run pytest tests/test_repomap.py -v -> 12/12 passed. uv run python -m loom.cli eval --filter repomap --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 786 passed (was 774, +12). uv run ruff + mypy -> 0 issues in 116 source files. loom/agent/repomap.py (NEW): build_repomap(workdir, max_files=20, max_tokens=4000) uses Python stdlib ast module to extract top-level classes + functions + methods from each .py file under WORKDIR. Sorts by symbol count descending, truncates at char budget. Skips dotfiles, __pycache__, syntax-error files. Output format: 'Codebase Map (top files by symbol count):\\nrel/path.py: ClassA, ClassA.method, function_foo, ...'. loom/agent/system_prompt.py: imports build_repomap and injects the map into the memory tier via sp.add_memory(repomap). TDD caught: I forgot to add the tmp_path fixture parameter to one test -- raised NameError, fixed."
+    },
+    {
+      "id": "f-mcp-client-p3",
+      "name": "Phase 3: MCP client integration (stdio + filesystem reference, minimal)",
+      "description": "Real MCP client. Minimal scope: stdio transport + spawn 1 reference server (e.g. @modelcontextprotocol/server-filesystem npx) + register its tools as additional loom tools. NOT SSE transport (deferred).",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "uv run pytest tests/test_mcp_client.py -v -> 10/10 passed. uv run python -m loom.cli eval --filter mcp-client --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 796 passed (was 786, +10). uv run ruff + mypy -> 0 issues in 118 source files. loom/agent/mcp_client.py (NEW): minimal MCP client (stdio transport, JSON-RPC 2.0 over Content-Length-framed messages). MCPServer dataclass, start() spawns Popen (or uses pre-injected process for testing) + initialize handshake + tools/list. call_tool(name, args) sends tools/call and returns result content. mcp_tool_to_loom_tool() converts MCP tool descriptors to loom tool schema. MCPError exception. TDD caught 2 real issues: (1) original start() always Popen'd which broke test injection; refactored to skip Popen if process is set. (2) original BytesIO-based fake failed because seek(0) after read() doesn't restart reads in the expected way; rewrote with real OS pipes and a worker thread. Now 10/10 tests pass with a fully-isolated fake."
     }
   ]
 }
