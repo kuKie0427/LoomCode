@@ -1,7 +1,8 @@
-"""Tests for AgentTUIApp shuttle tick driver — §2.2.3 primitive 1.
+"""Tests for AgentTUIApp gear tick driver — §2.2.3 primitive 1.
 
-Verifies the 1Hz interval that toggles StatusBar.shuttle_phase when the
-engine is active, and the idle freeze / reset semantics.
+Verifies the 1Hz interval that cycles StatusBar.shuttle_phase 0/1/2 when
+the engine is active (3-frame gear animation), and the idle freeze / reset
+semantics.
 """
 from __future__ import annotations
 
@@ -23,7 +24,6 @@ def test_app_shuttle_tick_idle_noop() -> None:
             app.engine_state = "idle"
             status_bar.shuttle_phase = 0
             await pilot.pause(0.05)
-            # Call tick directly — should be noop since state is idle
             app._tick_shuttle()
             assert status_bar.shuttle_phase == 0, (
                 f"shuttle must stay 0 in idle, got {status_bar.shuttle_phase}"
@@ -32,8 +32,8 @@ def test_app_shuttle_tick_idle_noop() -> None:
     asyncio.run(driver())
 
 
-def test_app_shuttle_tick_active_toggles() -> None:
-    """engine_state=executing: _tick_shuttle toggles phase 0→1→0."""
+def test_app_shuttle_tick_active_cycles_3_frames() -> None:
+    """engine_state=executing: _tick_shuttle cycles phase 0→1→2→0 (3-frame gear)."""
 
     async def driver() -> None:
         app = AgentTUIApp()
@@ -45,11 +45,15 @@ def test_app_shuttle_tick_active_toggles() -> None:
             await pilot.pause(0.05)
             app._tick_shuttle()
             assert status_bar.shuttle_phase == 1, (
-                f"first tick should toggle to 1, got {status_bar.shuttle_phase}"
+                f"first tick should advance to 1, got {status_bar.shuttle_phase}"
+            )
+            app._tick_shuttle()
+            assert status_bar.shuttle_phase == 2, (
+                f"second tick should advance to 2, got {status_bar.shuttle_phase}"
             )
             app._tick_shuttle()
             assert status_bar.shuttle_phase == 0, (
-                f"second tick should toggle back to 0, got {status_bar.shuttle_phase}"
+                f"third tick should wrap back to 0, got {status_bar.shuttle_phase}"
             )
 
     asyncio.run(driver())

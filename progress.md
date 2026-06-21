@@ -4770,3 +4770,64 @@ P0 (engine state) → P1a (ctx rail + shuttle) → P1b (tick-above-shuttle inlin
 **契约先行的设计正确性**: 新 eval 的 2 个 FAIL 准确锚定了 SP1 任务的实现锚点（添加齿轮字形 + 改 helper 签名）。SP1 实现完这 2 个点 → 2 个 FAIL 转绿 → 258/258 → gate 过。中间状态无需手动调整 eval，契约驱动自动收敛。
 
 **下一步**:  `/handoff` → 新会话 → 加载 `statusbar-revamp-p1.md`（实现：齿轮条 helper + render 重构 + 删 ShuttleTickOverlay + 死代码清理）。
+
+## SP1: 实现 (2026-06-21)
+
+完成 statusbar-revamp-p1 计划所有任务。sp0 写的契约性 eval 全部转绿，ShuttleTickOverlay 彻底清干净。
+
+**改动**:
+
+- `loom/tui/status_bar.py` (核心重写, +135, -116):
+  - 常量: `_RAIL_WIDTH = 14`, `_GEAR_FRAMES = ("❋", "✻", "✜")`, `_CHAIN = "┅"`, `_TOOTH = "┄"`。删除 `_RAIL_TICK`/`_SHUTTLE`/`_SHUTTLE_PASS_RANGE`。
+  - `_ctx_rail_components(ratio, phase, state) -> str` 重写: 单返回字符串（不是元组）。齿轮位置 `round(ratio * (_RAIL_WIDTH - 1))`；idle 冻结在 `❋` 基帧，active 按 `phase % 3` 换帧。逐格 markup: `i<pos` 链带 + 语义色; `i==pos` 齿轮 + `[$accent-light]`; `i>pos` 虚齿 + `[$text-faint]`。
+  - `_build_ctx_line_components` 死代码清理: 删 `quiet_prefix` 参数、删 `tick_str` 计算块、签名 → `tuple[str, str]`（2-tuple）。
+  - `_render_engine_badge` 6 态细分: idle/thinking/streaming/executing/compacting/error，每态一分支无 default。
+  - `StatusBar.render` 按 §9.3 重构: 砍 `loom` 前缀 + `esc ^l` key hints; A-tier 对比分层 (turns·tools/branch → $foreground, model → $secondary, 标签 → $text-muted); 引入 `_active_tier(field, is_active)` helper 实现 active-boost (idle→muted, active→提一档); 危险态 token 数字 + 百分比也染语义色 (≥0.60 黄, ≥0.85 红)。
+- `loom/tui/app.py` (+5, -23):
+  - 删 `ShuttleTickOverlay` import (line 45)。
+  - 删 `_sync_shuttle_tick_overlay` 方法 + 4 个调用点 (`:340-352`, `:404`, `:416`)。
+  - `_tick_shuttle`: `status_bar.shuttle_phase = (status_bar.shuttle_phase + 1) % 3` (3 帧循环); 保留 idle early-return (eval 锚定)。
+  - `compose()` 删 `yield ShuttleTickOverlay(id="shuttle-tick")`, `#chrome` 自然 3→2 行 (tick + status + composer → status + composer)。
+  - `on_mount` 的 `set_interval(1.0, self._tick_shuttle, name="shuttle-tick")` **保留** (eval `TuiCtxRailGearTick1HzInterval` 锚定 backward compat 名字)。
+  - 清理 `_detect_git_branch` 里的 stale TickOverlay 注释。
+- `tests/test_ctx_rail.py` (+79, -49): `●` (`\u25cf`) → `❋` (`\u274b`)。新增 3 帧测试 (phase 0/1/2 → ❋/✻/✜)。新增 `test_ctx_rail_active_position_is_pure_ratio` 验证 active 位置纯由 ratio 决定（无 phase bob）。helper 返回类型从 `(shuttle_x, rail_str)` 改为 `str`，测试用 `out = _ctx_rail_components(...)` 直接收。
+- `tests/test_app_shuttle.py` (+12, -8): `test_app_shuttle_tick_active_toggles` (0↔1) → `test_app_shuttle_tick_active_cycles_3_frames` (0→1→2→0)。
+- `tests/test_status_bar.py` (+33, -38): 删 `ShuttleTickOverlay` import; `test_render_engine_badge_pure_helper_active_states` 改为 parametrize 4 态各自的输出; `test_status_bar_renders_rail_not_fill_bar` 改用 `┅`/`❋`/`┄` 断言; `test_status_bar_renders_shuttle_tick_above` 改为负向断言 (chrome 无 caret)。
+- `tests/test_engine_state.py` (+11, -7): 同样的 parametrize 修复（之前 subagent 漏了）。`test_render_engine_badge_active_states` (旧 0↔1) 改为 4 态 parametrize。
+- `loom/eval/cases/tui_engine_state.py` (+17, -8): `TuiEngineBadge3RenderPaths` → `TuiEngineBadge6RenderPaths` (重命名 + 6 分支断言)。
+- `loom/eval/cases/__init__.py` (+0, -1): 删 `tui_shuttle_tick,` 注册行。
+- **删除** `tests/test_shuttle_tick.py` (-244, 10 tests) + `loom/eval/cases/tui_shuttle_tick.py` (-249, 5 eval cases)。
+- `feature_list.json`: sp0=done, sp1=in-progress→done (本 session 追加 evidence)。
+
+**验证**:
+
+- `uv run ruff check .` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in **87** source files（88→87: 删 tui_shuttle_tick.py）
+- `uv run pytest tests/test_ctx_rail.py tests/test_status_bar.py tests/test_app_shuttle.py tests/test_engine_state.py -q` → **53/53 passed in 45.88s**
+- `uv run python -m loom.cli eval` → **252/253 passed** (1 失败是 pre-existing flake `cli-help-is-fast-no-agent-import`, wall-time 漂移, 与 SP1 无关, SP0 已记录):
+  - 5 个齿轮 eval 全 PASS: `tui-ctx-rail-gear-contract`, `...-gear-helper-defined`, `...-gear-tick-1hz-interval`, `...-idle-freeze`, `...-gear-position-formula`
+  - 3 个 engine-state eval 全 PASS: `tui-engine-state-6-states-defined`, `tui-engine-badge-6-render-paths` (重命名), `tui-engine-badge-no-token-colors`
+- `grep -rn --include="*.py" ShuttleTickOverlay loom/ tests/` → **0 代码引用**（仅 1 处 prose docstring in test_status_bar.py:428 记录删除事实）
+- 全量非快照 pytest: **546/552 passed**; 6 失败**全部**是快照测试 (`test_tui_header.py` × 6 + `test_tui_snapshot.py` × 1) — 按计划 gate 延迟到 SP2:「若快照变更见 SP2, 本 phase 先确保非快照测试绿」
+
+**Gate 状态**:
+
+- [x] 齿轮条四态正确渲染 (idle 冻结 / active 3 帧换帧 / 阈值语义色 / 危险态数字+百分比染色)
+- [x] badge 6 态正确 (5 个 test + 1 eval 覆盖)
+- [x] ShuttleTickOverlay 彻底删除 (类 + 5 个 eval + 10 个 test + __init__ 注册 + app.py 引用 + 2 个 test_status_bar 引用)
+- [x] `_build_ctx_line_components` 死代码已清 (无 quiet_prefix, 无 tick_str, 2-tuple 签名)
+- [x] SP0 写的齿轮 eval 全部转绿 (5/5 PASS, 之前 2/5 暂红)
+- [x] `./init.sh` 静态层全绿 (ruff + mypy); 快照测试**按计划**暂红 (SP2 re-baseline)
+- [x] feature_list sp1 = done + evidence (本 commit)
+- [x] progress.md 追加 + git commit (本 commit)
+
+**实现细节 / 惊喜**:
+
+1. **ratio=0 边界**: `pos=0` 时无链带 cell (i<pos 为空)，首格是齿轮本身 (wrapped in `[$accent-light]❋`)。原断言 `out.find("[$") + len("[$success]"):.startswith(...)` 失效 (首 tag 是 `[$accent-light]` 不是 `[$success]`)，需用 `out.startswith("[$accent-light]❋")` 或断言 cell 内容。
+2. **banker's rounding**: `round(0.5 * 13) = round(6.5) = 6` (Python 用 banker's rounding，不是 school rounding)。`test_ctx_rail_active_position_is_pure_ratio` 断言 `pos == 6`，若用 school rounding (7) 会失败。
+3. **mypy file count**: 88→87 因为 `tui_shuttle_tick.py` 被删。一个源文件消失。
+4. **phase param 重命名**: `TuiCtxRailGearHelperDefined` eval 检查 `params == ["ratio", "phase", "state"]` 严格相等 (不是 `["ratio", "shuttle_phase", "state"]`)。原 helper 用 `shuttle_phase` (描述性)，新规范改 `phase` 以反映 3 帧循环语义。
+5. **快照测试**: StatusBar 大变（不同字形/不同布局）→ 快照必然失败。按 plan gate 显式延后到 SP2。`test_tui_header.py` 6 个 + `test_tui_snapshot.py` 1 个 = 7 个快照失败，符合预期。
+6. **subagent 漏改**: 第一个 subagent 改 `tests/test_status_bar.py` 的 badge parametrize 但漏了 `tests/test_engine_state.py` 同模式的 parametrize test。第二个 subagent (quick) 修复了 4 个 active-state cases。
+
+**下一步**: `/handoff` → 加载 `statusbar-revamp-p2.md` (验证收口: 快照 re-baseline + §9.3 字符数实测填入 + 窄终端预算核算)。

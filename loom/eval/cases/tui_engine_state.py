@@ -2,7 +2,7 @@
 
 Covers:
 1. All 6 EngineState literals defined in status_bar
-2. _render_engine_badge has 3 render paths (idle/error/active)
+2. _render_engine_badge has 6 explicit branches (post-revamp)
 3. AgentTUIApp has a reactive engine_state field
 4. run_agent_turn callbacks explicitly set all 6 engine states
 """
@@ -43,18 +43,24 @@ class TuiEngineState6StatesDefined(EvalCase):
         )
 
 
-class TuiEngineBadge3RenderPaths(EvalCase):
-    name = "tui-engine-badge-3-render-paths"
-    description = "_render_engine_badge has 3 branches: idle, error, default-active"
+class TuiEngineBadge6RenderPaths(EvalCase):
+    name = "tui-engine-badge-6-render-paths"
+    description = (
+        "_render_engine_badge has 6 explicit branches (post-revamp):"
+        " idle, thinking, streaming, executing, compacting, error"
+    )
 
     def run(self) -> EvalResult:
         from loom.tui.status_bar import _render_engine_badge
 
         source = inspect.getsource(_render_engine_badge)
         checks = {
-            "idle branch": 'if state == "idle":' in source,
-            "error branch": 'if state == "error":' in source,
-            "default return": 'return "[$accent]▸ run[/]"' in source,
+            "idle branch": 'state == "idle"' in source,
+            "thinking branch": 'state == "thinking"' in source,
+            "streaming branch": 'state == "streaming"' in source,
+            "executing branch": 'state == "executing"' in source,
+            "compacting branch": 'state == "compacting"' in source,
+            "error branch": 'state == "error"' in source,
         }
         missing = [name for name, ok in checks.items() if not ok]
         if missing:
@@ -66,7 +72,10 @@ class TuiEngineBadge3RenderPaths(EvalCase):
         return EvalResult(
             name=self.name,
             passed=True,
-            detail="All 3 render paths present (idle / error / default-active)",
+            detail=(
+                "All 6 render paths present (idle / thinking / streaming /"
+                " executing / compacting / error)"
+            ),
         )
 
 

@@ -18,7 +18,7 @@ from textual.events import MouseScrollDown, MouseScrollUp
 
 from loom.tui.app import AgentTUIApp
 from loom.tui.chat_log import ChatLog
-from loom.tui.status_bar import ShuttleTickOverlay, StatusBar, _format_tokens, _render_engine_badge
+from loom.tui.status_bar import StatusBar, _format_tokens, _render_engine_badge
 from tests.conftest import wait_for_state
 
 
@@ -68,8 +68,8 @@ def test_status_bar_shows_context_capacity_with_rail():
             assert "ctx:" in text, f"status bar missing ctx field: {text!r}"
             window = app.llm.get_context_window()
             assert str(window // 1000)[0] in text or "M" in text or "k" in text
-            assert "─" in text, (
-                f"ctx rail tick glyph missing: {text!r}"
+            assert "❋" in text, (
+                f"ctx rail gear glyph missing: {text!r}"
             )
 
     asyncio.run(driver())
@@ -355,20 +355,24 @@ def test_render_engine_badge_pure_helper_error():
 
 
 @pytest.mark.parametrize(
-    "state",
-    ["thinking", "streaming", "executing", "compacting"],
+    ("state", "expected"),
+    [
+        ("thinking", "[$warning]◌ thinking[/]"),
+        ("streaming", "[$accent]▸ streaming[/]"),
+        ("executing", "[$accent]⊙ executing[/]"),
+        ("compacting", "[$secondary]◌ compacting[/]"),
+    ],
 )
-def test_render_engine_badge_pure_helper_active_states(state):
-    assert _render_engine_badge(state) == "[$accent]▸ run[/]"
+def test_render_engine_badge_pure_helper_active_states(state, expected):
+    assert _render_engine_badge(state) == expected
 
 
 def test_status_bar_renders_engine_state_badge_for_three_representative_states():
-    """P0a §4.2.1: StatusBar.render() must include the engine_state badge
-    in the joined stats. Locks the 3 representative branches:
-      - executing (active):   [$accent]▸ run[/]
-      - idle:                 [$text-muted]● idle[/]
-      - error:                [$error]⊗ error[/]
-    P0b wires the App reactive transitions; P0a locks the render layer.
+    """§4.2.1: StatusBar.render() must include the engine_state badge.
+    Locks 3 representative branches from the 6-state contract:
+      - executing:           [$accent]⊙ executing[/]
+      - idle:                [$text-muted]● idle[/]
+      - error:               [$error]⊗ error[/]
     """
 
     async def driver():
@@ -379,7 +383,7 @@ def test_status_bar_renders_engine_state_badge_for_three_representative_states()
 
             status_bar.engine_state = "executing"
             await pilot.pause(0.05)
-            assert "[$accent]▸ run[/]" in status_bar.render(), (
+            assert "[$accent]⊙ executing[/]" in status_bar.render(), (
                 f"executing badge missing: {status_bar.render()!r}"
             )
 
@@ -399,7 +403,7 @@ def test_status_bar_renders_engine_state_badge_for_three_representative_states()
 
 
 def test_status_bar_renders_rail_not_fill_bar():
-    """P1b §2.2.4: ctx must use fixed rail (─) + shuttle (●), not fill bar (█/░)."""
+    """§9.3: ctx must use gear-rack rail (❋┅┄), not fill bar (█/░)."""
 
     async def driver():
         app = AgentTUIApp()
@@ -407,18 +411,25 @@ def test_status_bar_renders_rail_not_fill_bar():
             await pilot.pause(0.05)
             status_bar = app.query_one(StatusBar)
             status_bar.engine_state = "idle"
+            # Use a non-zero ratio so the rail has both chain + teeth + gear cells.
+            status_bar.ctx_tokens = max(1, status_bar.ctx_window // 2)
             await pilot.pause(0.05)
             text = status_bar.render()
             assert "█" not in text, f"fill bar forbidden in idle render: {text!r}"
             assert "░" not in text, f"empty bar forbidden in idle render: {text!r}"
-            assert "─" in text, f"rail tick must appear in idle render: {text!r}"
-            assert "●" in text, f"shuttle must appear in idle render: {text!r}"
+            assert "┅" in text, f"engaged chain ┅ must appear in idle render: {text!r}"
+            assert "❋" in text, f"gear glyph ❋ must appear in idle render: {text!r}"
+            assert "┄" in text, f"un-engaged tooth ┄ must appear in idle render: {text!r}"
 
     asyncio.run(driver())
 
 
 def test_status_bar_renders_shuttle_tick_above():
-    """§4.2.1: StatusBar no longer renders inline ^N. Tick is in ShuttleTickOverlay above."""
+    """§9.3 (post-revamp): ShuttleTickOverlay is DELETED — chrome has no
+    inline ^N caret. StatusBar.render() embeds the gear position via the
+    gear-rack rail directly. This test now asserts the negative: chrome
+    has only StatusBar + Composer (no tick widget exists to render ^).
+    """
 
     async def driver():
         app = AgentTUIApp()
@@ -426,38 +437,22 @@ def test_status_bar_renders_shuttle_tick_above():
             await pilot.pause(0.05)
 
             status_bar = app.query_one(StatusBar)
-            tick_overlay = app.query_one(ShuttleTickOverlay)
             chrome = app.query_one("#chrome")
 
-            # Verify DOM structure: TickOverlay is first child, StatusBar is inside #chrome
             children = list(chrome.children)
-            assert tick_overlay in children, "TickOverlay must be inside #chrome"
             assert status_bar in children, "StatusBar must be inside #chrome"
-            assert list(chrome.children).index(tick_overlay) < list(chrome.children).index(
-                status_bar
-            ), "TickOverlay must sit above StatusBar in #chrome"
 
-            # Verify StatusBar.render() no longer contains inline ^0/^1
             status_bar.shuttle_phase = 0
             await pilot.pause(0.05)
             sb_text = status_bar.render()
             assert "^0" not in sb_text, (
-                f"StatusBar should NOT contain inline ^0 after P3a: {sb_text!r}"
+                f"StatusBar should NOT contain ^0 caret: {sb_text!r}"
             )
             assert "^1" not in sb_text, (
-                f"StatusBar should NOT contain inline ^1 after P3a: {sb_text!r}"
+                f"StatusBar should NOT contain ^1 caret: {sb_text!r}"
             )
-
-            # Verify TickOverlay DOES render ^ (the tick)
-            tick_text = tick_overlay.render()
-            assert "^" in tick_text, (
-                f"TickOverlay must render ^ glyph: {tick_text!r}"
-            )
-
-            # Verify the ^ position is right after 'ctx: ' (shuttle_x offset)
-            ctx_marker = "ctx:"
-            assert ctx_marker in tick_text, (
-                f"TickOverlay must contain ctx: prefix: {tick_text!r}"
+            assert "^" not in sb_text, (
+                f"StatusBar should NOT contain any caret: {sb_text!r}"
             )
 
     asyncio.run(driver())

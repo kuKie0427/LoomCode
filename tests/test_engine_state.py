@@ -38,15 +38,19 @@ def test_render_engine_badge_error():
 
 
 @pytest.mark.parametrize(
-    "state",
-    ["thinking", "streaming", "executing", "compacting"],
+    ("state", "expected"),
+    [
+        ("thinking", "[$warning]◌ thinking[/]"),
+        ("streaming", "[$accent]▸ streaming[/]"),
+        ("executing", "[$accent]⊙ executing[/]"),
+        ("compacting", "[$secondary]◌ compacting[/]"),
+    ],
 )
-def test_render_engine_badge_active_states(state):
-    """The 4 active states all show [$accent]▸ run[/] per spec §4.2.1 — the
-    active state is conveyed by other UI elements (spinner/animation), not by
-    badge text. This is by design; do NOT differentiate per state in the badge.
+def test_render_engine_badge_active_states(state, expected):
+    """§4.2.1 (post-revamp): each active state has its own glyph + token.
+    The active state is conveyed by the badge text itself, not by external spinners.
     """
-    assert _render_engine_badge(state) == "[$accent]▸ run[/]"
+    assert _render_engine_badge(state) == expected
 
 
 def test_render_engine_badge_no_literal_colors():
