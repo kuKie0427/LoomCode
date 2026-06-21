@@ -1,12 +1,16 @@
-"""Eval cases for §2.2.3 primitive 1: ctx rail + shuttle pass.
+"""Eval cases for §2.2.3 primitive 1 (gear-rack advance) and §2.2.2 controlled exception.
 
 These eval cases lock the structural contracts that the test suite cannot
 directly enforce (because tests run after the source may have drifted):
-- No fill bar glyphs in status_bar source
-- _ctx_rail_components helper is defined
-- App's on_mount registers a 1Hz shuttle-tick interval
-- _tick_shuttle has the idle early-return
-- _ctx_rail_components uses the round(ratio * ...) position formula
+- Gear-rack source forbids continuous solid-block fill glyphs (`█`/`░`) but
+  allows the gear glyphs (`❋✻✜`) + chain `┅` + un-engaged teeth `┄`
+  (§2.2.2 controlled exception: gear-rack IS a fill, but a scoped one).
+- _ctx_rail_components gear helper is defined with the new contract.
+- AgentTUIApp.on_mount registers a 1Hz interval named 'shuttle-tick'
+  (name kept for backward compatibility; phase counter now cycles 0/1/2
+  for the 3-frame gear cycle instead of 0↔1).
+- _tick_shuttle has the idle early-return guard (unchanged invariant).
+- _ctx_rail_components uses the round(ratio * ...) position formula.
 """
 from __future__ import annotations
 
@@ -14,71 +18,94 @@ import inspect
 
 from loom.eval.runner import EvalCase, EvalResult
 
+# Gear-rack glyph vocabulary per §2.2.3 primitive 1 + §2.2.2 controlled exception
+_GEAR_FRAMES = ("❋", "✻", "✜")
+_GEAR_CHAIN_ENGAGED = "┅"
+_GEAR_TEETH_UNENGAGED = "┄"
+# Continuous solid-block fill glyphs — STILL forbidden (§2.2.2 forbids rectangular fills)
+_FORBIDDEN_BLOCKS = ("█", "░")
 
-class TuiCtxRailNoFillBar(EvalCase):
-    name = "tui-ctx-rail-no-fill-bar"
-    description = "loom/tui/status_bar.py must not contain █ or ░ fill-bar glyphs (§2.2.4 forbidden)"
+
+class TuiCtxRailGearContract(EvalCase):
+    name = "tui-ctx-rail-gear-contract"
+    description = (
+        "loom/tui/status_bar.py forbids rectangular fill glyphs (█/░) but allows "
+        "gear-rack glyphs (❋✻✜/┅/┄) per §2.2.2 controlled exception"
+    )
 
     def run(self) -> EvalResult:
         source = inspect.getsource(__import__("loom.tui.status_bar", fromlist=["*"]))
-        if "█" in source:
+        for bad in _FORBIDDEN_BLOCKS:
+            if bad in source:
+                return EvalResult(
+                    name=self.name,
+                    passed=False,
+                    detail=(
+                        f"loom/tui/status_bar.py contains {bad!r} (rectangular fill) — "
+                        "§2.2.2 still forbids continuous solid-block fill bars"
+                    ),
+                )
+        missing: list[str] = []
+        for g in _GEAR_FRAMES:
+            if g not in source:
+                missing.append(g)
+        if _GEAR_CHAIN_ENGAGED not in source:
+            missing.append(_GEAR_CHAIN_ENGAGED)
+        if _GEAR_TEETH_UNENGAGED not in source:
+            missing.append(_GEAR_TEETH_UNENGAGED)
+        if missing:
             return EvalResult(
                 name=self.name,
                 passed=False,
-                detail="loom/tui/status_bar.py contains █ (fill bar) — §2.2.4 forbids it",
-            )
-        if "░" in source:
-            return EvalResult(
-                name=self.name,
-                passed=False,
-                detail="loom/tui/status_bar.py contains ░ (empty bar) — §2.2.4 forbids it",
+                detail=(
+                    "loom/tui/status_bar.py is missing gear-rack glyph(s): "
+                    f"{missing} — §2.2.3 primitive 1 gear-rack contract"
+                ),
             )
         return EvalResult(
             name=self.name,
             passed=True,
-            detail="No fill-bar glyphs (█ or ░) found in status_bar source",
+            detail=(
+                "Gear-rack contract: █/░ absent; ❋✻✜/┅/┄ all present "
+                "(§2.2.2 controlled exception + §2.2.3 primitive 1)"
+            ),
         )
 
 
-class TuiCtxRailShuttleComponentsDefined(EvalCase):
-    name = "tui-ctx-rail-shuttle-components-defined"
-    description = "_ctx_rail_components pure helper must be defined in loom.tui.status_bar"
+class TuiCtxRailGearHelperDefined(EvalCase):
+    name = "tui-ctx-rail-gear-helper-defined"
+    description = (
+        "_ctx_rail_components gear helper must exist in loom.tui.status_bar "
+        "with signature (ratio, phase, state)"
+    )
 
     def run(self) -> EvalResult:
         from loom.tui.status_bar import _ctx_rail_components  # noqa: F401
 
         sig = inspect.signature(_ctx_rail_components)
         params = list(sig.parameters.keys())
-        if params != ["ratio", "shuttle_phase", "state"]:
+        if params != ["ratio", "phase", "state"]:
             return EvalResult(
                 name=self.name,
                 passed=False,
                 detail=(
-                    f"_ctx_rail_components signature must be (ratio, shuttle_phase, state),"
+                    f"_ctx_rail_components signature must be (ratio, phase, state),"
                     f" got ({', '.join(params)})"
                 ),
             )
-        return_ann = sig.return_annotation
-        if return_ann is not inspect.Parameter.empty:
-            if str(return_ann) != str(tuple[int, str]):
-                return EvalResult(
-                    name=self.name,
-                    passed=False,
-                    detail=(
-                        f"_ctx_rail_components return annotation must be tuple[int, str],"
-                        f" got {return_ann}"
-                    ),
-                )
         return EvalResult(
             name=self.name,
             passed=True,
-            detail="_ctx_rail_components has correct 3-param signature returning tuple[int, str]",
+            detail="_ctx_rail_components has gear-helper 3-param signature (ratio, phase, state)",
         )
 
 
-class TuiCtxRailShuttleTick1HzInterval(EvalCase):
-    name = "tui-ctx-rail-shuttle-tick-1hz-interval"
-    description = "AgentTUIApp.on_mount must register a 1Hz interval named 'shuttle-tick'"
+class TuiCtxRailGearTick1HzInterval(EvalCase):
+    name = "tui-ctx-rail-gear-tick-1hz-interval"
+    description = (
+        "AgentTUIApp.on_mount must register a 1Hz interval named 'shuttle-tick' "
+        "for the gear-rack advance (name preserved for backward compatibility)"
+    )
 
     def run(self) -> EvalResult:
         from loom.tui.app import AgentTUIApp  # noqa: F401
@@ -90,25 +117,31 @@ class TuiCtxRailShuttleTick1HzInterval(EvalCase):
                 passed=False,
                 detail=(
                     "AgentTUIApp.on_mount must call set_interval(1.0, ...,"
-                    " name='shuttle-tick')"
+                    " name='shuttle-tick') for the gear-rack 1Hz advance"
                 ),
             )
         if 'name="shuttle-tick"' not in source:
             return EvalResult(
                 name=self.name,
                 passed=False,
-                detail="AgentTUIApp.on_mount must name the shuttle interval 'shuttle-tick'",
+                detail=(
+                    "AgentTUIApp.on_mount must name the gear-rack interval "
+                    "'shuttle-tick' (name kept for backward compatibility)"
+                ),
             )
         return EvalResult(
             name=self.name,
             passed=True,
-            detail="on_mount registers 1Hz set_interval named 'shuttle-tick'",
+            detail="on_mount registers 1Hz set_interval named 'shuttle-tick' for gear-rack advance",
         )
 
 
 class TuiCtxRailIdleFreeze(EvalCase):
     name = "tui-ctx-rail-idle-freeze"
-    description = "_tick_shuttle first control flow must early-return when engine_state == 'idle'"
+    description = (
+        "_tick_shuttle first control flow must early-return when engine_state == 'idle' "
+        "(gear freezes at base frame ❋ while idle — §2.2.2 invariant)"
+    )
 
     def run(self) -> EvalResult:
         from loom.tui.app import AgentTUIApp  # noqa: F401
@@ -135,7 +168,10 @@ class TuiCtxRailIdleFreeze(EvalCase):
                 return EvalResult(
                     name=self.name,
                     passed=True,
-                    detail="_tick_shuttle early-returns when engine_state == 'idle'",
+                    detail=(
+                        "_tick_shuttle early-returns when engine_state == 'idle' "
+                        "(gear freezes at base frame ❋)"
+                    ),
                 )
 
         return EvalResult(
@@ -145,9 +181,12 @@ class TuiCtxRailIdleFreeze(EvalCase):
         )
 
 
-class TuiCtxRailShuttlePositionFormulaComponents(EvalCase):
-    name = "tui-ctx-rail-shuttle-position-formula-components"
-    description = "_ctx_rail_components must use round(ratio * ...) for the shuttle base position"
+class TuiCtxRailGearPositionFormula(EvalCase):
+    name = "tui-ctx-rail-gear-position-formula"
+    description = (
+        "_ctx_rail_components must use round(ratio * (WIDTH - 1)) for the "
+        "gear's base position along the rack"
+    )
 
     def run(self) -> EvalResult:
         from loom.tui.status_bar import _ctx_rail_components  # noqa: F401
@@ -157,10 +196,16 @@ class TuiCtxRailShuttlePositionFormulaComponents(EvalCase):
             return EvalResult(
                 name=self.name,
                 passed=False,
-                detail="_ctx_rail_components must use round(ratio * ...) for base shuttle position",
+                detail=(
+                    "_ctx_rail_components must use round(ratio * ...) for the "
+                    "gear's base position on the rack"
+                ),
             )
         return EvalResult(
             name=self.name,
             passed=True,
-            detail="_ctx_rail_components uses round(ratio * (_RAIL_WIDTH - 1)) for base position",
+            detail=(
+                "_ctx_rail_components uses round(ratio * (RAIL_WIDTH - 1)) "
+                "for the gear base position"
+            ),
         )

@@ -109,7 +109,7 @@ Five and ONLY five motion primitives are allowed in the TUI. Each has a fixed ra
 
 | # | Primitive | Rate | Amplitude | Idle freeze | Implementation |
 |---|---|---|---|---|---|
-| 1 | Shuttle pass on ctx rail | 1Hz (toggle phase 0↔1) | ±1 char | `engine_state == "idle"` → phase frozen at 0 | `status_bar.py::_ctx_rail_render` + `app.py::_tick_shuttle` (1Hz `set_interval`, idle guard) |
+| 1 | Gear-rack advance on ctx rail | 1Hz (gear frame cycle `❋✻✜`, 3 frames) | gear advances ±1 char by ratio; frame swaps | `engine_state == "idle"` → gear frozen at base frame `❋`, chain static | `status_bar.py` gear helper + `app.py::_tick_shuttle` (1Hz `set_interval`, idle guard) |
 | 2 | Running glyph cycle `⊙⊚◎` | 1Hz (cycle 3 frames) | glyph swap | `_complete` or non-executing state → cycle stops, idx resets to 0 | `chat_log.py::ToolCallMarker._tick_cycle` (1Hz `set_interval(1.0, name="tool-cycle")`) |
 | 3 | Thinking spinner | 5fps (10 frames × 50ms; 4× slower after 10s) | glyph swap | `_complete` → marker frozen at `◦ thought · Ns` | `chat_log.py::_tick_spinner` (5fps `set_interval(0.05)`) |
 | 4 | Section button pulse | 1Hz square wave | opacity 1.0↔0.5 | `count == 0` → opacity frozen at 1.0 | `header.py::_tick_pulse` (Python `set_interval(0.5, name="header-pulse")`; Textual CSS doesn't support `@keyframes`/`animation`) |
@@ -131,18 +131,33 @@ The following motion patterns are **explicitly forbidden** — they violate §2 
 - Fade-in / fade-out for any element
 - Animated borders, pulsing colors, breathing opacity (other than the 5 primitives above)
 - Scroll tweening (always `animate=False`)
-- Progress-bar fill animation (the progress bar is a discrete glyph, not an animated fill)
+- Continuous solid-block fill bars (`█`/`░`-style rectangular progress fills) and any easing/fade on a fill — **but see the controlled exception below**
 - Hover-triggered pulse / breathe / shake on any widget
 - Per-character typewriter / streaming animation in markdown
 - Smooth interpolation of any reactive value (color, opacity, position) via tween
 
-**Enforcement:** any new commit that adds one of these patterns is a regression. The eval suite has a primitive-1 case (`tui-ctx-rail-no-fill-bar`) that guards one specific instance; the structural rule is enforced by code review + this doc.
+> **Controlled exception (2026-06-21, ctx rail gear-rack):** The ctx-usage rail (primitive 1, §2.2.3) renders progress as a **gear-rack transmission**: a colored "engaged chain" (`┅` in the semantic threshold color) trails behind a gear glyph (`❋✻✜`) that advances along a rack of un-engaged teeth (`┄` in `$text-faint`). The colored chain IS a form of fill, so this is an explicit, scoped carve-out from the "no fill" rule above. It remains bound by the rest of §2.2: **idle freezes the gear at base frame `❋` with the chain static** (no fill change while idle), the advance is a discrete per-tick position change (no easing/tween/fade), and continuous solid-block `█`/`░` rectangles are still forbidden. Rationale: the user required stronger ctx presence; a gear-rack is "linear transmission visualization," not a rectangular fill bar, and its motion is the existing 1Hz primitive-1 shuttle re-skinned (no new motion primitive).
+
+**Enforcement:** any new commit that adds one of these patterns is a regression. The eval suite has a primitive-1 case (`tui-ctx-rail-gear-contract`) that locks the gear-rack contract (allows `❋✻✜`/`┅`/`┄`, still forbids `█`/`░`); the structural rule is enforced by code review + this doc.
 
 #### §2.2.3 Why this matters
 
 In a long-loop TUI (sessions routinely 30min to several hours), even subliminal motion becomes distracting. The 5 primitives are reserved for state visualization ("something is happening right now") — nothing else. The idle-freeze invariant means the screen becomes a held still image between agent iterations, with only the composer cursor in motion (which is system-default Textual behavior, not our motion).
 
-**Known deviations from §4.2.1 (deferred to P3):** The original §4.2.1 spec called for a `^` tick mark above the shuttle glyph. P1b solved this with inline `^0`/`^1` phase indicator on the same StatusBar row (preserves the 1-line cap, §9.3). The two-row shuttle+tick visual is deferred to P3 — if/when the user reports the inline `^N` visual is inadequate, P3 will either grow StatusBar to 2 rows (with risk of breaking §2 rule 1) or add a `ShuttleTickOverlay` widget (pixel alignment work).
+**§4.2.1 — engine badge contract (6 states).** The StatusBar carries a 1-glyph engine-state badge (implemented in `status_bar.py::_render_engine_badge`). As of the StatusBar revamp (2026-06-21) it distinguishes all **six** `engine_state` values rather than collapsing them into 3 (`idle`/`run`/`error`). Each maps to exactly one glyph + one loom-ink token:
+
+| engine_state | glyph | token | meaning |
+|---|---|---|---|
+| `idle` | `●` | `$text-muted` |待命，no live work |
+| `thinking` | `◌` | `$warning` | reasoning in progress |
+| `streaming` | `▸` | `$accent` | emitting response text |
+| `executing` | `⊙` | `$accent` | running a tool (glyph echoes the inline `ToolCallMarker` `⊙`) |
+| `compacting` | `◌` | `$secondary` | context compression running |
+| `error` | `⊗` | `$error` | last operation failed |
+
+The badge carries **pure status only** — no tool name (decoupled from ChatLog per the revamp decision). Color is meaning, not decoration (§8.3): a badge color change always signals an `engine_state` change.
+
+**§4.2.1 tick-above-shuttle — REMOVED (2026-06-21).** The original §4.2.1 spec called for a `^` tick mark above the shuttle glyph; P3 (`f-tui-paradigm-p3`) implemented it as a `ShuttleTickOverlay` widget (a second `#chrome` row). The StatusBar revamp **removes `ShuttleTickOverlay` entirely** — the gear glyph's position on the rack already indicates progress, so a separate `^` pointer-to-the-pointer was redundant and cost a full chrome row. See the §7 reversal decision "ShuttleTickOverlay removed". The gear-rack rail (primitive 1, §2.2.3) replaces the shuttle `●`; there is no longer a separate tick row.
 
 ---
 
@@ -533,6 +548,16 @@ The StatusBar was the only region that broke. Its content length was:
 
 The earlier "Default: No" rationale assumed the overlay dimmed the ChatLog (`opacity: 0.20`) so click-outside would steal clicks meant for scrolling. The per-section toggle design dropped the dimming, so the conflict no longer exists.
 
+### ShuttleTickOverlay removed (StatusBar revamp)
+
+**Question:** Should the StatusBar continue to carry a separate `ShuttleTickOverlay` widget row (the `^` tick above the shuttle, implemented by `f-tui-paradigm-p3`)?
+
+**Decision (2026-06-21, StatusBar revamp SP0):** **Remove.** Delete `loom/tui/loom/tui/ShuttleTickOverlay`, `loom/eval/cases/tui_shuttle_tick.py`, `tests/test_shuttle_tick.py`, the `tui_shuttle_tick` registration in `loom/eval/cases/__init__.py`, the ShuttleTickOverlay references in `tests/test_status_bar.py` and `loom/tui/app.py`, and the `_sync_shuttle_tick_overlay` plumbing. `#chrome` shrinks from 3 rows (tick + status + composer) to 2 (status + composer); the reclaimed row is given to ChatLog content.
+
+**Why reversed:** The gear-rack re-skin of the ctx rail (see §2.2.2 controlled exception + §2.2.3 primitive 1) makes the shuttle-position pointer redundant — the gear glyph itself occupies the cell that the shuttle used to point at, and its `❋✻✜` frame cycle encodes the 1Hz phase that the `^` tick was meant to indicate. The shuttle-tick overlay was added (2026-06-20, `f-tui-paradigm-p3`) to satisfy "the original §4.2.1 spec called for a `^` tick mark above the shuttle glyph"; that visual contract is now satisfied by the gear's own position on the rack, without a second row. The cost (a permanent 1-row chrome tax + a 1Hz repaint of an essentially-empty line) outweighed the benefit after the gear-rack change.
+
+**Status:** Closed (Reversal — supersedes the 2026-06-20 P3 close).
+
 **Status:** Closed.
 
 
@@ -656,35 +681,51 @@ A single `─` row in `$border`, mounted before each user turn label. Re-uses th
 - **§2 rule 5 (indentation encodes nesting, max 2 tiers):** The separator sits on the outer column with `TurnLabel` — it is decoration on the existing tier, not a new tier.
 - **§3 (hairline convention):** A `$border` divider is the same color as existing hairline borders (`HeaderOverlay` bottom, `PermissionScreen` outline). It is consistent with the §3 hairline vocabulary, not a new visual primitive.
 
-### §9.3 StatusBar enrichment (within 93-col budget)
+### §9.3 StatusBar (post-revamp — 2026-06-21)
 
-StatusBar carries both **stats** (left) and **key hints** (right) on a single line — the opencode bottom-dock pattern. Composition:
+The StatusBar revamp tightens visibility, removes the obsolete tick row (see §7 reversal), and re-skins the ctx rail as a gear-rack (see §2.2.2 controlled exception). **No new motion primitive** is introduced; primitive 1 (gear-rack advance) re-uses the existing 1Hz interval + idle-freeze invariant.
+
+**Composition** (single line, height: 1):
 
 ```
- loom · model · ⎇ main · 0t·0tl · ctx: ░░░░░░░░░░ 0/1.0M (0%)   esc ^l / 0:00
-└────── stats (left) ──────┘                                └─ hints + elapsed (right) ─┘
+ [model] · ⎇ [branch] · [Nt·Mtl] · ctx: [❋┅┅┅┅┄┄┄┄┄┄┄┄┄] [Nk/NM (N%)] · [engine-badge]   [0:00]
+ └─identity─┘ └─session──────────┘ └──────────── ctx-rail + data ────────────┘ └─state─┘  └─time┘
 ```
 
-- **Git branch** (`⎇ <name>`, dimmed): cached once at mount via `git rev-parse --abbrev-ref HEAD` with a 2s timeout; absent if not a git repo or the call fails. One subprocess call per session — zero per-frame cost.
-- **Session elapsed** (`H:MM:SS` / `M:SS`): a `reactive[int]` bumped by a single `set_interval(60.0, ...)`. Updates the displayed time once per minute, not per frame. Moved to the right side in 2026-06-21 so the live stats read first.
-- **Key hints** (`esc ^l /`, dimmed): modeled on opencode's bottom dock (which carries `esc interrupt · ctrl+t variants · tab agents · ctrl+p commands`). The compact form is a deliberate constraint — three hints fit in the 93-col budget, more would not. Rendered in `$text-faint` so the eye is pulled to the live stats first.
-- **Separator change** (`|` → `·`): the `|` was visually heavy next to the new section; `·` is a typographic middle dot that reads as a separator without dominating.
-- **Turns/tools merged** (`0t·0tl` instead of `0t · 0 tools`): the verbose label was redundant; the suffix `-tl` distinguishes tools from turns.
-- **Visual hierarchy** (loom-ink tokens only — §8.1 one-theme rule, no literal color names): each field gets a token that matches its semantic weight, so the eye reads top-down:
-  - `loom` wordmark → `[$text-faint]` (brand tag, almost invisible — anchors the bar without competing with the live stats)
-  - `model` name → `[$secondary]` (cyan-ish, the "name" anchor in the bar — same token used for MCP server / subagent id in §8.3, so model reads as "another name field" not a separate category)
-  - `⎇` glyph → `[$text-faint]` (decorative, demoted below the name it precedes)
-  - `<branch>` → `[$text-muted]` (name follows glyph, slightly brighter so the value is readable)
-  - `Nt·Mtl` → default `[$text]` (live counters — the main visual weight, no decoration)
-  - `ctx:` label → `[$text-muted]` (demotes the label below the bar+number, so the eye lands on the data)
-  - `bar / percentage` → `[$success]` / `[$warning]` / `[$error]` (per §8.3 threshold contract — color change = state change, never decoration)
-  - `esc ^l / 0:00` (right side) → `[$text-faint]` (ambient hints, the live stats on the left outrank them)
+- **`model` name** → `[$secondary]` (identity anchor — same token as MCP server / subagent id in §8.3, so the model reads as "another name field" not a separate category).
+- **`⎇ <branch>`** → `[$text-muted]` (cached once at mount via `git rev-parse --abbrev-ref HEAD`, 2s timeout; absent if not a git repo or call fails. Zero per-frame cost.)
+- **`Nt·Mtl`** (turns · tools, merged) → `[$foreground]` (bright tier — the main live-stat weight). The suffix `-tl` distinguishes tools from turns.
+- **`ctx:` label** → `[$text-muted]` (demotes the label below the bar+number so the eye lands on the data).
+- **Gear-rack rail** (`❋┅┅┅┄┄┄┄┄┄┄┄┄`): see §2.2.3 primitive 1 + §2.2.2 controlled exception. The gear frame cycles `❋→✻→✜` at 1Hz while live; idle freezes at base frame `❋`. The engaged chain `┅` follows the threshold contract: `$success` < 60% → `$warning` < 85% → `$error`. Un-engaged teeth `┄` are `$text-faint`. The rail was widened from 10 to **14 cells** for the gear to occupy a stable cell (gears must not straddle two cells — verified at the terminal-rendering layer; `⚙` was rejected because its emoji-variant renders 2-wide and breaks alignment).
+- **Token numbers + percentage** → `[$foreground]` in the ok band; **danger-state coloring**: when the rail is in `$warning` or `$error`, the `<tokens>/<window> (N%)` text inherits the **same semantic color** (not just the rail). This prevents the common "rail is red but the number is gray" reading failure. The threshold contract — `$success` / `$warning` / `$error` — stays exactly as §8.3 (color = state, never decoration).
+- **Engine badge** (1-glyph, 6 states per §4.2.1): `● idle` (muted) / `◌ thinking` (warning) / `▸ streaming` (accent) / `⊙ executing` (accent) / `◌ compacting` (secondary) / `⊗ error` (error). Pure status — no tool name (decoupled from ChatLog).
+- **Session elapsed** (`M:SS` / `H:MM:SS`) → `[$text-muted]`. A `reactive[int]` bumped by `set_interval(60.0, ...)` — ticks once per minute, not per frame (§2 rule 2: the number is informational, not live state).
 
-  All tokens are sourced from `_LOOM_INK_THEME` (`loom/tui/app.py`) per §8.1. No widget hard-codes a hex value or a Rich literal color name — `loom/tui/status_bar.py` is the only StatusBar source. The 87-char empty-state width is unchanged (token spans cost 0 visible width).
+#### **Active boost** (new mechanism)
+
+When `engine_state != "idle"`, the **identity + session tier** (model, branch, turns·tools) is promoted **one tier brighter** for the duration of the active state:
+
+| Tier | idle | active |
+|---|---|---|
+| model | `$text-muted` | `$secondary` |
+| branch | `$text-faint` | `$text-muted` |
+| turns·tools | `$text` (default) | `$foreground` |
+
+Rationale: the live-stats tier visually "lights up" while work is happening, reinforcing §2 rule 2 ("motion/emphasis only when live"). On `engine_state → idle` transition the tier demotes back instantly — no fade, no tween (which §2.2.2 forbids). Implementation is a single helper that returns the active-tier token for a given (field, engine_state) pair; no extra reactives, no per-frame state.
+
+#### Removed in this revamp
+
+- **`loom` wordmark prefix** — dropped; the brand is carried by the WelcomeBanner at session start, and a redundant wordmark in the chrome is visual noise.
+- **`esc ^l` key-hint cluster** — dropped; the bindings (`ctrl+c` cancel, `ctrl+l` clear, `escape` collapse) are documented in `/help` slash output and are stable user knowledge. Re-introducing would compete with live data for the right-side real-estate.
+- **Inline `^N` phase indicator** — superseded by the gear's position on the rack (the gear itself encodes phase).
+
+**Char-count budget:** empty-state width is **`待 SP2 实测填入`** chars (was 87 pre-revamp; cutting `loom`+`esc^l` frees ~12 chars, adding the 4-cell rail widening consumes ~4 chars; net gain to spend on richer labels). SP2 must measure and backfill this placeholder in §7 and in the Appendix B changelog — do not guess.
 
 **Why this honors the long-loop aesthetic:**
-- **§5 "1-line StatusBar cap" (hard constraint):** Width is still 1 line. Compact-mode labels (`0t`, `0 tools`, `deepseek-v4-flash` without a `model:` prefix) keep the rendered length at **87 chars** in the empty state, under the §7 93-col narrow-terminal budget. Below 93, the bar right-clips per §7 (loses the ctx token count first, then the percentage) — same graceful degradation as before.
-- **§2 rule 2 (quiet by default):** Elapsed ticks once per minute, not per second. The number is informational, not live state — the eye does not track it.
+- **§5 "1-line StatusBar cap" (hard constraint):** Height stays 1 row; `#chrome` shrinks from 3 rows (tick + status + composer) to 2 (status + composer). The reclaimed row is given to chat content.
+- **§2 rule 1 (bounded re-layout):** No new widgets; the gear replaces the shuttle in the existing primitive-1 helper, and active-boost is a token lookup not a layout change.
+- **§2 rule 2 (quiet by default):** Gear-frame swap is gated by `engine_state`; idle freezes at `❋`. Active-boost is a discrete token change on state transition, not a per-frame animation.
+- **§8 (single-theme, color = state):** All StatusBar tokens flow from `_LOOM_INK_THEME`. Gear uses `$accent-light` (the lighter sage already registered for WelcomeBanner's 3D extrusion — re-using avoids adding a new theme variable). Danger-state number coloring re-uses the existing threshold tokens, never introduces a new color.
 
 ### §9.4 Header rail hairline divider
 
@@ -702,7 +743,7 @@ Together, the four additions are deliberately **palette-locked and motion-locked
 |---|---|---|---|
 | WelcomeBanner | `$accent` motif, `$text` wordmark, `$text-muted` slogan, `$text-faint` hints | none | Static; lives in ChatLog's empty state only |
 | TurnSeparator | `$border` | none | height: 1, content-column padding |
-| StatusBar enrichment | `$text-faint` (loom wordmark, ⎇ glyph, key hints, elapsed) · `$secondary` (model name) · `$text-muted` (branch name, ctx: label) · `$text` (Nt·Mtl counters) · `$success` / `$warning` / `$error` (bar+ratio per §8.3) | 1-min tick (elapsed) | height: 1 unchanged |
+| StatusBar enrichment | `$text-faint` (un-engaged teeth `┄`) · `$text-muted` (branch, ctx: label, elapsed) · `$secondary` (model name) · `$foreground` (turns·tools counters, token numbers, percentage) · `$accent-light` (gear `❋✻✜`) · `$success` / `$warning` / `$error` (engaged chain `┅` + numbers+pct at threshold per §8.3 + engine badge 6 states per §4.2.1) | 1Hz gear-frame cycle while live (idle-frozen at `❋` per §2.2.2); 1-min tick (elapsed) | height: 1 unchanged; `#chrome` shrinks 3→2 rows (ShuttleTickOverlay removed — see §7 reversal) |
 | Header hairline | `$border` | none | border-left attribute, no widget added |
 
 If a future change wants a new decoration, it must pick from this envelope (palette tokens from §8, no animation, no new indent tier, no widget that lives in a locked region without a contract update).

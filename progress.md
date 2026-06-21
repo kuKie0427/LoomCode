@@ -4736,3 +4736,37 @@ P0 (engine state) → P1a (ctx rail + shuttle) → P1b (tick-above-shuttle inlin
 - `uv run ruff check .` → All checks passed
 - `uv run mypy loom/` → Success: no issues found in 88 source files
 - `./init.sh` → **562 passed, 35 warnings, 8 snapshots** → "Verification Complete (all green)"
+
+## StatusBar revamp SP0: 契约修订 (文档 + eval) — 2026-06-21
+
+**目标**: 契约先行 — 改设计语言文档让齿轮传动 ctx 条合法化，重写 eval 锚定新契约。**不碰实现**（那是 SP1）。计划: `.sisyphus/plans/statusbar-revamp-{roadmap,p0,p1,p2}.md`（Momus 评审 APPROVE）。
+
+**改动**:
+
+- `docs/tui-design-language.md`:
+  - §2.2.2: 「Progress-bar fill animation」禁令改为受控解除 — 连续色块 `█`/`░` 矩形填充条仍禁止，但齿轮传动条（已传动链带 `┅` 染语义色）作为 scoped exception 允许；enforcement 引用从 `tui-ctx-rail-no-fill-bar` 改为 `tui-ctx-rail-gear-contract`。其余 7 条禁令保留不变。
+  - §2.2.3 primitive 1 表行: Shuttle pass → **Gear-rack advance**（3 帧 `❋✻✜`，1Hz 换帧，amplitude ±1 char，idle 冻结在 `❋` 基帧）。
+  - 「Known deviations from §4.2.1」段替换为 **§4.2.1 engine badge 契约**新小节（6 态表: idle `● $text-muted` / thinking `◌ $warning` / streaming `▸ $accent` / executing `⊙ $accent` / compacting `◌ $secondary` / error `⊗ $error`，纯状态无工具名）+ tick-above-shuttle **REMOVED** 段。
+  - §9.3 完整重写：砍 `loom` 前缀 + `esc ^l` key hints；新增 **Active-boost 机制**（idle→muted、active→提一档，三档对比表）；rail 描述从 shuttle 刻度点改齿轮传动条（14 格、加宽、字形集变化）；危险态 token 数字+百分比也染色（不只 rail）；字符数写 `待 SP2 实测填入` 占位（避免猜错）。
+  - §9.5 装饰信封表 StatusBar 行更新为齿轮传动条 token 集合 + 1Hz gear-frame cycle + `#chrome` 3→2 行。
+  - §7 新增 reversal decision「ShuttleTickOverlay removed (StatusBar revamp)」，状态 Closed (Reversal — supersedes 2026-06-20 P3 close)，理由是齿轮字形已占据 shuttle 原本指的位置，第二行的 `^` 指针成为冗余。
+- `loom/eval/cases/tui_ctx_rail.py` 整文件重写:
+  - `TuiCtxRailNoFillBar` → **`TuiCtxRailGearContract`**（禁 `█`/`░` + 要求 `❋✻✜`/`┅`/`┄` 全在）
+  - 其余 4 case 更名 `gear-helper-defined` / `gear-tick-1hz-interval` / `idle-freeze` / `gear-position-formula`（断言内容按齿轮契约调整：helper 签名 `(ratio, phase, state)`；interval 仍 1Hz 且 name 保留 `shuttle-tick`；idle guard 不变；位置公式仍 `round(ratio * (WIDTH - 1))`）
+- `loom/eval/cases/__init__.py` **未改** — `tui_ctx_rail` 已注册；case 名称通过 `EvalCase.name` 内省生效。
+- `loom/tui/status_bar.py` / `loom/tui/app.py` **未碰** — 严格遵守 SP0「不碰实现」的纪律。
+- `feature_list.json`: 追加 `f-statusbar-revamp-sp0` (in-progress→done)。
+
+**验证**:
+
+- `uv run ruff check .` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in 88 source files
+- `uv run python -m loom.cli eval` → **255/258 passed**（契约先行的预期暂红状态）:
+  - `[FAIL] tui-ctx-rail-gear-contract` — status_bar.py 还缺齿轮字形（SP1 添加）
+  - `[FAIL] tui-ctx-rail-gear-helper-defined` — `_ctx_rail_components` 签名仍是 `(ratio, shuttle_phase, state)`（SP1 改 `(ratio, phase, state)`）
+  - `[PASS]` 另 3 case（tick-1hz、idle-freeze、position-formula）— 现有 source 已满足新契约断言
+  - 1 个 pre-existing flake `cli-help-is-fast-no-agent-import`（wall-time 170ms→278ms 漂移，与 SP0 无关，stash 验证：main 上也偶发红）
+
+**契约先行的设计正确性**: 新 eval 的 2 个 FAIL 准确锚定了 SP1 任务的实现锚点（添加齿轮字形 + 改 helper 签名）。SP1 实现完这 2 个点 → 2 个 FAIL 转绿 → 258/258 → gate 过。中间状态无需手动调整 eval，契约驱动自动收敛。
+
+**下一步**:  `/handoff` → 新会话 → 加载 `statusbar-revamp-p1.md`（实现：齿轮条 helper + render 重构 + 删 ShuttleTickOverlay + 死代码清理）。
