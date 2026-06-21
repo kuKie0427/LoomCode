@@ -15,6 +15,7 @@ from typing import Any, Literal
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.events import Click
+from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import Button, Markdown, Static
 
@@ -537,14 +538,56 @@ class ToolCallMarker(Static):
     }
     """
 
+    # §2.2.3 primitive 2: running glyph cycle `⊙⊚◎` 1Hz
+    _RUNNING_GLYPHS = ("⊙", "⊚", "◎")
+
+    engine_state: reactive[str] = reactive("idle")
+    _cycle_idx: reactive[int] = reactive(0)
+
     def __init__(self, tool_name: str, args_str: str, **kwargs: Any) -> None:
-        super().__init__(f"⊙ {tool_name} · running", **kwargs)
+        super().__init__(f"{self._RUNNING_GLYPHS[0]} {tool_name} · running", **kwargs)
         self._tool_name = tool_name
         self._args_str = args_str
         self._output_str = ""
         self._is_error = False
         self._complete = False
         self._output_widget: CollapsibleToolOutput | None = None
+        self.engine_state = "idle"
+        self._cycle_idx = 0
+        self._cycle_timer: Any = None
+
+    def watch_engine_state(self, _old: str, new: str) -> None:
+        if self._complete:
+            return  # §2.2.4 freeze on complete
+        if new == "executing":
+            self._start_cycle_timer()
+        else:
+            self._stop_cycle_timer()
+            self._cycle_idx = 0
+            self._refresh_glyph()
+
+    def _start_cycle_timer(self) -> None:
+        if getattr(self, "_cycle_timer", None) is not None:
+            return
+        self._cycle_timer = self.set_interval(1.0, self._tick_cycle, name="tool-cycle")
+
+    def _stop_cycle_timer(self) -> None:
+        if getattr(self, "_cycle_timer", None) is not None:
+            self._cycle_timer.stop()
+            self._cycle_timer = None
+
+    def _tick_cycle(self) -> None:
+        if self._complete:
+            self._stop_cycle_timer()
+            return
+        self._cycle_idx = (self._cycle_idx + 1) % len(self._RUNNING_GLYPHS)
+        self._refresh_glyph()
+
+    def _refresh_glyph(self) -> None:
+        if self._complete:
+            return
+        glyph = self._RUNNING_GLYPHS[self._cycle_idx]
+        self.update(f"{glyph} {self._tool_name} · running")
 
     def on_click(self, event: Click) -> None:
         if event.chain == 2:
@@ -570,6 +613,7 @@ class ToolCallMarker(Static):
     def set_complete(self, output: str, is_error: bool) -> None:
         if self._complete:
             return
+        self._stop_cycle_timer()  # §2.2.4 freeze on complete
         self._complete = True
         self._output_str = output
         self._is_error = is_error
@@ -582,11 +626,18 @@ class ToolCallMarker(Static):
 class ChatLog(VerticalScroll):
     _sticky: bool = True
 
+    # §2.2.3 primitive 2: ChatLog receives engine_state from App, propagates to all live tool markers
+    engine_state: reactive[str] = reactive("idle")
+
     def watch_scroll_y(self, old_y: float, new_y: float) -> None:
         if new_y < old_y:
             self._sticky = False
         elif new_y > old_y and self.is_vertical_scroll_end:
             self._sticky = True
+
+    def watch_engine_state(self, _old: str, new: str) -> None:
+        for marker in self._tool_markers.values():
+            marker.engine_state = new
 
     def compose(self) -> Any:
         self._current_body: Markdown | None = None
@@ -776,6 +827,7 @@ class ChatLog(VerticalScroll):
         self._finalize_streaming()
         args_str = json.dumps(inp, ensure_ascii=False, indent=2) if inp else ""
         marker = ToolCallMarker(name, args_str)
+        marker.engine_state = self.engine_state  # §2.2.3 primitive 2: sync before mount
         output = CollapsibleToolOutput("")
         marker.set_output_widget(output)
         self._tool_markers[tool_id] = marker

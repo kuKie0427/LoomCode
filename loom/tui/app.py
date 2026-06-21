@@ -402,6 +402,14 @@ class AgentTUIApp(App):
             return True
         return False
 
+    def _sync_chat_engine_state(self, state: EngineState) -> bool:
+        """§2.2.3 primitive 2: propagate engine_state to ChatLog (and hence to live tool markers)."""
+        try:
+            self.query_one(ChatLog).engine_state = state
+            return True
+        except Exception:
+            return False
+
     def _make_tui_asker(self):
         """Build an asker that pushes PermissionScreen onto the app via the main loop.
 
@@ -679,18 +687,22 @@ class AgentTUIApp(App):
             "on_tool_use": lambda name, inp, uid: (
                 self.post_message(ToolUseStarted(name, inp, uid)),
                 self._set_engine_state("executing"),
+                self._sync_chat_engine_state("executing"),
             ),
             "on_tool_result": lambda uid, out, err: (
                 self.post_message(ToolUseCompleted(uid, out, err)),
                 self._set_engine_state("error" if err else "executing"),
+                self._sync_chat_engine_state("error" if err else "executing"),
             ),
             "on_compact": lambda before, after: (
                 self.post_message(CompactOccurred(before, after)),
                 self._set_engine_state("compacting"),
+                self._sync_chat_engine_state("compacting"),
             ),
             "on_message_end": lambda calls, turns: (
                 self.post_message(AssistantTurnEnd(calls, turns)),
                 self._set_engine_state("idle"),
+                self._sync_chat_engine_state("idle"),
             ),
             # f-tui-header-backend-wiring: cross-thread bridge for todo /
             # subagent state. Callbacks fire from the worker thread inside

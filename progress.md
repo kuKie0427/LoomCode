@@ -4457,3 +4457,77 @@ $ ./init.sh
 | `mypy loom/eval/cases/tui_ctx_rail.py` | No issues found |
 
 **P1 complete:** f-tui-paradigm-p0 (engine state) + f-tui-paradigm-p1 (ctx rail shuttle) implement §2.2.1 + §2.2.3 primitive 1 + §4.2.1 contract. Next session should `/start-work loop-tui-paradigm-p2a` for §2.2.3 primitives 2-5 (ToolCallMarker cycle, thinking spinner 5fps ✓, section button pulse, cursor blink ✓).
+
+
+## P2 — 织机范式 P2 (HeaderSectionButton pulse + ToolCallMarker cycle + §2.2.3 验收) — 2026-06-21
+
+### What was done
+
+完成 §2.2.3 织机范式 5 motion primitives 全部实现 + idle-freeze 全部守门。织机范式 (looper paradigm) 完整实现。
+
+**P2a: ToolCallMarker 1Hz glyph cycle + ChatLog reactive propagation**
+- `loom/tui/chat_log.py` — `ToolCallMarker` 增加 `_RUNNING_GLYPHS = ("⊙", "⊚", "◎")` 常量、`engine_state: reactive[str]`、`_cycle_idx: reactive[int]`、`_start_cycle_timer`/`_stop_cycle_timer`/`_tick_cycle`/`_refresh_glyph` 5 个方法。1Hz `set_interval(1.0, _tick_cycle, name="tool-cycle")`。`set_complete` 在 freeze 前先 stop cycle timer（ordering：先 stop → 再 `_complete = True`）。`ChatLog` 增加 `engine_state: reactive[str]`，`watch_engine_state` 扇出到所有 `_tool_markers.values()`。`add_tool_call_inline` 在 mount 前 sync `marker.engine_state = self.engine_state`（race-avoidance）。
+- `loom/tui/app.py` — `AgentTUIApp._sync_chat_engine_state(state: EngineState) -> bool` 包装器（mypy 要求 `-> bool` 而非 `-> None`，与 `_set_engine_state` 对称）。在 `run_agent_turn` 的 4 个 callback 中 wire：`on_tool_use` → `"executing"`, `on_tool_result` → `"error" if err else "executing"`, `on_compact` → `"compacting"`, `on_message_end` → `"idle"`。`on_text_delta`/`on_thinking_delta`/`on_message_start`/`on_assistant_message_start` 不 wire（不接触 tool markers）。
+
+**P2b: HeaderSectionButton 1Hz opacity pulse + tests + §2.2.3 motion contract 验收**
+- `loom/tui/header.py` — `HeaderSectionButton` 增加 `pulse_phase: reactive[int] = reactive(0)`、`update_pulse(has_count: bool)` 方法、`_start_pulse`/`_stop_pulse`/`_tick_pulse` 3 个 timer 方法。`Header.update_state` 在每个 button 调 `update_pulse(has_count)`（MCP count>0 / todo count>0 / subagent count>0）。
+- `tests/test_tool_cycle.py` — 6 个新测试：default_idle、executing_cycle、complete_freezes、complete_error_freezes、state_change_stops、chatlog_propagates。
+- `tests/test_header_pulse.py` — 4 个新测试：class_when_positive、no_class_when_zero、python_timer_1hz、toggle_on_state_change。
+- `tests/test_chat_log_engine_state.py` — 3 个新测试：default_idle、propagates_to_new_marker、propagates_to_existing_markers。
+- `loom/eval/cases/tui_motion_primitives.py` — 6 个新 eval cases（tui-tool-marker-cycle-*、tui-header-section-button-pulse-*、tui-chatlog-engine-state-reactive-propagation）。
+- `loom/eval/cases/__init__.py` — 注册 `tui_motion_primitives` 模块。
+- `docs/tui-design-language.md` — 新增 §2.2 Motion primitives contract 子章节（5 primitive 表格 + idle-freeze invariant + forbidden motion 清单 + why this matters）。Appendix B 追加 2026-06-21 P2 changelog bullet。
+
+### DEVIATION (accepted)
+
+**Plan specified CSS `animation: pulse 1s steps(2, end) infinite` + `@keyframes pulse` for primitive 4 (HeaderSectionButton pulse).**
+
+**Actual implementation: Python `set_interval(0.5, _tick_pulse, name="header-pulse")` that toggles `self.styles.opacity` between 1.0 and 0.5.**
+
+**Reason:** Textual CSS parser (v8.2.7) does NOT support `@keyframes` (TokenError on `@`) or `animation: ... steps(...) ...` (TokenError on `(`). Empirically verified with `loom` in REPL. Same pattern as P2a's `ToolCallMarker._cycle_timer` — codebase convention for 1Hz periodic animation.
+
+**Behavioral equivalence:** 0.5s interval toggling opacity 1.0↔0.5 produces 1Hz square wave at 50% amplitude, identical to `steps(2, end)` CSS. `pulsing` class still gates animation (add→start, remove→stop). Idle-freeze invariant preserved.
+
+**Impact on tests/eval:** Task 3 test #3 renamed from `test_section_button_pulse_css_animation_1hz` to `test_section_button_pulse_python_timer_1hz`; check `set_interval(0.5` + `name="header-pulse"` + assert NO `@keyframes`/`animation:` in source (regression guard). Task 5 eval #4 renamed from `tui-header-section-button-pulse-css-defined` to `tui-header-section-button-pulse-timer-defined`; same check.
+
+### Verification
+
+| Layer | Result |
+|---|---|
+| `uv run ruff check loom/tui/header.py loom/tui/chat_log.py loom/tui/app.py` | clean |
+| `uv run mypy loom/tui/header.py loom/tui/chat_log.py loom/tui/app.py` | clean |
+| `uv run pytest tests/test_tool_cycle.py tests/test_header_pulse.py tests/test_chat_log_engine_state.py -v` | **13/13 passed** |
+| `./init.sh` | **504 passed** (was 491 = +13), 9 snapshots, all green |
+| `uv run python -m loom.cli eval --fail-under 100` | **249/249** (was 243/243 = +6 new motion_primitives cases) |
+
+### Files changed (final stat)
+
+```
+docs/tui-design-language.md           | +44 -1   (Appendix B + §2.2 sub-section)
+feature_list.json                     | +11 -0   (status=done + evidence)
+loom/eval/cases/__init__.py           |  +1 -0   (register tui_motion_primitives)
+loom/eval/cases/tui_motion_primitives.py | +232 -0 (new — 6 eval cases)
+loom/tui/app.py                       | +12 -0   (_sync_chat_engine_state + 4 callback wires)
+loom/tui/chat_log.py                  | +53 -1   (ToolCallMarker cycle + ChatLog reactive)
+loom/tui/header.py                    | +58 -0   (HeaderSectionButton pulse + Header.update_state wire)
+tests/test_chat_log_engine_state.py   |  +73 -0  (new — 3 tests)
+tests/test_header_pulse.py            | +134 -0  (new — 4 tests)
+tests/test_tool_cycle.py              | +130 -0  (new — 6 tests)
+```
+
+### Gate (P2 整体完成)
+
+- [x] `feature_list.json` 中 `f-tui-paradigm-p2` = `done` + evidence（刚更新）
+- [x] `uv run python -m loom.cli eval --fail-under 100` → 249/249 passed（+6 新 motion_primitives cases）
+- [x] `uv run pytest tests/test_tool_cycle.py tests/test_header_pulse.py tests/test_chat_log_engine_state.py -v` → 13/13 passed
+- [x] `./init.sh` 全绿（504 passed）
+- [x] `git diff --stat` 仅显示 P2a + P2b 列出文件
+- [x] §2.2.3 5 primitive 全部实现 + §2.2.2 idle freeze 全部守门
+- [x] `docs/tui-design-language.md` Appendix B 已追加实现 changelog
+- [x] `progress.md` 已追加 P2 段（就是本段）
+
+### 织机范式 (looper paradigm) 完整实现
+
+P0 (engine state transitions) → P1a (ctx rail + shuttle) → P1b (tick-above-shuttle inline) → P2a (ToolCallMarker cycle) → P2b (HeaderSectionButton pulse + §2.2.3 验收)
+
+**Next:** P3 独立 follow-up（tick-above-shuttle 严格实现 §4.2.1 two-row visual），triggered by user dissatisfaction with inline `^N` indicator。

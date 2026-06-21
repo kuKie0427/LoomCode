@@ -40,6 +40,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.events import Click
 from textual.message import Message
+from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static
 
@@ -266,6 +267,8 @@ class HeaderSectionButton(Static):
 
     can_focus = True
 
+    pulse_phase: reactive[int] = reactive(0)
+
     DEFAULT_CSS = """
     HeaderSectionButton {
         width: 1fr;
@@ -288,12 +291,22 @@ class HeaderSectionButton(Static):
         visibility: hidden;
         border-left: none;
     }
+    HeaderSectionButton {
+        /* §2.2.3 primitive 4 baseline: opacity 1.0 (pulse overrides via Python) */
+        opacity: 1.0;
+    }
+    HeaderSectionButton.pulsing {
+        /* Marker class for pulse state (animation is Python set_interval) */
+        opacity: 1.0;
+    }
     """
 
     def __init__(self, section: str, **kwargs: Any) -> None:
         super().__init__("", **kwargs)
         self._section: str = section
         self._state: HeaderState | None = None
+        self.pulse_phase = 0
+        self._pulse_timer: Any | None = None
 
     @property
     def section(self) -> str:
@@ -357,6 +370,41 @@ class HeaderSectionButton(Static):
         if self.has_class("section-hidden"):
             return
         self.post_message(Header.SectionToggle(self._section))
+
+    def update_pulse(self, has_count: bool) -> None:
+        """§2.2.3 primitive 4: toggle 1Hz pulse based on section count.
+
+        ``has_count=True`` activates the pulse (50% amplitude, 1Hz square
+        wave via Python ``set_interval``). ``has_count=False`` freezes
+        opacity at 1.0 (idle-freeze invariant §2.2.4 — no motion when idle).
+        """
+        if has_count:
+            self.add_class("pulsing")
+            self._start_pulse()
+        else:
+            self.remove_class("pulsing")
+            self._stop_pulse()
+
+    def _start_pulse(self) -> None:
+        """Start the 1Hz opacity pulse (50% amplitude)."""
+        if self._pulse_timer is not None:
+            return
+        self._pulse_timer = self.set_interval(0.5, self._tick_pulse, name="header-pulse")
+
+    def _stop_pulse(self) -> None:
+        """Stop the pulse and freeze opacity at 1.0 (idle-freeze invariant)."""
+        if self._pulse_timer is not None:
+            self._pulse_timer.stop()
+            self._pulse_timer = None
+        self.styles.opacity = 1.0
+
+    def _tick_pulse(self) -> None:
+        """Toggle opacity between 1.0 and 0.5 (1Hz square wave)."""
+        if not self.has_class("pulsing"):
+            self._stop_pulse()
+            return
+        self.pulse_phase += 1
+        self.styles.opacity = 0.5 if self.styles.opacity >= 1.0 else 1.0
 
 
 class Header(Horizontal):
@@ -436,6 +484,16 @@ class Header(Horizontal):
             try:
                 btn = self.query_one(f"#header-btn-{section}", HeaderSectionButton)
                 btn.update_state(state)
+                # §2.2.3 primitive 4: pulse when section has active items
+                if section == SECTION_MCP:
+                    has_count = mcp_glyph(state.mcps)[2] > 0
+                elif section == SECTION_TODO:
+                    has_count = todo_glyph(state.todos)[2] > 0
+                elif section == SECTION_SUBAGENT:
+                    has_count = subagent_glyph(state.subagents)[1] > 0
+                else:
+                    has_count = False
+                btn.update_pulse(has_count)
             except Exception:
                 # Buttons not yet mounted (during __init__) — skip.
                 pass
