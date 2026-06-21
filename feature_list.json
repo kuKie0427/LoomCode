@@ -914,6 +914,14 @@
       "dependencies": [],
       "status": "done",
       "evidence": "uv run pytest tests/test_cost_telemetry.py -v -> 13/13 passed. uv run python -m loom.cli eval --filter cost-telemetry --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 687 passed (was 674, +13). uv run ruff + mypy -> 0 issues in 103 source files. loom/agent/cost.py (NEW): TokenUsage dataclass (input/output/cache_read/cache_creation), CostBreakdown (4 cost components + total), compute_cost(model, usage) with per-model pricing tables for claude-opus-4-1, claude-sonnet-4-5, claude-haiku-3-5, deepseek-v4-flash, deepseek-v4-pro. Anthropic's cache-aware pricing: cache_read 10% of input, cache_write 125% of input. SessionCostAccumulator maintains running total. Global record_turn() lazily creates the accumulator; reset_session_cost() clears it. loom/agent/loop.py: llm_response trace event now includes cost_usd + cache_read + cache_creation; session_end and loop_limit_reached events include total_usd, total_input_tokens, total_output_tokens, total_cache_read_tokens, total_cache_creation_tokens. reset_session_cost() called at session_start."
+    },
+    {
+      "id": "f-conversation-export-p2",
+      "name": "Phase 2: Conversation export (markdown + json + /export slash)",
+      "description": "Add /export slash command + loom export CLI subcommand. Markdown: human-readable with role headers, thinking collapsed, tool calls, cost footer. JSON: lossless round-trip. --redact flag strips API keys/emails before sharing.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "uv run pytest tests/test_conversation_export.py -v -> 19/19 passed. uv run python -m loom.cli eval --filter conversation-export --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 706 passed (was 687, +19). uv run ruff + mypy -> 0 issues in 105 source files. loom/agent/export.py (NEW): ExportMetadata dataclass; to_markdown(messages, meta) renders role headers, thinking blocks collapsed in <details>, tool calls as JSON, tool results truncated at 500 chars, cost summary footer. to_json(messages, meta) produces lossless JSON with metadata. redact_pii() strips sk-xxx API keys, ANTHROPIC_API_KEY=xxx env vars, and email addresses. write_export() creates parent dirs. loom/cli.py: new `loom export --output PATH --format {md,json} --redact` subcommand reads the latest checkpoint and writes the transcript."
     }
   ]
 }

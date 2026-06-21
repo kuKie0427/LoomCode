@@ -83,6 +83,12 @@ def _build_parser() -> argparse.ArgumentParser:
     eval_p.add_argument("--filter", dest="case_filter", default=None, help="Substring match against case name/description (case-insensitive). Runs only matching cases — for fast dev cycles.")
     eval_p.add_argument("--kind", choices=["harness", "agent-quality"], default=None, help="Run only one kind of eval. 'harness' = infrastructure mechanics (default mix), 'agent-quality' = end-to-end agent behavior (real LLM calls).")
 
+    export_p = sub.add_parser("export", help="Export the latest checkpoint session transcript")
+    export_p.add_argument("--workdir", type=Path, default=Path("."), help="Project workdir")
+    export_p.add_argument("--output", "-o", type=Path, required=True, help="Output file path")
+    export_p.add_argument("--format", choices=["markdown", "json"], default="markdown", help="Output format (default: markdown)")
+    export_p.add_argument("--redact", action="store_true", help="Replace API keys and emails with [REDACTED]")
+
     return parser
 
 
@@ -177,6 +183,33 @@ def main(argv: list[str] | None = None) -> int:
             return int(exc.code) if exc.code is not None else 1
         if score < args.fail_under:
             return 1
+        return 0
+
+    if args.command == "export":
+        from loom.agent.checkpoint import exists, load
+        from loom.agent.cost import get_session_cost
+        from loom.agent.export import ExportMetadata, to_json, to_markdown, write_export
+        workdir = args.workdir.resolve()
+        if not exists(workdir):
+            print(f"Error: no checkpoint found at {workdir}. Run `loom run` first to create one.", file=__import__("sys").stderr)
+            return 1
+        ckpt = load(workdir) or {}
+        messages = ckpt.get("messages", [])
+        meta = ExportMetadata(
+            model=ckpt.get("model", "?"),
+            session_id=ckpt.get("saved_at", "?"),
+            workdir=str(workdir),
+            tool_call_count=ckpt.get("tool_call_count", 0),
+            started_at=ckpt.get("saved_at", "?"),
+            ended_at=ckpt.get("saved_at", "?"),
+            session_cost=get_session_cost(),
+        )
+        if args.format == "json":
+            content = to_json(messages, meta)
+        else:
+            content = to_markdown(messages, meta)
+        path = write_export(content, args.output, redact=args.redact)
+        print(f"Exported {len(messages)} messages to {path}")
         return 0
 
     parser.print_help()
