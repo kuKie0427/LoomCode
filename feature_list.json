@@ -708,8 +708,9 @@
       "name": "TUI 织机范式 P0: Engine state machine + StatusBar engine badge",
       "description": "实现 §2.2.1 6 态 engine state (idle/thinking/streaming/executing/compacting/error) + §4.2.1 StatusBar engine badge ([▸ run]/[● idle]/[⊗ error])。P0a: EngineState type + StatusBar reactive + 渲染层。P0b: App reactive + 6 transition + tests。",
       "dependencies": [],
-      "status": "active",
-      "verification": "uv run python -m loom.cli eval --fail-under 100 && uv run pytest tests/test_engine_state.py tests/test_status_bar.py -v && ./init.sh"
+      "status": "done",
+      "verification": "uv run python -m loom.cli eval --fail-under 100 && uv run pytest tests/test_engine_state.py tests/test_status_bar.py -v && ./init.sh",
+      "evidence": "P0a: 463 pytest + 234/234 eval (commit 702b6b4). P0b: 478 pytest (38 in test_engine_state.py + test_status_bar.py) + 238/238 eval cases (was 234, +4 new tui-engine-state cases) + 9 snapshots pass. All ruff/mypy clean. App.engine_state reactive + 6 transitions wired in run_agent_turn callbacks."
     }
   ]
 }

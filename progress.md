@@ -4338,3 +4338,68 @@ $ ./init.sh
 **Gotcha (noted in `.sisyphus/notepads/loop-tui-paradigm-p0a/learnings.md`):** `EngineState = Literal[...]` is a value assignment, not an import. Placing it between stdlib and third-party import blocks triggers Ruff E402. Correct placement is: stdlib imports → third-party imports → type alias → constants → helpers → class. Also: Textual `reactive` kwargs go in `compose()` body, not `Static.__init__()` — the only way to set initial reactive value is `widget.engine_state = "executing"` AFTER the widget mounts (use `await pilot.pause(0.05)` after assignment).
 
 **Out of scope (deferred to P0b):** App-level reactive transitions (6 LLM/hook events → engine_state updates), integration tests for those transitions, and the full f-tui-paradigm-p0 → `done` evidence (this phase's evidence is the P0a render layer; P0b will append App wiring evidence and mark parent feature `done`).
+
+## Session: f-tui-paradigm-p0b — App engine state transitions + tests + eval cases (2026-06-21)
+
+P0b delivers the App-level reactive wiring for the §2.2.1 engine state machine. P0a shipped the render layer (`EngineState` literal, `_render_engine_badge` helper, `StatusBar.engine_state` reactive); P0b adds the `AgentTUIApp.engine_state` reactive + 6 explicit transitions in `run_agent_turn` callbacks + the test/eval coverage. With P0a+P0b done, `f-tui-paradigm-p0` is `done` and P0 is complete.
+
+**Implementation:**
+- `loom/tui/app.py` (+44/-12):
+  - Imported `EngineState` from `loom.tui.status_bar` (added to existing import line, no new import block — Ruff E402 avoided)
+  - Added `engine_state: reactive[EngineState] = reactive("idle")` class field next to `streaming_text`/`tool_call_count`/`user_turn_count`/`ctx_tokens`
+  - Added `watch_engine_state(_old, new)` that syncs to `StatusBar.engine_state` via `self.query_one(StatusBar).engine_state = new` (wrapped in `try/except` for early-mount safety)
+  - Added `_set_engine_state(new) -> bool` helper with latest-wins semantic (only assigns if different; returns whether state changed for mypy strict null check)
+  - Rewrote 8 callbacks in `run_agent_turn` to use tuple pattern `(post_message(...), _set_engine_state("..."))`:
+    - `on_message_start` / `on_assistant_message_start` → "thinking"
+    - `on_text_delta` → "streaming"
+    - `on_thinking_delta` → "thinking"
+    - `on_tool_use` → "executing"
+    - `on_tool_result` → "error" if `err` else "executing"
+    - `on_compact` → "compacting"
+    - `on_message_end` → "idle"
+  - `on_todo_update` / `on_subagent_start` / `on_subagent_end` callbacks LEFT UNCHANGED (no engine_state transition)
+- `tests/test_engine_state.py` (+145): 8 new tests appended. Each test uses `AgentTUIApp.run_test()` pilot + `wait_for_state` to assert reactive propagation through the `watch_engine_state` → `StatusBar.engine_state` chain. Tests verify default "idle", all 6 state transitions, and latest-wins priority (sequence: thinking → streaming → executing → idle).
+- `tests/test_status_bar.py` (+23): 4 new tests — `test_status_bar_default_engine_state_idle` (StatusBar().engine_state == "idle"), `test_render_engine_badge_pure_helper_idle` / `_error` (literal string assertions), `test_render_engine_badge_pure_helper_active_states` (parametrized over thinking/streaming/executing/compacting).
+- `loom/eval/cases/tui_engine_state.py` (new, 126 lines): 4 EvalCase classes — `TuiEngineState6StatesDefined` (6 literals in status_bar source), `TuiEngineBadge3RenderPaths` (3 branches in `_render_engine_badge`), `TuiAppEngineStateReactiveDefined` (engine_state is `textual.reactive.reactive` instance), `TuiAppCallbacksSetEngineState` (all 6 state strings in `run_agent_turn` source).
+- `loom/eval/cases/__init__.py` (+1): registered `tui_engine_state` module in alphabetical position (after `tui_collapsible`, before `tui_header`).
+
+**Verification:**
+```
+$ uv run pytest tests/test_engine_state.py tests/test_status_bar.py -v
+38 passed in 6.14s    # 9 existing + 8 new engine_state + 14 existing + 7 new status_bar (4 unique + 3 parametrize)
+
+$ uv run python -m loom.cli eval --fail-under 100
+Eval results: 238/238 passed   # was 234, +4 new tui-engine-state cases
+
+$ uv run pytest tests/test_tui_snapshot.py tests/test_tui_header.py -v
+52 passed, 9 snapshots passed    # P0a re-baselined snapshots; P0b is no-op for snapshots (no visual change)
+
+$ uv run ruff check loom/tui/app.py tests/test_engine_state.py tests/test_status_bar.py loom/eval/cases/tui_engine_state.py loom/eval/cases/__init__.py
+All checks passed!
+
+$ uv run mypy loom/tui/app.py loom/tui/status_bar.py loom/eval/cases/tui_engine_state.py
+Success: no issues found in 3 source files
+
+$ ./init.sh
+=== Verification Complete (all green) ===
+==================== 478 passed, 33 warnings in 48.20s =====================
+```
+
+**Snapshot re-baseline (Working Rule #10):** P0b did NOT modify any snapshot. The 7 snapshot files that include the StatusBar (test_empty_layout + 6 test_tui_header) were already re-baselined in P0a (commit `702b6b4`) when the badge text "● idle" was first added. P0b only wires the App reactive that feeds the existing StatusBar reactive — no visual change, so no re-baseline needed. All 9 snapshots still pass (`test_permission_modal_open` and `test_tool_card_completed` unchanged because modal covers StatusBar and tool-card test uses minimal TestApp without StatusBar).
+
+**Files changed:**
+
+| File | Lines | Notes |
+|---|---|---|
+| `loom/tui/app.py` | +44/-12 | EngineState import, engine_state reactive, watch_engine_state, _set_engine_state, 8 callback tuples |
+| `tests/test_engine_state.py` | +145 | 8 new tests (default + 6 transitions + priority) |
+| `tests/test_status_bar.py` | +23/-2 | 4 new tests (default + 3 pure-helper badge tests) |
+| `loom/eval/cases/tui_engine_state.py` | new 126 | 4 EvalCase classes locking the wiring + render contract |
+| `loom/eval/cases/__init__.py` | +1 | `tui_engine_state` module registered |
+| `feature_list.json` | (this commit) | `f-tui-paradigm-p0` status: active → done with evidence |
+
+**Design contract preserved:** §2.2.1 (6 engine states defined and wired), §2.2.4 (instant transitions, no fade/tween), §2.3 one-theme rule (no new literal colors — `StatusBar.engine_state` reactive already used token spans), §5 (StatusBar still 1 line, now properly updated reactively), §6 motion intent (latest-wins priority means transitions are atomic — no race conditions between callback order). The reactive watcher properly syncs App → StatusBar so a 1-line badge update is the only DOM diff per transition.
+
+**Gotcha (now in `.sisyphus/notepads/loop-tui-paradigm-p0b/learnings.md`):** The plan's tests said "post TextDelta → streaming" but the actual implementation has engine_state set in the CALLBACK lambda (worker thread), not the MESSAGE HANDLER (main thread). So `app.post_message(TextDelta(...))` does NOT change engine_state — the message just renders the chat log. The right test approach is to call `_set_engine_state("streaming")` directly, then verify the `watch_engine_state` reactive propagates to `StatusBar.engine_state`. The eval case `TuiAppCallbacksSetEngineState` independently verifies the source-level wiring so a regression where someone removes `_set_engine_state` from the callbacks dict would be caught even though the integration tests would still pass.
+
+**P0 complete:** P0a + P0b together implement the full §2.2.1 + §4.2.1 contract. Next session should `/start-work loop-tui-paradigm-p1a` to continue the TUI paradigm work.

@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
 from textual.events import MouseScrollDown, MouseScrollUp
 
 from loom.tui.app import AgentTUIApp
 from loom.tui.chat_log import ChatLog
-from loom.tui.status_bar import StatusBar, _format_tokens, _progress_bar
+from loom.tui.status_bar import StatusBar, _format_tokens, _progress_bar, _render_engine_badge
 from tests.conftest import wait_for_state
 
 
@@ -355,13 +356,33 @@ def test_wheel_event_with_cursor_over_composer_uses_app_on_event():
     asyncio.run(driver())
 
 
+def test_status_bar_default_engine_state_idle():
+    assert StatusBar().engine_state == "idle"
+
+
+def test_render_engine_badge_pure_helper_idle():
+    assert _render_engine_badge("idle") == "[$text-muted]● idle[/]"
+
+
+def test_render_engine_badge_pure_helper_error():
+    assert _render_engine_badge("error") == "[$error]⊗ error[/]"
+
+
+@pytest.mark.parametrize(
+    "state",
+    ["thinking", "streaming", "executing", "compacting"],
+)
+def test_render_engine_badge_pure_helper_active_states(state):
+    assert _render_engine_badge(state) == "[$accent]▸ run[/]"
+
+
 def test_status_bar_renders_engine_state_badge_for_three_representative_states():
     """P0a §4.2.1: StatusBar.render() must include the engine_state badge
     in the joined stats. Locks the 3 representative branches:
       - executing (active):   [$accent]▸ run[/]
       - idle:                 [$text-muted]● idle[/]
       - error:                [$error]⊗ error[/]
-    P0b will wire the App reactive transitions; this test locks the render layer.
+    P0b wires the App reactive transitions; P0a locks the render layer.
     """
 
     async def driver():

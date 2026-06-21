@@ -42,7 +42,7 @@ from loom.tui.messages import (
     ToolUseCompleted,
     ToolUseStarted,
 )
-from loom.tui.status_bar import StatusBar
+from loom.tui.status_bar import EngineState, StatusBar
 
 # Mapping from agent_loop's todo status (string) to the TUI Header's
 # TodoItem.state (Literal["pending", "active", "done"]). The agent uses
@@ -164,6 +164,7 @@ class AgentTUIApp(App):
     tool_call_count: reactive[int] = reactive(0)
     user_turn_count: reactive[int] = reactive(0)
     ctx_tokens: reactive[int] = reactive(0)
+    engine_state: reactive[EngineState] = reactive("idle")
 
     BINDINGS = [
         ("ctrl+c", "cancel_stream", "Cancel"),
@@ -367,6 +368,19 @@ class AgentTUIApp(App):
 
     def watch_ctx_tokens(self, _old: int, _new: int) -> None:
         self._sync_status_bar()
+
+    def watch_engine_state(self, _old: EngineState, new: EngineState) -> None:
+        try:
+            self.query_one(StatusBar).engine_state = new
+        except Exception:
+            pass
+
+    def _set_engine_state(self, new: EngineState) -> bool:
+        """§2.2.1 transitions are instant — no fade, no tween. Returns True if state changed."""
+        if self.engine_state != new:
+            self.engine_state = new
+            return True
+        return False
 
     def _make_tui_asker(self):
         """Build an asker that pushes PermissionScreen onto the app via the main loop.
@@ -626,19 +640,37 @@ class AgentTUIApp(App):
         await chat_log.append_user_message(user_msg)
 
         callbacks = {
-            "on_message_start": lambda: self.post_message(AssistantTurnStart()),
-            "on_assistant_message_start": lambda: self.post_message(
-                AssistantTurnStart()
+            "on_message_start": lambda: (
+                self.post_message(AssistantTurnStart()),
+                self._set_engine_state("thinking"),
             ),
-            "on_text_delta": lambda chunk: self.post_message(TextDelta(chunk)),
-            "on_thinking_delta": lambda chunk: self.post_message(ThinkingDelta(chunk)),
-            "on_tool_use": lambda name, inp, uid: self.post_message(ToolUseStarted(name, inp, uid)),
-            "on_tool_result": lambda uid, out, err: self.post_message(
-                ToolUseCompleted(uid, out, err)
+            "on_assistant_message_start": lambda: (
+                self.post_message(AssistantTurnStart()),
+                self._set_engine_state("thinking"),
             ),
-            "on_compact": lambda before, after: self.post_message(CompactOccurred(before, after)),
-            "on_message_end": lambda calls, turns: self.post_message(
-                AssistantTurnEnd(calls, turns)
+            "on_text_delta": lambda chunk: (
+                self.post_message(TextDelta(chunk)),
+                self._set_engine_state("streaming"),
+            ),
+            "on_thinking_delta": lambda chunk: (
+                self.post_message(ThinkingDelta(chunk)),
+                self._set_engine_state("thinking"),
+            ),
+            "on_tool_use": lambda name, inp, uid: (
+                self.post_message(ToolUseStarted(name, inp, uid)),
+                self._set_engine_state("executing"),
+            ),
+            "on_tool_result": lambda uid, out, err: (
+                self.post_message(ToolUseCompleted(uid, out, err)),
+                self._set_engine_state("error" if err else "executing"),
+            ),
+            "on_compact": lambda before, after: (
+                self.post_message(CompactOccurred(before, after)),
+                self._set_engine_state("compacting"),
+            ),
+            "on_message_end": lambda calls, turns: (
+                self.post_message(AssistantTurnEnd(calls, turns)),
+                self._set_engine_state("idle"),
             ),
             # f-tui-header-backend-wiring: cross-thread bridge for todo /
             # subagent state. Callbacks fire from the worker thread inside
