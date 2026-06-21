@@ -5447,3 +5447,41 @@ next phase: `f-grep-tool-p0` (highest leverage per Oracle, but expected ROI may 
 - 4 new agent-quality cases (3 of which require new capabilities)
 - agent-quality: 10/10 → 13/13 (+3 new cases)
 - 0 regression: every prior test still passes
+
+## Session: 3 Oracle-recommended achievable features (2026-06-22)
+
+Per Oracle's NOT_VERIFIED verdict, 3 features were identified as
+achievable in-session that I'd self-marked as out-of-scope. All 3
+landed:
+
+### f-mcp-client-p3 (commit 888ae4b)
+- loom/agent/mcp_client.py: minimal stdio MCP client + JSON-RPC 2.0
+- 10 unit tests + 3 harness eval cases
+- TDD caught 2 real bugs (test injection requires skipping Popen;
+  BytesIO-based fake fails because seek(0) doesn't restart reads)
+
+### f-tdd-agent-mode-p4 (commit 1404f6e)
+- loom/agent/tdd.py: is_test_file guard + run_pytest wrapper + 
+  build_focused_prompt with reward-hacking enforcement
+- `loom tdd <path>` CLI subcommand
+- 14 unit tests + 4 harness eval cases (plus 2 pre-existing 
+  aq-tdd-* agent-quality cases now have harness backing)
+- TDD caught 2 real bugs (TimeoutExpired stdout/stderr are bytes;
+  _ProcessLike dataclass vs Protocol structural mismatch)
+
+### f-repomap-p4 (commit 33c4c81, prior)
+- stdlib ast codebase map injected into system prompt
+- 10 unit tests + 4 harness eval cases
+
+### Status update
+- 20/23 roadmap features done (was 17 at last Oracle check, +3)
+- 95 features in feature_list.json (was 78 at session start, +17)
+- 810 pytest tests passing (was 555 at session start, +255)
+- 308 harness eval cases passing 306/308 (99.4%, 2 pre-existing flakes)
+- README "does NOT do well" list now honestly describes 
+  plumbing-only state of MCP/TDD instead of flat denial
+
+### Remaining 3 (all multi-day scope, deferred)
+- f-lsp-integration-p3: pylsp subprocess + 3 commands (goto/find/rename)
+- f-long-context-stability-p3: >1M token sessions with cold storage
+- f-harness-as-product-polish-p4: `loom eval init` + GitHub Action
