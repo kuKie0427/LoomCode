@@ -8,6 +8,7 @@ invariant ($text-muted), and App→TickOverlay reactive propagation.
 from __future__ import annotations
 
 import asyncio
+import re
 
 from loom.tui.app import AgentTUIApp
 from loom.tui.status_bar import ShuttleTickOverlay, StatusBar
@@ -49,7 +50,12 @@ def test_shuttle_tick_overlay_renders_caret_in_idle():
 
 
 def test_shuttle_tick_overlay_prefix_matches_status_bar():
-    """§4.2.1 char-level alignment: prefix (up to/including ctx:) is identical."""
+    """§4.2.1 char-level alignment: TickOverlay prefix contains the same plain
+    text as StatusBar prefix (loom · model · ⎇ branch · Nt·Mtl · ctx:) but
+    rendered as a single $text-faint span instead of the full §9.3 hierarchy.
+
+    The ^ caret must land at the same visual column as the ● shuttle.
+    """
 
     async def driver():
         app = AgentTUIApp()
@@ -61,19 +67,35 @@ def test_shuttle_tick_overlay_prefix_matches_status_bar():
             tick_text = tick.render()
             sb_text = status_bar.render()
 
-            # Find ctx: in both renders
-            ctx_idx_tick = tick_text.find("ctx:")
-            ctx_idx_sb = sb_text.find("ctx:")
-            assert ctx_idx_tick >= 0, f"ctx: missing in TickOverlay: {tick_text!r}"
-            assert ctx_idx_sb >= 0, f"ctx: missing in StatusBar: {sb_text!r}"
+            # Strip Rich markup tags from both renders to compare plain text
+            def strip_tags(s: str) -> str:
+                return re.sub(r"\[\$[^\]]+\]|\[/\]", "", s)
 
-            # Everything up to and including "ctx:" should be identical
-            tick_prefix = tick_text[: ctx_idx_tick + 4]
-            sb_prefix = sb_text[: ctx_idx_sb + 4]
+            tick_plain = strip_tags(tick_text)
+            sb_plain = strip_tags(sb_text)
+
+            # Find ctx: in both renders
+            ctx_idx_tick = tick_plain.find("ctx:")
+            ctx_idx_sb = sb_plain.find("ctx:")
+            assert ctx_idx_tick >= 0, f"ctx: missing in TickOverlay: {tick_plain!r}"
+            assert ctx_idx_sb >= 0, f"ctx: missing in StatusBar: {sb_plain!r}"
+
+            # Plain text up to and including "ctx:" must be identical
+            tick_prefix = tick_plain[: ctx_idx_tick + 4]
+            sb_prefix = sb_plain[: ctx_idx_sb + 4]
             assert tick_prefix == sb_prefix, (
-                f"Prefix mismatch up to ctx:\n"
+                f"Plain-text prefix mismatch up to ctx:\n"
                 f"  TickOverlay: {tick_prefix!r}\n"
                 f"  StatusBar:   {sb_prefix!r}"
+            )
+
+            # TickOverlay prefix must use single $text-faint span (ambient row)
+            assert "[$text-faint]loom" in tick_text, (
+                f"TickOverlay prefix must use single $text-faint span; got: {tick_text!r}"
+            )
+            # StatusBar prefix must NOT use single $text-faint wrap (preserves hierarchy)
+            assert "[$text-faint]loom · " not in sb_text, (
+                f"StatusBar prefix must NOT collapse to single $text-faint span (would lose §9.3 hierarchy); got: {sb_text!r}"
             )
 
     asyncio.run(driver())

@@ -71,30 +71,48 @@ def _build_ctx_line_components(
     ctx_window: int,
     engine_state: EngineState,
     shuttle_phase: int,
+    *,
+    quiet_prefix: bool = False,
 ) -> tuple[str, str, str]:
     """Shared prefix + rail + tick builder. Used by both StatusBar and ShuttleTickOverlay.
-
+    
     Returns: (prefix_str, rail_str, tick_str)
       - prefix_str: ' loom · model · ⎇ branch · 0t·0tl · ctx: '
       - rail_str:  '[$success|warning|error]─...●─...[/]'
       - tick_str:  '[$text-muted]─...─^─...─[/]' (single ^ at shuttle position, rest blank)
+    
+    quiet_prefix=True: render prefix with all $text-faint tokens (used by
+    ShuttleTickOverlay so the ^ caret is the only visually prominent element
+    on the row — the duplicate prefix becomes "ambient noise" matching the
+    §9.3 dim tier rather than re-rendering the full §9.3 hierarchy).
     """
     model = getattr(getattr(app, "llm", None), "model", "?")
-
-    prefix_parts = [
-        "[$text-faint]loom[/]",
-        f"[$secondary]{model}[/]",
-    ]
     git_branch = getattr(app, "_git_branch", "") or ""
-    if git_branch:
-        prefix_parts.append(
-            f"[$text-faint]⎇[/] [$text-muted]{git_branch}[/]"
-        )
     turns = getattr(app, "user_turn_count", 0)
     tools = getattr(app, "tool_call_count", 0)
-    prefix_parts.append(f"{turns}t·{tools}tl")
 
-    prefix = f" {_SEP} ".join(prefix_parts) + " [$text-muted]ctx:[/] "
+    if quiet_prefix:
+        prefix_parts = [
+            "loom",
+            model,
+        ]
+        if git_branch:
+            prefix_parts.append(f"⎇ {git_branch}")
+        prefix_parts.append(f"{turns}t·{tools}tl")
+        joined = " · ".join(prefix_parts)
+        prefix = f"[$text-faint]{joined} ctx:[/] "
+    else:
+        # StatusBar row: full §9.3 hierarchy
+        prefix_parts = [
+            "[$text-faint]loom[/]",
+            f"[$secondary]{model}[/]",
+        ]
+        if git_branch:
+            prefix_parts.append(
+                f"[$text-faint]⎇[/] [$text-muted]{git_branch}[/]"
+            )
+        prefix_parts.append(f"{turns}t·{tools}tl")
+        prefix = f" {_SEP} ".join(prefix_parts) + " [$text-muted]ctx:[/] "
 
     ctx_window = ctx_window or 1
     ratio = ctx_tokens / ctx_window if ctx_window > 0 else 0.0
@@ -185,5 +203,6 @@ class ShuttleTickOverlay(Static):
             return ""
         prefix, _rail, tick_str = _build_ctx_line_components(
             app, self.ctx_tokens, self.ctx_window, self.engine_state, self.shuttle_phase,
+            quiet_prefix=True,
         )
         return prefix + tick_str

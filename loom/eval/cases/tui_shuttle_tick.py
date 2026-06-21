@@ -120,7 +120,7 @@ class TuiShuttleTickOverlayHelperExists(EvalCase):
     description = (
         "_build_ctx_line_components must be defined in loom.tui.status_bar with"
         " signature (app, ctx_tokens, ctx_window, engine_state, shuttle_phase)"
-        " returning tuple[str, str, str]"
+        " + optional quiet_prefix keyword-only, returning tuple[str, str, str]"
     )
 
     def run(self) -> EvalResult:
@@ -135,13 +135,14 @@ class TuiShuttleTickOverlayHelperExists(EvalCase):
         fn = mod._build_ctx_line_components
         sig = inspect.signature(fn)
         params = list(sig.parameters.keys())
-        expected = ["app", "ctx_tokens", "ctx_window", "engine_state", "shuttle_phase"]
-        if params != expected:
+        required = ["app", "ctx_tokens", "ctx_window", "engine_state", "shuttle_phase"]
+        if not all(p in params for p in required) or len(params) > len(required) + 2:
             return EvalResult(
                 name=self.name,
                 passed=False,
                 detail=(
-                    f"_build_ctx_line_components params must be {expected},"
+                    f"_build_ctx_line_components must have {required} as"
+                    f" first 5 params (optional keyword-only flags allowed), got {params}"
                     f" got {params}"
                 ),
             )
