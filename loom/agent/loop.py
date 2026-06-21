@@ -251,7 +251,8 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                 tr.record("session_start", workdir=str(WORKDIR), initial_messages=len(messages))
             tool_call_count = 0
             tokens_at_last_checkpoint = context.current_tokens(messages)
-            while True:
+            max_turns = _active_config.max_turns
+            for turn in range(max_turns):
                 if context.should_compact(messages, llm_client.get_context_window(), llm_client.model):
                     hooks.trigger_hooks("PreCompact", messages, context.last_input_tokens)
                     msg_count_before = len(messages)
@@ -351,6 +352,26 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                         tr.record("checkpoint_save", path=str(saved_path),
                                   tool_calls=tool_call_count, new_tokens=new_tokens)
                     tokens_at_last_checkpoint = context.current_tokens(messages)
+            else:
+                if tr is not None:
+                    tr.record("loop_limit_reached", turn=turn + 1, tool_calls=tool_call_count,
+                              max_turns=max_turns)
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"<system-reminder>\n"
+                        f"You have reached the maximum turn limit ({max_turns}). "
+                        f"Summarize current progress, list remaining work, and stop. "
+                        f"Do not call any more tools.\n"
+                        f"</system-reminder>"
+                    ),
+                })
+                hooks.trigger_hooks("AgentStop", messages)
+                checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
+                if cb["on_message_end"] is not None:
+                    cb["on_message_end"](tool_call_count, len(messages))
+                trace_mod.stop()
+                return
     finally:
         clear_active_callbacks()
 

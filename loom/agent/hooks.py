@@ -35,11 +35,11 @@ class Hooks:
 
     def register_hook(self, event: str, callback):
         with HOOKS_LOCK:
-            HOOKS[event].append(callback)
+            HOOKS.setdefault(event, []).append(callback)
 
     def trigger_hooks(self, event: str, *args):
         with HOOKS_LOCK:
-            callbacks = list(HOOKS[event])
+            callbacks = list(HOOKS.get(event, []))
         for callback in callbacks:
             result = callback(event, *args)
             if result is not None:

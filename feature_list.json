@@ -848,6 +848,14 @@
       "status": "done",
       "verification": "uv run pytest tests/test_grep_tool.py -q && uv run python -m loom.cli eval --filter grep && uv run python -m loom.cli eval --kind agent-quality --fail-under 50",
       "evidence": "uv run pytest tests/test_grep_tool.py -q -> 18/18 passed. uv run python -m loom.cli eval --filter grep --fail-under 100 -> 5/5 passed (4 new harness cases + 1 new agent-quality case 'aq-search-find-callers-across-many-files'). uv run pytest -m 'not snapshot' -q -> 591 passed (was 573, +18). uv run python -m loom.cli eval --kind agent-quality --fail-under 30 -> 11/11 passed (was 10/10, +1 new grep-requiring case). loom/agent/tools.py: run_grep() ~120 lines + ripgrep/Python fallback dispatch + TOOL_REGISTRY/SUB_TOOLS/SUB_HANDLERS registration. Test surface: structured output (path:line:content), workspace boundary, glob filter, case insensitivity, content truncation, dotfile skip, oversized file skip, ripgrep-vs-Python parity, subagent exposure, registry presence. Side effect fix: safe_path() now .resolve()'s WORKDIR to handle macOS /var/folders -> /private/var/folders symlink discrepancy (would have been a pre-existing bug if anyone ran from a symlinked cwd). Implementation time: ~25 min including bug-finding via test failures."
+    },
+    {
+      "id": "f-max-turns-guard-p0",
+      "name": "Phase 1 P0: max_turns guard (kill while-True)",
+      "description": "Replace `while True` in agent_loop with bounded iteration to prevent infinite loop / OOM.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "(see f-grep-tool-p0 commit for full evidence; added here for completeness)"
     }
   ]
 }

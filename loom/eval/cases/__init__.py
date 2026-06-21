@@ -19,6 +19,7 @@ from loom.eval.cases import (
     integration,  # noqa: F401
     loop_call_depth,  # noqa: F401
     max_output_tokens_config,  # noqa: F401
+    max_turns_guard,  # noqa: F401
     memory_skills,  # noqa: F401
     permission_canonicalize,  # noqa: F401
     permission_deny_expanded,  # noqa: F401

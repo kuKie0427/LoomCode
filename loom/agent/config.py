@@ -129,6 +129,7 @@ class HarnessConfig:
     disabled_tools: frozenset[str] = field(default_factory=frozenset)
     run_init_sh_on_session_end: bool = True
     llm: LLMConfig = field(default_factory=LLMConfig.from_defaults)
+    max_turns: int = 100
 
     @classmethod
     def from_defaults(cls) -> HarnessConfig:
@@ -289,6 +290,20 @@ def _parse_tools_section(section: dict | None) -> frozenset[str]:
     return frozenset(disabled)
 
 
+DEFAULT_MAX_TURNS = 100
+
+
+def _parse_agent_section(section: dict | None) -> int:
+    if not section:
+        return DEFAULT_MAX_TURNS
+    if not isinstance(section, dict):
+        raise ConfigError("[agent] must be a table")
+    raw = section.get("max_turns", DEFAULT_MAX_TURNS)
+    if not isinstance(raw, int) or raw < 1:
+        raise ConfigError("[agent] max_turns must be a positive integer")
+    return raw
+
+
 def _parse_telemetry_section(section: dict | None) -> TelemetryConfig:
     if not section:
         return TelemetryConfig()
@@ -334,6 +349,7 @@ def load_config(workdir: Path) -> HarnessConfig:
         telemetry=_parse_telemetry_section(data.get("telemetry")),
         disabled_tools=_parse_tools_section(data.get("tools")),
         llm=_parse_llm_section(data.get("llm")),
+        max_turns=_parse_agent_section(data.get("agent")),
     )
 
 

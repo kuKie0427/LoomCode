@@ -5208,3 +5208,30 @@ next phase: `f-grep-tool-p0` (highest leverage per Oracle, but expected ROI may 
 - **这意味着 grep 工具有 ROI**, 但只在 cross-file 多文件场景. Phase 1 P0 余下两个 (max-turns guard, edit-file v2) 的 ROI 仍然待验证
 
 **next phase**: `f-max-turns-guard-p0` (替换 while-True, 10 分钟工作, 高保险价值).
+
+---
+
+## 2026-06-22 — f-max-turns-guard-p0 (kill while-True)
+
+**Goal**: 阻止 agent_loop 无限循环 (LLM 持续 tool_use). Oracle 列为 high-priority P0 fix.
+
+**实现**:
+1. `loom/agent/config.py` — `HarnessConfig.max_turns: int = 100`, 新 `_parse_agent_section` 解析 `[agent] max_turns` (ConfigError on <1 or non-int).
+2. `loom/agent/loop.py` — `while True:` → `for turn in range(max_turns):` + `for/else` 块处理自然耗尽: 注入 `<system-reminder>You have reached the maximum turn limit (N). Summarize current progress, list remaining work, and stop.</system-reminder>`, 触发 AgentStop, save checkpoint, fire on_message_end, record `loop_limit_reached` trace event.
+3. `loom/agent/hooks.py` — `trigger_hooks` 用 `HOOKS.get(event, [])` 替代 `HOOKS[event]`, `register_hook` 用 `setdefault`. 修了一个 **潜伏的 KeyError** bug: 当 tests `HOOKS.clear()` 后(确实有几个 test 这么干), 任何 `trigger_hooks("SessionStart")` 都会 KeyError. 真生产路径里这个 bug 不可触发因为 loop.py main 函数会在 clear 之后 register. 但我的 test 重新初始化了 `hooks` ref, 走的是 HOOKS 的全局状态, 所以暴露了.
+4. `loom/eval/cases/max_turns_guard.py` (NEW) — 3 个 harness eval: default 100 / loop_limit_reached 事件存在 / 主 loop 是 bounded
+5. `tests/test_max_turns_guard.py` (NEW) — 11 个测试: 7 个 config parsing (default/toml/zero/negative/string/missing-section), 2 个 agent_loop 集成 mock (强制 tool_use 验证 max-turns exit, 自然 end_turn 验证不走 limit 路径), 2 个 harness eval invocation
+
+**Verification**:
+- `uv run pytest tests/test_max_turns_guard.py -v` → 11/11 passed
+- `uv run pytest -m 'not snapshot' -q` → 602 passed (was 591, +11)
+- `uv run python -m loom.cli eval --filter max-turns --fail-under 100` → 3/3 passed
+- `uv run ruff check .` → All checks passed
+- `uv run mypy loom/` → 0 issues in 95 source files
+
+**过程 bug 与修复 (TDD)**:
+- 第一次跑 full suite: `KeyError: 'SessionStart'` — 是我新 test 用 `monkeypatch.setattr(loop_mod, "hooks", new_hooks_instance)` 但 `HOOKS` 是模块全局 dict, 别的 test 之前 `HOOKS.clear()` 没完整 repopulate. **修法**: `trigger_hooks` 用 `.get(event, [])`, `register_hook` 用 `setdefault`. 这是个真生产相关的鲁棒性提升, 不仅是 test fix — 任何错误清空 HOOKS 的代码路径都不会再 KeyError.
+- 第二次跑 2 ruff F841 (unused vars) — 清理
+- 第三次跑: 全部 green
+
+**next phase**: `f-edit-file-v2-p0` (fuzzy + multi-edit + line-range). 这是 P0 里最大的一个, ~30-45 分钟.
