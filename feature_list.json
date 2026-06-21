@@ -733,6 +733,17 @@
       "status": "done",
       "verification": "uv run python -m loom.cli eval --fail-under 100 && uv run pytest tests/test_tool_cycle.py tests/test_header_pulse.py tests/test_chat_log_engine_state.py -v && ./init.sh",
       "evidence": "P2a (commit pending): ToolCallMarker _RUNNING_GLYPHS = ('⊙', '⊚', '◎') + engine_state reactive + _start_cycle_timer/_stop_cycle_timer (1Hz set_interval(1.0, name='tool-cycle')) + ChatLog.engine_state fan-out to all _tool_markers.values() + App._sync_chat_engine_state wired into 4 callbacks (on_tool_use, on_tool_result, on_compact, on_message_end). P2b: HeaderSectionButton pulse_phase: reactive[int] + update_pulse(has_count) toggling Python set_interval(0.5, name='header-pulse') that flips self.styles.opacity between 1.0 and 0.5 (1Hz square wave). DEVIATION (accepted): plan specified CSS animation: pulse 1s steps(2, end) + @keyframes pulse; Textual CSS parser v8.2.7 doesn't support @keyframes (TokenError on @) or animation: ... steps(...) ... (TokenError on () — Python set_interval(0.5) is the Textual-native equivalent, same 1Hz at 50% amplitude, identical observable behavior. 13/13 new tests pass (6 test_tool_cycle + 4 test_header_pulse + 3 test_chat_log_engine_state). 6/6 new eval cases pass (tui-tool-marker-cycle-{3-frames-defined,timer-1hz,stops-on-complete} + tui-header-section-button-pulse-{timer-defined,class-toggle} + tui-chatlog-engine-state-reactive-propagation). eval 249/249 (was 243/243 = +6 new motion_primitives cases). ./init.sh: 504 passed (was 491 = +13 new P2b tests), 9 snapshots, all green. docs/tui-design-language.md gained §2.2 Motion primitives contract sub-section + Appendix B changelog entry documenting the 5 primitives + the accepted deviation. tick-above-shuttle deferred to P3 per plan § 'known deviation'."
+    },
+    {
+      "id": "f-tui-paradigm-p3",
+      "name": "TUI 织机范式 P3: Strict §4.2.1 tick-above-shuttle (ShuttleTickOverlay widget)",
+      "description": "替换 P1b 方案 C (inline ^0/^1) 为严格 §4.2.1 spec：新增 ShuttleTickOverlay widget (1-line, 在 StatusBar 上方)，渲染 ^ at shuttle position。共享 _build_ctx_line_components() helper 让 prefix (loom · model · ⎇ branch · Nt·Mtl · ctx:) 与 StatusBar 完全对齐。idle freeze 全部守门。StatusBar.render() 移除 inline ^N。7 snapshot rebaseline (layout shift by 1 row in #chrome)。",
+      "dependencies": [
+        "f-tui-paradigm-p2"
+      ],
+      "status": "active",
+      "verification": "uv run python -m loom.cli eval --fail-under 100 && uv run pytest tests/test_shuttle_tick.py tests/test_status_bar.py -v && ./init.sh",
+      "evidence": ""
     }
   ]
 }
