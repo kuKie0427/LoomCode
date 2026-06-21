@@ -4688,3 +4688,27 @@ tests/test_shuttle_tick.py                         | 224 (new)
 P0 (engine state) → P1a (ctx rail + shuttle) → P1b (tick-above-shuttle inline) → P2a (ToolCallMarker cycle) → P2b (HeaderSectionButton pulse) → P3a (ShuttleTickOverlay widget impl) → **P3b (tests + eval + snapshots) — DONE**
 
 5 motion primitives + 2-line tick-above-shuttle spec 全部实现 + 测试 + eval + snapshots 锁定。
+
+## f-tool-display-p0 — 清理死代码 ToolCallCard（2026-06-21）
+
+`loom/tui/widgets.py::ToolCallCard` 是生产死代码：实际工具展示走 `chat_log.py::ToolCallMarker` + `CollapsibleToolOutput`。`ToolCallCard` 仅被测试/eval 引用，且违反 §2 rule 5（带边框卡片）与 §8.4（整框上色 = 装饰性用色）。Phase 0 纯清理，不动 `ToolCallMarker` 任何行为。
+
+**改动文件（5）**:
+- `loom/tui/widgets.py` — 删除（62 行整文件，唯一内容 `ToolCallCard`）
+- `tests/test_tui_snapshot.py` — 移除 `from loom.tui.widgets import ToolCallCard` + `test_tool_card_completed` 函数；保留 `test_empty_layout` + `test_permission_modal_open`（2 个有效 snapshot）
+- `loom/eval/cases/tui_permission.py` — Cases 2+3 重写：`TuiToolCallCardExists` → `TuiToolCallMarkerExists`（`from loom.tui.chat_log import ToolCallMarker` + `Static` 子类 + `set_complete` 方法）；`TuiToolCardThreeStatesRender` → `TuiToolMarkerThreeStatesContract`（§2.2.3 primitive 2 契约：`_RUNNING_GLYPHS = ("⊙", "⊚", "◎")` + `set_complete` done/error 双路径类成员验证）
+- `tests/__snapshots__/test_tui_snapshot/test_tool_card_completed.raw` — 删（孤儿 snapshot）
+- `feature_list.json` — 追加 `f-tool-display-p0` 实体（status: done + 真实 evidence）
+
+**验证（orchestrator 独立复跑）**:
+- `grep -rn ToolCallCard loom/ tests/` → ZERO（仅 `feature_list.json`/`docs/harness-roadmap.md`/`progress.md` 历史 prose 含此名）
+- `uv run pytest tests/test_tui_snapshot.py loom/eval/cases/tui_permission.py -q` → 2/2 passed
+- `uv run python -m loom.cli eval --fail-under 100` → 254/254 passed（2 新 case `tui-tool-call-marker-exists` + `tui-tool-marker-three-states-contract` 均 PASS）
+- `uv run ruff check .` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in 87 source files
+- `uv run pytest` → **513 passed, 8 snapshots**（基线 514/9 → -1 test + -1 snapshot = 删除的 `test_tool_card_completed` + 其 snapshot baseline；eval 已迁移覆盖 3 态契约，无信息丢失）
+
+**关键决策（notepad）**:
+- Case 3 选用 `_complete`/`_is_error`/`has_class()` 而非渲染文本字符串匹配 — 直接验证行为契约，比解析 Rich `Text` 输出更鲁棒
+- `ToolCallMarker.has_class()` 在无 DOM 时正常工作（`DOMNode.__init__` 初始化 `self._classes = set()`，`add_class`/`has_class` 操作此 set），无需 `App` 实例
+- Cases 1/4/5 未动 — 它们不引用 `ToolCallCard`

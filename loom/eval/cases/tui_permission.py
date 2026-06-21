@@ -1,7 +1,7 @@
 """Eval cases for TUI permission modal (f-tui-permission-modal).
 
 Phase F3 Task 6 — 5 EvalCase classes that lock in the permission modal contract:
-PermissionScreen, ToolCallCard, Hooks asker injection, and TUI asker wiring.
+PermissionScreen, ToolCallMarker, Hooks asker injection, and TUI asker wiring.
 """
 
 from __future__ import annotations
@@ -33,62 +33,117 @@ class TuiPermissionScreenExists(EvalCase):
         )
 
 
-# ── Case 2: ToolCallCard inherits Static + has complete method ───────────────
+# ── Case 2: ToolCallMarker inherits Static + has set_complete method ──────────
 
 
-class TuiToolCallCardExists(EvalCase):
-    name = "tui-tool-call-card-exists"
-    description = "ToolCallCard inherits Static + has complete method"
+class TuiToolCallMarkerExists(EvalCase):
+    name = "tui-tool-call-marker-exists"
+    description = "ToolCallMarker inherits Static + has set_complete method"
 
     def run(self) -> EvalResult:
         from textual.widgets import Static
 
-        from loom.tui.widgets import ToolCallCard
+        from loom.tui.chat_log import ToolCallMarker
 
-        if not issubclass(ToolCallCard, Static):
+        if not issubclass(ToolCallMarker, Static):
             return EvalResult(
                 name=self.name, passed=False,
-                detail=f"ToolCallCard bases: {[b.__name__ for b in ToolCallCard.__mro__]}",
+                detail=f"ToolCallMarker bases: {[b.__name__ for b in ToolCallMarker.__mro__]}",
             )
-        if not hasattr(ToolCallCard, "complete"):
+        if not hasattr(ToolCallMarker, "set_complete"):
             return EvalResult(
                 name=self.name, passed=False,
-                detail="ToolCallCard missing 'complete' method",
+                detail="ToolCallMarker missing 'set_complete' method",
             )
         return EvalResult(
             name=self.name, passed=True,
-            detail="ToolCallCard(Static) + complete() present",
+            detail="ToolCallMarker(Static) + set_complete() present",
         )
 
 
-# ── Case 3: 3 states render() returns Text without error ─────────────────────
+# ── Case 3: ToolCallMarker 3-state contract (§2.2.3 primitive 2) ─────────────
 
 
-class TuiToolCardThreeStatesRender(EvalCase):
-    name = "tui-tool-card-three-states-render"
-    description = "ToolCallCard.render() returns Text for running/completed/error states"
+class TuiToolMarkerThreeStatesContract(EvalCase):
+    name = "tui-tool-marker-three-states-contract"
+    description = "ToolCallMarker: _RUNNING_GLYPHS=3 frames + set_complete done/error contract (§2.2.3)"
 
     def run(self) -> EvalResult:
-        from rich.text import Text
+        from loom.tui.chat_log import ToolCallMarker
 
-        from loom.tui.widgets import ToolCallCard
+        # ── 1. _RUNNING_GLYPHS 3-frame cycle ─────────────────────────────────
+        if not hasattr(ToolCallMarker, "_RUNNING_GLYPHS"):
+            return EvalResult(
+                name=self.name, passed=False,
+                detail="ToolCallMarker missing _RUNNING_GLYPHS class attribute",
+            )
+        glyphs = ToolCallMarker._RUNNING_GLYPHS
+        if glyphs != ("⊙", "⊚", "◎"):
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=f"_RUNNING_GLYPHS must be ('⊙', '⊚', '◎'), got {glyphs!r}",
+            )
 
-        card = ToolCallCard("bash", {"command": "ls"}, "t-1")
-        for state in ["running", "completed", "error"]:
-            if state == "running":
-                result = card.render()
-            else:
-                card.state = state
-                card.output = "some output here"
-                result = card.render()
-            if not isinstance(result, Text):
-                return EvalResult(
-                    name=self.name, passed=False,
-                    detail=f"State '{state}' render() returned {type(result).__name__}, expected Text",
-                )
+        # ── 2. set_complete(done): _complete=True, tool-done class ───────────
+        marker = ToolCallMarker("bash", "ls")
+        if marker._complete:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail="Fresh ToolCallMarker should not be _complete",
+            )
+        marker.set_complete("output ok", is_error=False)
+        if not marker._complete:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail="set_complete(ok) should set _complete=True",
+            )
+        if marker._is_error:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail="set_complete(ok) should set _is_error=False",
+            )
+        if not marker.has_class("tool-done"):
+            return EvalResult(
+                name=self.name, passed=False,
+                detail="set_complete(ok) should add tool-done class",
+            )
+        if marker.has_class("tool-error"):
+            return EvalResult(
+                name=self.name, passed=False,
+                detail="set_complete(ok) should NOT have tool-error class",
+            )
+
+        # ── 3. set_complete(error): _complete=True, tool-error class ─────────
+        marker2 = ToolCallMarker("bash", "ls")
+        marker2.set_complete("error output", is_error=True)
+        if not marker2._complete:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail="set_complete(error) should set _complete=True",
+            )
+        if not marker2._is_error:
+            return EvalResult(
+                name=self.name, passed=False,
+                detail="set_complete(error) should set _is_error=True",
+            )
+        if not marker2.has_class("tool-error"):
+            return EvalResult(
+                name=self.name, passed=False,
+                detail="set_complete(error) should add tool-error class",
+            )
+        if marker2.has_class("tool-done"):
+            return EvalResult(
+                name=self.name, passed=False,
+                detail="set_complete(error) should NOT have tool-done class",
+            )
+
         return EvalResult(
             name=self.name, passed=True,
-            detail="All 3 states (running/completed/error) render Text",
+            detail=(
+                "_RUNNING_GLYPHS=3 frames (⊙,⊚,◎) + "
+                "set_complete done→_complete=True,tool-done / "
+                "error→_complete=True,tool-error"
+            ),
         )
 
 
