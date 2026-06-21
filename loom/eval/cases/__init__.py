@@ -40,7 +40,9 @@ from loom.eval.cases import (
     session_hooks,  # noqa: F401
     session_mutable_prompt,  # noqa: F401
     stop_event_helper,  # noqa: F401
+    subagent_templates,  # noqa: F401
     telemetry_sink,  # noqa: F401
+    tool_error_semantics,  # noqa: F401
     trace_path,  # noqa: F401
     tui_app,  # noqa: F401
     tui_assistant_message_start,  # noqa: F401
@@ -55,7 +57,6 @@ from loom.eval.cases import (
     tui_permission,  # noqa: F401
     tui_thinking_callback,  # noqa: F401
     tui_thought_no_double_marker,  # noqa: F401
-    tool_error_semantics,  # noqa: F401
     user_hooks,  # noqa: F401
     web_fetch,  # noqa: F401
 )

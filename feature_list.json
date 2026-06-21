@@ -938,6 +938,14 @@
       "dependencies": [],
       "status": "done",
       "evidence": "uv run pytest tests/test_tool_error_semantics.py -v -> 13/13 passed. uv run python -m loom.cli eval --filter tool-errors --fail-under 100 -> 4/4 passed. uv run pytest -m 'not snapshot' -q -> 739 passed (was 726, +13). uv run ruff + mypy -> 0 issues in 109 source files. loom/agent/tool_errors.py (NEW): extract_tool_use_blocks / extract_tool_result_blocks for parsing messages; detect_repeated_failures(messages, max_failures=3, lookback=6) walks last N messages, tracks (tool, input) key + consecutive error count, returns dict on threshold. build_retry_guidance(detection) produces a <system-reminder> mentioning the tool name, the count, and 3 action paths (diagnose / gather context / explain to user). loom/agent/loop.py: each iteration calls detect; if triggered and the last message isn't already a guidance reminder, appends the reminder to messages. loom/agent/system_prompt.py: added a 'Tool Failure Handling' static section teaching the agent to read errors and self-correct. TDD bug: first detection algorithm reset count on every assistant tool_use (regardless of key match), so 3 consecutive same-tool errors never accumulated. Rewrote with explicit key-match + last_was_error state tracking. Caught by tests."
+    },
+    {
+      "id": "f-subagent-grep-patterns-p2",
+      "name": "Phase 2: Subagent task templates (investigate / refactor / TDD-fix)",
+      "description": "After adding grep tool, subagents can actually search. Add 3 specialized task templates that wrap free-form 'task' with focused system prompts + required arg schemas.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "uv run pytest tests/test_subagent_templates.py -v -> 13/13 passed. uv run python -m loom.cli eval --filter subagent-template --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 752 passed (was 739, +13). uv run ruff + mypy -> 0 issues in 111 source files. loom/agent/subagent_templates.py (NEW): 3 templates with focused system prompts. investigate_code: read-only search specialist (emphasizes grep). refactor_across_files: cross-file rename specialist (4-step: search, plan, multi_edit, verify; emphasizes non-overlapping edits). fix_failing_test: TDD-driven bug-fixer (read error -> locate -> minimal fix -> re-run; explicitly anti-skip/anti-xfail to prevent reward hacking). loom/agent/tools.py: 3 new tools registered as task_investigate_code / task_refactor_across_files / task_fix_failing_test, each with required arg schema from the template. Subagents get the focused system prompt instead of the generic SUB_SYSTEM."
     }
   ]
 }

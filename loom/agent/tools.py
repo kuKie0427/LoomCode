@@ -911,3 +911,43 @@ def run_task(description: str) -> str:
 
 
 TOOL_HANDLERS["task"] = run_task
+
+
+def _run_template_subagent(template_name: str, args: dict) -> str:
+    """Run a subagent with a specialized template prompt."""
+    from loom.agent.subagent_templates import format_subagent_prompt
+    try:
+        description = format_subagent_prompt(template_name, **args)
+    except TypeError as exc:
+        return f"Error: {exc}"
+    except ValueError as exc:
+        return f"Error: {exc}"
+    return spawn_subagent(description)
+
+
+def _make_template_tool(template_name: str):
+    from loom.agent.subagent_templates import get_template
+    tpl = get_template(template_name)
+    if tpl is None:
+        return None
+    def _handler(**kwargs):
+        return _run_template_subagent(template_name, kwargs)
+    return Tool(
+        name=f"task_{template_name}",
+        description=(
+            f"Launch a subagent specialized for: {tpl['description']} "
+            f"Accepts args: {', '.join(tpl['args_schema'])}."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {a: {"type": "string"} for a in tpl["args_schema"]},
+            "required": list(tpl["args_schema"]),
+        },
+        handler=_handler,
+    )
+
+
+for _tpl_name in ("investigate_code", "refactor_across_files", "fix_failing_test"):
+    _tool = _make_template_tool(_tpl_name)
+    if _tool is not None:
+        TOOL_REGISTRY.register(_tool)
