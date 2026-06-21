@@ -123,38 +123,89 @@ class Context:
         try:
             rounds = self._find_rounds(messages)
             if len(rounds) <= 1:
+                if not messages:
+                    return
+                tail_cutoff = self._find_tail_cutoff(messages, int(TAIL_TOKEN_BUDGET_PERCENT * context_window))
+                tail_start = self._align_to_round_start(rounds, tail_cutoff)
+                head_messages = messages[:tail_start]
+                tail_messages = messages[tail_start:]
+                last_todo = self._extract_last_todo(head_messages)
+            else:
+                tail_cutoff = self._find_tail_cutoff(messages, int(TAIL_TOKEN_BUDGET_PERCENT * context_window))
+                tail_start = self._align_to_round_start(rounds, tail_cutoff)
+                head_messages = messages[:tail_start]
+                tail_messages = messages[tail_start:]
+                last_todo = self._extract_last_todo(head_messages)
+
+            summary = self._generate_summary(head_messages, client, model) if head_messages else ""
+            if summary:
+                messages.clear()
+                messages.append({
+                    "role": "user",
+                    "content": f"<system-reminder>\n对话历史已被压缩。以下是摘要：\n\n{summary}\n</system-reminder>"
+                })
+                messages.extend(tail_messages)
+
+                if last_todo:
+                    self._inject_todo_attachment(messages, last_todo)
+
+                self.last_input_tokens = 0
+                self.checked_at_index = 0
+
+                logger.success(f"压缩完成：{len(head_messages)} 条消息 → 1 条摘要，保留 {len(tail_messages)} 条尾巴")
                 return
 
-            tail_cutoff = self._find_tail_cutoff(messages, int(TAIL_TOKEN_BUDGET_PERCENT * context_window))
-
-            tail_start = self._align_to_round_start(rounds, tail_cutoff)
-
-            head_messages = messages[:tail_start]
-            tail_messages = messages[tail_start:]
-
-            last_todo = self._extract_last_todo(head_messages)
-
-            summary = self._generate_summary(head_messages, client, model)
-            if not summary:
-                logger.warning("压缩摘要生成失败，跳过压缩（caller 应处理 context overflow）")
-                return
-
-            messages.clear()
-            messages.append({
-                "role": "user",
-                "content": f"<system-reminder>\n对话历史已被压缩。以下是摘要：\n\n{summary}\n</system-reminder>"
-            })
-            messages.extend(tail_messages)
-
-            if last_todo:
-                self._inject_todo_attachment(messages, last_todo)
-
-            self.last_input_tokens = 0
-            self.checked_at_index = 0
-
-            logger.success(f"压缩完成：{len(head_messages)} 条消息 → 1 条摘要，保留 {len(tail_messages)} 条尾巴")
+            if head_messages:
+                logger.warning(
+                    f"压缩摘要生成失败，回退到 raw truncate: 保留尾部 {len(tail_messages)} 条，"
+                    f"丢弃头部 {len(head_messages)} 条（context_window={context_window}）"
+                )
+            else:
+                logger.warning(
+                    f"压缩无可压缩内容（无 head），但 last_input_tokens 仍可能超阈值 — 强制清空计数器"
+                )
+            self._raw_truncate_fallback(messages, tail_messages, last_todo)
         except Exception as e:
             logger.error(f"压缩失败：{e}")
+
+    def _raw_truncate_fallback(
+        self,
+        messages: list[MessageParam],
+        tail_messages: list[MessageParam],
+        last_todo: str | None,
+    ) -> None:
+        """Replace head with a placeholder when LLM summary generation fails.
+
+        Without this, callers (the agent loop) re-trigger `should_compact`
+        on the next iteration — which still sees >85% — and `autocompact`
+        retries forever, each attempt failing the same way.
+        """
+        messages.clear()
+        if not tail_messages:
+            messages.append({
+                "role": "user",
+                "content": (
+                    "<system-reminder>\n"
+                    "对话历史已被强制截断（LLM 摘要失败且无可保留的尾部上下文）。"
+                    "早期上下文已丢失；如需引用旧消息请重新读取相关文件。\n"
+                    "</system-reminder>"
+                ),
+            })
+        else:
+            messages.append({
+                "role": "user",
+                "content": (
+                    "<system-reminder>\n"
+                    "对话历史已被强制截断（LLM 摘要失败）。"
+                    "早期上下文已丢失；如需引用旧消息请重新读取相关文件。\n"
+                    "</system-reminder>"
+                ),
+            })
+            messages.extend(tail_messages)
+        if last_todo:
+            self._inject_todo_attachment(messages, last_todo)
+        self.last_input_tokens = 0
+        self.checked_at_index = 0
 
     def _find_rounds(self, messages: list[MessageParam]) -> list[int]:
         return [

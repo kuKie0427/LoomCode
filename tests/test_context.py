@@ -436,21 +436,31 @@ def test_autocompact_full_flow_compresses_head(mocker):
     assert messages[1]["content"] == "Round 8"
 
 
-def test_autocompact_not_enough_rounds_returns_early(mocker):
-    """autocompact returns immediately when there is 1 or fewer rounds."""
+def test_autocompact_not_enough_rounds_applies_raw_truncate_fallback(mocker):
+    """When there is 1 round and LLM summary fails, the raw_truncate_fallback
+    STILL fires (with no head to drop, it inserts a placeholder and keeps the
+    single round as the tail). This prevents the pre-fix bug where autocompact
+    would silently return and the loop would re-trigger on the next iteration."""
     ctx = Context()
     messages = _build_rounds(1)
 
     mock_client = mocker.Mock()
+    mock_client.messages.create.side_effect = Exception("API Error")
     ctx.autocompact(messages, mock_client, "claude-3-haiku-20240307", context_window=200)
 
-    assert len(messages) == 4
-    assert messages[0]["content"] == "Round 1"
-    assert messages[1]["content"][0]["type"] == "tool_use"
+    # After fallback: [placeholder, round1_messages...]
+    assert len(messages) == 5
+    assert messages[0]["role"] == "user"
+    assert "强制截断" in messages[0]["content"]
+    assert messages[1]["content"] == "Round 1"
+    assert messages[2]["content"][0]["type"] == "tool_use"
 
 
-def test_autocompact_llm_failure_skips_compaction(mocker):
-    """autocompact skips compaction when _generate_summary raises an exception."""
+def test_autocompact_llm_failure_applies_raw_truncate_fallback(mocker):
+    """When _generate_summary raises, autocompact must NOT silently return
+    (the pre-fix bug that caused infinite recompact loops). It now applies
+    the raw_truncate_fallback: head is dropped, tail is kept, a placeholder
+    is inserted at index 0."""
     ctx = Context()
     messages = _build_rounds(5)
 
@@ -458,8 +468,11 @@ def test_autocompact_llm_failure_skips_compaction(mocker):
     mock_client.messages.create.side_effect = Exception("API Error")
     ctx.autocompact(messages, mock_client, "claude-3-haiku-20240307", context_window=200)
 
-    assert len(messages) == 20
-    assert messages[0]["content"] == "Round 1"
+    # Original was 20 messages. After fallback: placeholder + 3 tail rounds (12 messages) = 13
+    assert len(messages) == 13
+    assert messages[0]["role"] == "user"
+    assert "强制截断" in messages[0]["content"]
+    assert messages[1]["content"] == "Round 3"
 
 
 def test_autocompact_injects_todo_when_present(mocker):

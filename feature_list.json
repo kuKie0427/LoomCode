@@ -866,6 +866,14 @@
       ],
       "status": "done",
       "evidence": "(see commit message for full evidence)"
+    },
+    {
+      "id": "f-autocompact-fallback-p1",
+      "name": "Phase 1 P1: autocompact fallback (raw truncate when LLM summary fails)",
+      "description": "When LLM summary fails, autocompact silently returns and the next loop iteration re-triggers it, creating an infinite recompact loop. Fix with raw truncate fallback that always reduces size.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "uv run pytest tests/test_autocompact_fallback.py -v -> 8/8 passed. uv run python -m loom.cli eval --filter autocompact-fallback --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 631 passed (was 623, +8 new + 2 updated context tests). uv run ruff check . + uv run mypy loom/ -> 0 issues in 97 source files. loom/agent/context.py: new _raw_truncate_fallback() method replaces silent-return when LLM summary fails. autocompact() branches on summary success/failure. Pre-fix bug: loop re-triggered autocompact on every iteration since size was unchanged, creating an infinite recompact loop. Post-fix: size drops, should_compact returns False, loop continues normally."
     }
   ]
 }

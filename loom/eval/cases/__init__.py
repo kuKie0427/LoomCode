@@ -4,6 +4,7 @@ from loom.eval.cases import (
     async_streaming,  # noqa: F401
     audit,  # noqa: F401
     audit_self_test,  # noqa: F401
+    autocompact_fallback,  # noqa: F401
     ci,  # noqa: F401
     cli_lazy_imports,  # noqa: F401
     cold_start_continuity,  # noqa: F401
