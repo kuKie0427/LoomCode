@@ -5349,3 +5349,50 @@ next phase: `f-grep-tool-p0` (highest leverage per Oracle, but expected ROI may 
 - 第一次写测试时用 `__import__("unittest.mock")` 延迟 import, 运行时抛 `AttributeError: module 'unittest' has no attribute 'patch'`. 修法: 直接 `from unittest.mock import patch` 顶部 import. 这个 bug 反映我对 `__import__` 的误解 — `__import__("unittest.mock")` 返回的仍是 `unittest` 模块不是 `unittest.mock`. 正确是 `__import__("unittest.mock", fromlist=["patch"])` 或者直接 import. 选了直接的方案, 测试文件也清晰.
 
 **next phase**: `f-session-mutable-prompt-p1` (SystemPrompt 模块级常量, 改 MEMORY.md 后 agent 看不到 — 改成 lazy cached property)
+
+---
+
+## 2026-06-22 — f-session-mutable-prompt-p1 (lazy + cacheable system prompt)
+
+**Goal**: 修 SystemPrompt 模块级常量, 让 session 中改 MEMORY.md / AGENTS.md 后 agent 真的能看到.
+
+**实现**:
+- `loom/agent/system_prompt.py` (NEW) — 独立模块持有 process-local cache (`{workdir: (prompt, mtimes, ts)}`), 锁定后读写. 失效条件: (1) `invalidate_system_prompt(reason)` 显式调用; (2) 任何 tracked file (AGENTS.md / MEMORY.md / session-handoff.md) 的 mtime 变化. `get_system_prompt(workdir)` 检查 cache → mtime 仍一致直接返回, 否则重建.
+- `loom/agent/loop.py` — 删 `SYSTEM = build_system_prompt().build()` (模块级, 永不刷新). 改为 `_get_system_prompt() -> str` 函数, 每个 LLM call site (`stream_text(SYSTEM, ...)`, `client.messages.create(system=SYSTEM, ...)`) 调它, 每次拿到最新.
+- `loom/agent/tools.py` — `run_memory_write` 和 `run_load_skill` 在写入后调 `invalidate_system_prompt(reason=...)`, 下次 LLM call 立刻看到新内容.
+
+**Verification**:
+- `uv run pytest tests/test_session_mutable_prompt.py -v` → 10/10 passed (含 cache 返回相同 / mtime 变化重建 / 显式 invalidate / multi-workdir 全清 / 端到端 build_fresh / memory_write 触发的 invalidate / load_skill 触发的 invalidate)
+- `uv run python -m loom.cli eval --filter session-mutable` → 3/3 passed
+- `uv run pytest -m 'not snapshot' -q` → 666 passed (was 656, +10)
+- `uv run ruff + mypy` → 0 issues in 101 source files
+
+**TDD 过程**:
+- 没明显 bug — 10/10 一次过. 这是因为 cache 设计简单, mtime 比较是经典模式, 测试用 `monkeypatch` 替换 `_read_mtimes` 验证 cache 行为, 不依赖真实文件系统事件.
+
+**Phase 1 全部完成** (P0 4 个 + P1 4 个 = 8 个 features):
+1. f-agent-quality-eval-p0 ✅ (10 baseline cases)
+2. f-grep-tool-p0 ✅ (+1 case, baseline 11)
+3. f-max-turns-guard-p0 ✅ (safety guard, no baseline impact)
+4. f-edit-file-v2-p0 ✅ (+2 cases, baseline 13)
+5. f-autocompact-fallback-p1 ✅ (infinite-loop fix, no baseline impact — bug only triggers on LLM failure)
+6. f-microcompact-token-counter-p1 ✅ (premature autocompact fix, no baseline impact — bug only triggers at scale)
+7. f-web-fetch-tool-p1 ✅ (no agent-quality case yet — needs URL-fetching test)
+8. f-session-mutable-prompt-p1 ✅ (no agent-quality case yet — needs agent writing to memory mid-session)
+
+**Final agent-quality baseline (post Phase 1)**: 13/13 pass (100%) — same as pre-Phase-1 because none of the fixes are tested by the current 13 cases. The fixes improve ROBUSTNESS (prevent OOM, infinite loops, stale prompts) but don't enable new agent capabilities on this fixture set. To prove Phase 1 P0/P1 fixes are real, the next round of agent-quality cases should be:
+- Failure-injection cases (intentionally bad LLM responses, intentionally old_text that appears twice, etc.)
+- Stress cases (50+ tool calls, tool failures mid-session)
+- Multi-turn cases (agent writes to memory, then asks for it back)
+
+**剩余未做** (15 个 features): Phase 2 (7) + Phase 3 (4) + Phase 4 (3) + chore (1). 这些每个都是 1-2 天工程, 不适合在一个 session 完成. 建议:
+- 下一个 session 跑 Phase 2 P0 (cost telemetry + conversation export) — 高 ROI
+- 然后 Phase 2 P1 (prompt caching) — 用现有架构加 cache_control, 1-2 小时
+- 然后 Phase 2 P2 (subagent grep patterns + tool error semantics) — 半天
+
+**整体统计**:
+- 8 features 完成, 8 atomic commits, 87 个新 test, 19 个新 harness eval, 3 个新 agent-quality case
+- 代码: +~2000 LOC (核心), +500 LOC (test)
+- 0 regression: 全部现有 test 仍 pass (除 2 个 test_context.py 旧 test 被有意更新到新正确行为)
+- agent-quality 13/13 (100%) — baseline 不退步
+- 9 个 commit 历史干净, 每次都遵守 Working Rule #2 (./init.sh 0 退出 + real evidence)

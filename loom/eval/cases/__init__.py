@@ -34,6 +34,7 @@ from loom.eval.cases import (
     run_repl_async_init_sh,  # noqa: F401
     scope_wip1,  # noqa: F401
     session_hooks,  # noqa: F401
+    session_mutable_prompt,  # noqa: F401
     stop_event_helper,  # noqa: F401
     telemetry_sink,  # noqa: F401
     trace_path,  # noqa: F401

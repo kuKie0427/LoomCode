@@ -564,6 +564,11 @@ def run_memory_write(entry: str, heading: str | None = None) -> str:
         MemoryStore(WORKDIR).append(entry, heading=heading)
     except ValueError as e:
         return f"Memory cap exceeded: {e}"
+    try:
+        from loom.agent.system_prompt import invalidate_system_prompt
+        invalidate_system_prompt(reason="memory_write appended to MEMORY.md")
+    except Exception:
+        pass
     return f"Appended {len(entry)} chars to MEMORY.md"
 
 
@@ -573,6 +578,11 @@ def run_load_skill(name: str) -> str:
         return f"Error: skill {name!r} not found in {WORKDIR / '.minicode/skills'}"
     if not skill.has_body:
         return f"Error: skill {name!r} has no body (SKILL.md is empty after the metadata section)"
+    try:
+        from loom.agent.system_prompt import invalidate_system_prompt
+        invalidate_system_prompt(reason=f"load_skill {name!r}")
+    except Exception:
+        pass
     return skill.body
 
 

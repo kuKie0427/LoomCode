@@ -18,6 +18,7 @@ from loom.agent.context import Context
 from loom.agent.hooks import Hooks
 from loom.agent.llm import LLMClient, StreamEvent
 from loom.agent.prompt import AGENTS_MD_STATIC_LIMIT, SystemPrompt
+from loom.agent.system_prompt import get_system_prompt, invalidate_system_prompt
 from loom.agent.tools import (
     TOOL_HANDLERS,
     TOOLS,
@@ -144,7 +145,8 @@ def build_system_prompt(workdir: Path = WORKDIR) -> SystemPrompt:
     return sp
 
 
-SYSTEM = build_system_prompt().build()
+def _get_system_prompt() -> str:
+    return get_system_prompt(WORKDIR)
 
 
 context = Context()
@@ -274,7 +276,7 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                     input_tokens = 0
                     output_tokens = 0
                     stop_reason = "end_turn"
-                    for ev in stream_text(SYSTEM, messages, cast(list, TOOLS), LLM_CONFIG.max_output_tokens):
+                    for ev in stream_text(_get_system_prompt(), messages, cast(list, TOOLS), LLM_CONFIG.max_output_tokens):
                         if ev.kind == "text":
                             content_blocks.append(TextBlock(type="text", text=ev.text))
                             if cb["on_text_delta"] is not None:
@@ -309,7 +311,7 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                 else:
                     # ===== SYNC PATH (unchanged) =====
                     response = llm_client.client.messages.create(
-                        model=llm_client.model, system=SYSTEM, messages=messages,
+                        model=llm_client.model, system=_get_system_prompt(), messages=messages,
                         tools=cast(list, TOOLS), max_tokens=LLM_CONFIG.max_output_tokens,
                     )
                 context.update(len(messages), response)

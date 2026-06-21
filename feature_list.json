@@ -890,6 +890,14 @@
       "dependencies": [],
       "status": "done",
       "evidence": "uv run pytest tests/test_web_fetch.py -v -> 17/17 passed. uv run python -m loom.cli eval --filter web-fetch --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 656 passed (was 639, +17). uv run ruff + mypy -> 0 issues in 99 source files. loom/agent/tools.py: run_web_fetch(url, max_chars=50000) using httpx with 30s timeout + 5 redirect follow. _TextExtractor (stdlib HTMLParser) strips script/style, decodes entities, adds blank lines around block elements. Content-type routing: html -> extract; plain/json/markdown -> passthrough; other -> error. is_read_only=True, is_concurrent_safe=True. Registered in TOOL_REGISTRY + SUB_TOOLS + SUB_HANDLERS. Decision: used stdlib HTMLParser (zero new deps) instead of readability-lxml / markdownify since the agent's needs are moderate (read docs, not preserve perfect formatting). Could swap for readability later if formatting matters."
+    },
+    {
+      "id": "f-session-mutable-prompt-p1",
+      "name": "Phase 1 P1: session-mutable system prompt (rebuild on file change)",
+      "description": "SystemPrompt built once at module import time and never refreshed. User writes to MEMORY.md or adds a skill mid-session -> agent never sees the change. Fix with lazy cached prompt + invalidation hooks.",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "uv run pytest tests/test_session_mutable_prompt.py -v -> 10/10 passed. uv run python -m loom.cli eval --filter session-mutable --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 666 passed (was 656, +10). uv run ruff + mypy -> 0 issues in 101 source files. loom/agent/system_prompt.py (NEW): own module owning process-local cache of rendered system prompt string, keyed by workdir. Invalidated by (1) explicit invalidate_system_prompt() call, (2) any tracked file (AGENTS.md, MEMORY.md, session-handoff.md) mtime change. loom/agent/loop.py: removed module-level SYSTEM = build_system_prompt().build(), replaced with _get_system_prompt() function called at each LLM request site. loom/agent/tools.py: run_memory_write and run_load_skill call invalidate_system_prompt(reason=...) after their writes so the next LLM call sees fresh state. Pre-fix bug class: session-mid edits invisible to the agent. Post-fix: mtime check + explicit invalidation hooks both cover the gap."
     }
   ]
 }
