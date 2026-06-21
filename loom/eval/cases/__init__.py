@@ -35,6 +35,7 @@ from loom.eval.cases import (
     pre_compact_hook,  # noqa: F401
     prompt_caching,  # noqa: F401
     real_token_counter,  # noqa: F401
+    repomap,  # noqa: F401
     resume_benchmark,  # noqa: F401
     run_repl_async_init_sh,  # noqa: F401
     scope_wip1,  # noqa: F401

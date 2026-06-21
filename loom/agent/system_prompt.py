@@ -90,6 +90,14 @@ def build_fresh(workdir: Path) -> str:
     sp.add_dynamic(f"工作目录: {workdir}")
     sp.add_dynamic(sp.get_git_context(workdir))
 
+    try:
+        from loom.agent.repomap import build_repomap
+        repomap = build_repomap(workdir)
+        if repomap:
+            sp.add_memory(repomap)
+    except Exception:
+        pass
+
     memory_parts: list[str] = []
     try:
         from loom.skills import build_skill_index

@@ -970,6 +970,14 @@
       "dependencies": [],
       "status": "done",
       "evidence": "uv run pytest tests/test_diff_pane.py -v -> 13/13 passed. uv run python -m loom.cli eval --filter diff-pane --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 774 passed (was 761, +13). uv run ruff + mypy -> 0 issues in 114 source files. loom/tui/diff_pane.py (NEW): DiffPane(Static) with reactive diff_text attribute. colorize_diff() wraps added lines in [green], removed in [red], hunk headers in [yellow], context unchanged. Empty/whitespace content shows '(no diff to display)' placeholder. ~50 lines of rendering code. TDD caught 2 real bugs before commit: (1) my initial test assumed the sample had a '-def add' line which it didn't (real unified diff metadata `--- a/calc.py` starts with `-` and gets correctly colored red; I confused myself with a different test data structure); (2) Textual reactive updates call update() once for mount + once for value change, so the test had to assert 'last call has new content' not 'called exactly once'."
+    },
+    {
+      "id": "f-repomap-p4",
+      "name": "Phase 4: Repomap (ast-based minimal scope)",
+      "description": "AST-aware codebase map in the system prompt. Minimal scope: stdlib ast module extracts top-level classes/functions/imports from each .py file under WORKDIR. NOT tree-sitter (would add heavy dep).",
+      "dependencies": [],
+      "status": "done",
+      "evidence": "uv run pytest tests/test_repomap.py -v -> 12/12 passed. uv run python -m loom.cli eval --filter repomap --fail-under 100 -> 3/3 passed. uv run pytest -m 'not snapshot' -q -> 786 passed (was 774, +12). uv run ruff + mypy -> 0 issues in 116 source files. loom/agent/repomap.py (NEW): build_repomap(workdir, max_files=20, max_tokens=4000) uses Python stdlib ast module to extract top-level classes + functions + methods from each .py file under WORKDIR. Sorts by symbol count descending, truncates at char budget. Skips dotfiles, __pycache__, syntax-error files. Output format: 'Codebase Map (top files by symbol count):\\nrel/path.py: ClassA, ClassA.method, function_foo, ...'. loom/agent/system_prompt.py: imports build_repomap and injects the map into the memory tier via sp.add_memory(repomap). TDD caught: I forgot to add the tmp_path fixture parameter to one test -- raised NameError, fixed."
     }
   ]
 }
