@@ -1,4 +1,5 @@
 from loom.eval.cases import (
+    agent_quality,  # noqa: F401 — registers AgentQualityCase subclasses
     async_init_sh_helper,  # noqa: F401
     async_streaming,  # noqa: F401
     audit,  # noqa: F401

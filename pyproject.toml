@@ -38,6 +38,9 @@ packages = ["loom"]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-v --tb=short"
+markers = [
+    "snapshot: visual / terminal-snapshot tests via snap_compare; slow (~1-13s each) and not relevant for non-UI changes. Use `pytest -m 'not snapshot'` in dev cycles.",
+]
 
 [tool.ruff]
 line-length = 100

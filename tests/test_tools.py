@@ -50,14 +50,14 @@ def test_run_bash_missing_command(monkeypatch, temp_workdir):
 # ── run_read ──────────────────────────────────────────────────────────────
 
 def test_run_read_existing_file(monkeypatch, temp_workdir):
-    """run_read returns the full content of an existing file."""
+    """run_read returns the file's lines numbered 1..N (cat -n style, no offset)."""
     monkeypatch.setattr(main, "WORKDIR", temp_workdir)
 
     file_path = temp_workdir / "read_test.txt"
     file_path.write_text("line1\nline2\nline3")
 
     result = main.run_read("read_test.txt")
-    assert result == "line1\nline2\nline3"
+    assert result == "1: line1\n2: line2\n3: line3"
 
 
 def test_run_read_missing_file(monkeypatch, temp_workdir):
@@ -68,7 +68,7 @@ def test_run_read_missing_file(monkeypatch, temp_workdir):
 
 
 def test_run_read_with_limit(monkeypatch, temp_workdir):
-    """run_read respects the limit parameter and adds a truncation hint."""
+    """run_read with limit=3 on 10-line file returns first 3 numbered lines + '... (7 more lines)' footer."""
     monkeypatch.setattr(main, "WORKDIR", temp_workdir)
 
     lines = [f"line{i}" for i in range(10)]
@@ -77,9 +77,7 @@ def test_run_read_with_limit(monkeypatch, temp_workdir):
 
     result = main.run_read("many_lines.txt", limit=3)
     result_lines = result.splitlines()
-    # limit lines + 1 truncation hint line (or fewer if file is smaller)
-    assert len(result_lines) <= 3 + 1
-    assert "more lines)" in result
+    assert result_lines == [" 1: line0", " 2: line1", " 3: line2", "... (7 more lines)"]
 
 
 def test_run_read_path_escape(monkeypatch, temp_workdir):
@@ -91,6 +89,105 @@ def test_run_read_path_escape(monkeypatch, temp_workdir):
 
     result = main.run_read("../outside")
     assert "Error:" in result
+
+
+def test_run_read_with_offset(monkeypatch, temp_workdir):
+    """offset is 1-indexed: offset=4 on 10-line file returns lines 4..10 numbered 4..10."""
+    monkeypatch.setattr(main, "WORKDIR", temp_workdir)
+
+    lines = [f"line{i}" for i in range(10)]
+    file_path = temp_workdir / "offset_test.txt"
+    file_path.write_text("\n".join(lines))
+
+    result = main.run_read("offset_test.txt", offset=4)
+    result_lines = result.splitlines()
+    assert result_lines == [f"{i:>2}: line{i - 1}" for i in range(4, 11)]
+
+
+def test_run_read_offset_and_limit(monkeypatch, temp_workdir):
+    """offset+limit returns a 1-indexed window: offset=3, limit=3 on 10-line file → lines 3..5 + footer."""
+    monkeypatch.setattr(main, "WORKDIR", temp_workdir)
+
+    lines = [f"line{i}" for i in range(10)]
+    file_path = temp_workdir / "offset_limit_test.txt"
+    file_path.write_text("\n".join(lines))
+
+    result = main.run_read("offset_limit_test.txt", limit=3, offset=3)
+    result_lines = result.splitlines()
+    assert result_lines == [" 3: line2", " 4: line3", " 5: line4", "... (5 more lines)"]
+
+
+def test_run_read_offset_at_end(monkeypatch, temp_workdir):
+    """offset > total returns 'past end' marker (no IndexError, no exception)."""
+    monkeypatch.setattr(main, "WORKDIR", temp_workdir)
+
+    lines = [f"line{i}" for i in range(5)]
+    file_path = temp_workdir / "short.txt"
+    file_path.write_text("\n".join(lines))
+
+    result = main.run_read("short.txt", offset=10)
+    assert "past end" in result
+    assert "5 lines" in result
+
+
+def test_run_read_offset_at_total(monkeypatch, temp_workdir):
+    """offset == total returns the last line (boundary, not past-end)."""
+    monkeypatch.setattr(main, "WORKDIR", temp_workdir)
+
+    lines = [f"line{i}" for i in range(5)]
+    file_path = temp_workdir / "boundary.txt"
+    file_path.write_text("\n".join(lines))
+
+    result = main.run_read("boundary.txt", offset=5)
+    assert result == "5: line4"
+
+
+def test_run_read_negative_offset(monkeypatch, temp_workdir):
+    """run_read with a negative `offset` returns an explicit Error string (does not raise)."""
+    monkeypatch.setattr(main, "WORKDIR", temp_workdir)
+
+    file_path = temp_workdir / "x.txt"
+    file_path.write_text("only line")
+
+    result = main.run_read("x.txt", offset=-1)
+    assert result.startswith("Error:")
+    assert "offset must be >= 0" in result
+
+
+def test_run_read_line_number_alignment(monkeypatch, temp_workdir):
+    """Line-number column is right-aligned to len(str(total)) so columns line up across windows."""
+    monkeypatch.setattr(main, "WORKDIR", temp_workdir)
+
+    file_path = temp_workdir / "wide.txt"
+    file_path.write_text("\n".join(f"row{i}" for i in range(150)))
+
+    result = main.run_read("wide.txt", limit=5, offset=10)
+    lines = result.splitlines()
+    widths = {len(line.split(": ", 1)[0]) for line in lines if ": " in line}
+    assert widths == {3}, f"expected width=3 for 150-line file, got {widths}"
+
+
+def test_run_read_offset_passes_through_as_first_line_number(monkeypatch, temp_workdir):
+    """The first line's number in the output equals the offset (1-indexed, cat -n invariant)."""
+    monkeypatch.setattr(main, "WORKDIR", temp_workdir)
+
+    file_path = temp_workdir / "page.txt"
+    file_path.write_text("\n".join(f"L{i}" for i in range(50)))
+
+    result = main.run_read("page.txt", limit=3, offset=42)
+    first_line = result.splitlines()[0]
+    assert first_line.startswith("42: "), f"first line should be '42: ...', got {first_line!r}"
+
+
+def test_run_read_empty_file(monkeypatch, temp_workdir):
+    """Empty file returns '(no content in window)' without crashing."""
+    monkeypatch.setattr(main, "WORKDIR", temp_workdir)
+
+    file_path = temp_workdir / "empty.txt"
+    file_path.write_text("")
+
+    result = main.run_read("empty.txt")
+    assert "no content" in result.lower()
 
 
 # ── run_write ─────────────────────────────────────────────────────────────

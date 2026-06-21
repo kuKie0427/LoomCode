@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -13,6 +14,16 @@ from anthropic import Anthropic
 from anthropic.types import MessageParam, TextBlock, ToolResultBlockParam
 
 StatePredicate = Callable[[], bool]
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    for item in items:
+        try:
+            sig = inspect.signature(item.function)
+        except (TypeError, ValueError):
+            continue
+        if "snap_compare" in sig.parameters:
+            item.add_marker(pytest.mark.snapshot)
 
 
 async def wait_for_state(

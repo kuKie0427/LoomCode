@@ -22,11 +22,11 @@ from loom.eval.runner import (
 )
 
 
-def run_evals(workdir=None, html_output=None) -> int:
-    """Run all evals; optionally write an HTML report. Returns pass rate 0-100."""
+def run_evals(workdir=None, html_output=None, case_filter=None, kind=None) -> int:
+    """Run all evals; ``case_filter`` (case-insensitive substring on name+description) limits the run for fast dev cycles. ``kind`` (e.g. "harness" or "agent-quality") narrows to that subset."""
     import os
 
-    benchmark = os.environ.get("LOOP_BENCHMARK")
+    benchmark = os.environ.get("LOOM_BENCHMARK")
     if benchmark == "resume":
         from loom.eval.benchmarks.resume import run_resume_benchmark
 
@@ -37,7 +37,7 @@ def run_evals(workdir=None, html_output=None) -> int:
         print(f"benchmark: resume {report.successes}/{report.trials} ({report.rate_pct}%) < 90% threshold")
         return 1
 
-    passed, results = run_all()
+    passed, results = run_all(case_filter=case_filter, kind=kind)
     print(format_report(passed, results))
     if html_output is not None:
         from pathlib import Path as _P

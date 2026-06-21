@@ -106,12 +106,28 @@ def safe_path(p: str) -> Path:
     return path
 
 
-def run_read(path: str, limit: int | None = None) -> str:
+def run_read(path: str, limit: int | None = None, offset: int = 0) -> str:
     try:
-        lines = safe_path(path).read_text().splitlines()
-        if limit and limit < len(lines):
-            lines = lines[:limit] + [f"... ({len(lines) - limit} more lines)"]
-        return "\n".join(lines)
+        if offset < 0:
+            return f"Error: offset must be >= 0, got {offset}"
+        all_lines = safe_path(path).read_text().splitlines()
+        total = len(all_lines)
+        if offset == 0:
+            start_idx = 0
+        elif offset > total:
+            return f"(file has {total} lines, offset {offset} is past end)"
+        else:
+            start_idx = offset - 1
+        end_idx = start_idx + limit if limit is not None else total
+        window = all_lines[start_idx:end_idx]
+        if not window:
+            return "(no content in window)"
+        width = len(str(total))
+        numbered = [f"{start_idx + 1 + i:>{width}}: {line}" for i, line in enumerate(window)]
+        remaining_after = total - (start_idx + len(window))
+        if remaining_after > 0:
+            numbered.append(f"... ({remaining_after} more lines)")
+        return "\n".join(numbered)
     except Exception as e:
         return f"Error: {e}"
 
@@ -204,8 +220,13 @@ TOOL_REGISTRY.register(Tool(
 ))
 TOOL_REGISTRY.register(Tool(
     name="read_file",
-    description="Read file contents.",
-    input_schema={"type": "object", "properties": {"path": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["path"]},
+    description=(
+        "Read file contents with optional 1-indexed pagination. Output lines are numbered "
+        "(cat -n style, right-aligned to total line count) so any line number you see can "
+        "be passed straight back as `offset` for the next read. A trailing '... (N more "
+        "lines)' hint indicates further content past the window."
+    ),
+    input_schema={"type": "object", "properties": {"path": {"type": "string"}, "limit": {"type": "integer"}, "offset": {"type": "integer", "minimum": 1, "description": "1-indexed start line; omit or 0 to read from the beginning"}}, "required": ["path"]},
     handler=run_read,
     is_read_only=True,
     is_concurrent_safe=True,
@@ -297,8 +318,8 @@ TOOL_HANDLERS = {name: TOOL_REGISTRY.handler_for(name) for name in TOOL_REGISTRY
 SUB_TOOLS: list[ToolParam] = [
     {"name": "bash", "description": "Run a shell command.",
      "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
-    {"name": "read_file", "description": "Read file contents.",
-     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
+    {"name": "read_file", "description": "Read file contents with 1-indexed pagination. Output lines are numbered (cat -n style) so any line number can be passed back as `offset` for the next read. A trailing '... (N more lines)' hint indicates further content past the window.",
+     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "limit": {"type": "integer"}, "offset": {"type": "integer", "minimum": 1, "description": "1-indexed start line; omit or 0 to read from the beginning"}}, "required": ["path"]}},
     {"name": "write_file", "description": "Write content to a file.",
      "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},
     {"name": "edit_file", "description": "Replace exact text in a file once.",

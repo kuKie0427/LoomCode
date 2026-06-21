@@ -249,3 +249,38 @@ class MemorySummaryTruncates(EvalCase):
         if "entry 0" not in summary:
             return EvalResult(name=self.name, passed=False, detail="summary missing first entry")
         return EvalResult(name=self.name, passed=True, detail=f"summary={line_count} lines")
+
+
+class ReadFileOffsetReturnsWindowedSlice(EvalCase):
+    name = "read-file-offset-returns-windowed-slice"
+    description = (
+        "run_read(path, limit, offset) returns a 1-indexed cat -n style window: line numbers "
+        "are right-aligned and the first line's number equals the offset, so the LLM can "
+        "pass any displayed number straight back as `offset` on the next call."
+    )
+
+    def run(self) -> EvalResult:
+        import shutil
+
+        from loom.eval._util import make_empty_workdir
+        wd = make_empty_workdir("read-offset")
+        shutil.rmtree(wd, ignore_errors=True)
+        wd.mkdir(parents=True, exist_ok=True)
+        target = wd / "page.txt"
+        target.write_text("\n".join(f"L{i}" for i in range(20)))
+
+        import loom.agent.tools as main
+        old_wd = main.WORKDIR
+        main.WORKDIR = wd.resolve()
+        try:
+            windowed = main.run_read("page.txt", limit=5, offset=11)
+        finally:
+            main.WORKDIR = old_wd
+
+        lines = windowed.splitlines()
+        expected_window = [f"{i:>2}: L{i - 1}" for i in range(11, 16)]
+        if lines[:5] != expected_window:
+            return EvalResult(name=self.name, passed=False, detail=f"window wrong:\n got  {lines[:5]}\n want {expected_window}")
+        if not lines[-1].endswith("more lines)"):
+            return EvalResult(name=self.name, passed=False, detail=f"missing footer: {lines[-1]!r}")
+        return EvalResult(name=self.name, passed=True, detail="1-indexed offset+window+footer ok")

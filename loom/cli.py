@@ -80,6 +80,8 @@ def _build_parser() -> argparse.ArgumentParser:
     eval_p.add_argument("--html", type=Path, default=None, help="Write HTML report to FILE")
     eval_p.add_argument("--fail-under", type=int, default=100, help="Exit non-zero if score < N (default 100)")
     eval_p.add_argument("--benchmark", choices=["resume"], default=None, help="Run a named benchmark instead of the regular eval suite")
+    eval_p.add_argument("--filter", dest="case_filter", default=None, help="Substring match against case name/description (case-insensitive). Runs only matching cases — for fast dev cycles.")
+    eval_p.add_argument("--kind", choices=["harness", "agent-quality"], default=None, help="Run only one kind of eval. 'harness' = infrastructure mechanics (default mix), 'agent-quality' = end-to-end agent behavior (real LLM calls).")
 
     return parser
 
@@ -166,11 +168,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "eval":
         if args.benchmark:
-            os.environ["LOOP_BENCHMARK"] = args.benchmark
+            os.environ["LOOM_BENCHMARK"] = args.benchmark
         from loom.eval import run_evals
         workdir = args.workdir.resolve()
         try:
-            score = run_evals(workdir=workdir, html_output=args.html)
+            score = run_evals(workdir=workdir, html_output=args.html, case_filter=args.case_filter, kind=args.kind)
         except SystemExit as exc:
             return int(exc.code) if exc.code is not None else 1
         if score < args.fail_under:

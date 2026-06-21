@@ -18,6 +18,7 @@ class EvalResult:
 class EvalCase:
     name: ClassVar[str] = ""
     description: ClassVar[str] = ""
+    kind: ClassVar[str] = "harness"
 
     def setup(self) -> None:
         pass
@@ -48,7 +49,8 @@ def _walk_subclasses(cls: type) -> list[type]:
 def discover_evals() -> list[type[EvalCase]]:
     import loom.eval.cases  # noqa: F401 — side effect: register all cases
 
-    return _walk_subclasses(EvalCase)
+    cases = _walk_subclasses(EvalCase)
+    return [c for c in cases if getattr(c, "name", "")]
 
 
 def run_one(case: type[EvalCase]) -> EvalResult:
@@ -82,8 +84,17 @@ def run_one(case: type[EvalCase]) -> EvalResult:
     return result
 
 
-def run_all() -> tuple[int, list[EvalResult]]:
+def run_all(case_filter: str | None = None, kind: str | None = None) -> tuple[int, list[EvalResult]]:
     cases = discover_evals()
+    if kind is not None:
+        cases = [c for c in cases if getattr(c, "kind", "harness") == kind]
+    if case_filter:
+        f = case_filter.lower()
+        cases = [
+            c for c in cases
+            if f in getattr(c, "name", "").lower()
+            or f in getattr(c, "description", "").lower()
+        ]
     results = [run_one(c) for c in cases]
     passed = sum(1 for r in results if r.passed)
     return passed, results
