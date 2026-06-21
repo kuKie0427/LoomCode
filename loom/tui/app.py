@@ -253,6 +253,7 @@ class AgentTUIApp(App):
         self.query_one(ChatLog).mount_welcome()
         self._session_start = time.monotonic()
         self.set_interval(60.0, self._tick_session_elapsed, name="elapsed-tick")
+        self.set_interval(1.0, self._tick_shuttle, name="shuttle-tick")
         self._detect_git_branch()
 
     def on_key(self, event) -> None:
@@ -343,6 +344,20 @@ class AgentTUIApp(App):
             return
         status_bar.elapsed_seconds = int(time.monotonic() - self._session_start)
 
+    def _tick_shuttle(self) -> None:
+        """§2.2.3 primitive 1: 1Hz shuttle pass, ONLY when state != idle.
+
+        Idle freezes shuttle at base position (no view churn).
+        Active: phase toggles 0↔1 each tick → ±1 char back-and-forth.
+        """
+        if self.engine_state == "idle":
+            return
+        try:
+            status_bar = self.query_one(StatusBar)
+        except Exception:
+            return
+        status_bar.shuttle_phase = 1 - status_bar.shuttle_phase
+
     def _detect_git_branch(self) -> None:
         try:
             result = subprocess.run(
@@ -370,6 +385,11 @@ class AgentTUIApp(App):
         self._sync_status_bar()
 
     def watch_engine_state(self, _old: EngineState, new: EngineState) -> None:
+        if new == "idle":
+            try:
+                self.query_one(StatusBar).shuttle_phase = 0
+            except Exception:
+                pass
         try:
             self.query_one(StatusBar).engine_state = new
         except Exception:

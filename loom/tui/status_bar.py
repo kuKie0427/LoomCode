@@ -7,9 +7,10 @@ from textual.widgets import Static
 
 EngineState = Literal["idle", "thinking", "streaming", "executing", "compacting", "error"]
 
-_BAR_WIDTH = 10
-_BAR_FULL = "█"
-_BAR_EMPTY = "░"
+_RAIL_WIDTH = 10
+_RAIL_TICK = "─"
+_SHUTTLE = "●"
+_SHUTTLE_PASS_RANGE = 1
 
 _CTX_WARN_RATIO = 0.60
 _CTX_DANGER_RATIO = 0.85
@@ -31,18 +32,30 @@ def _format_elapsed(seconds: int) -> str:
     return f"{seconds // 3600}:{(seconds % 3600) // 60:02d}:{seconds % 60:02d}"
 
 
-def _progress_bar(ratio: float, width: int = _BAR_WIDTH) -> str:
-    ratio = max(0.0, min(1.0, ratio))
-    filled = int(round(ratio * width))
-    return _BAR_FULL * filled + _BAR_EMPTY * (width - filled)
-
-
 def _ctx_color_class(ratio: float) -> str:
     if ratio >= _CTX_DANGER_RATIO:
         return "ctx-danger"
     if ratio >= _CTX_WARN_RATIO:
         return "ctx-warn"
     return "ctx-ok"
+
+
+def _ctx_rail_render(ratio: float, shuttle_phase: int, state: EngineState) -> str:
+    """§2.2.3 ctx rail with shuttle pass — idle freezes, active passes."""
+    base_x = round(ratio * (_RAIL_WIDTH - 1))
+    offset = 0 if state == "idle" else shuttle_phase * _SHUTTLE_PASS_RANGE
+    shuttle_x = max(0, min(_RAIL_WIDTH - 1, base_x + offset))
+
+    rail_chars = [_RAIL_TICK] * _RAIL_WIDTH
+    rail_chars[shuttle_x] = _SHUTTLE
+    rail_str = "".join(rail_chars)
+
+    color_map = {
+        "ctx-ok": "[$success]",
+        "ctx-warn": "[$warning]",
+        "ctx-danger": "[$error]",
+    }
+    return f"{color_map[_ctx_color_class(ratio)]}{rail_str}[/]"
 
 
 def _render_engine_badge(state: EngineState) -> str:
@@ -73,6 +86,7 @@ class StatusBar(Static):
     elapsed_seconds: reactive[int] = reactive(0)
     git_branch: reactive[str] = reactive("")
     engine_state: reactive[EngineState] = reactive("idle")
+    shuttle_phase: reactive[int] = reactive(0)
 
     def render(self) -> str:
         app = self.app
@@ -80,14 +94,9 @@ class StatusBar(Static):
 
         ctx_window = self.ctx_window or 1
         ratio = self.ctx_tokens / ctx_window if ctx_window > 0 else 0.0
-        bar = _progress_bar(ratio)
-        color_open = {
-            "ctx-ok": "[$success]",
-            "ctx-warn": "[$warning]",
-            "ctx-danger": "[$error]",
-        }[_ctx_color_class(ratio)]
+        rail = _ctx_rail_render(ratio, self.shuttle_phase, self.engine_state)
         ctx_str = (
-            f"[$text-muted]ctx:[/] {color_open}{bar}[/] "
+            f"[$text-muted]ctx:[/] {rail} "
             f"{_format_tokens(self.ctx_tokens)}/{_format_tokens(self.ctx_window)} "
             f"({ratio * 100:.0f}%)"
         )
