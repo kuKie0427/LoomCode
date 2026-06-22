@@ -29,10 +29,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from loom.agent import mcp_client, mcp_manager as mm
+from loom.agent import mcp_client
+from loom.agent import mcp_manager as mm
 from loom.agent.mcp_client import MCPError, MCPServer
 from loom.agent.tools import TOOL_REGISTRY
-
 
 # ── Shared fixture: clean manager state between tests ──────────────────────
 
@@ -145,7 +145,7 @@ def test_flatten_mcp_content_resource_missing_uri() -> None:
 
 def test_mcp_handler_truncates_at_50kb() -> None:
     """A 60KB text result is truncated to 50KB + a footer."""
-    server = _seed_server("big")
+    _seed_server("big")
     big_text = "x" * 60000
     with patch.object(
         mcp_client, "call_tool", return_value=[{"type": "text", "text": big_text}],
@@ -171,7 +171,7 @@ def test_mcp_handler_truncation_emits_trace_event() -> None:
             self.events.append((event, fields))
 
     fake = _FakeTrace()
-    server = _seed_server("big")
+    _seed_server("big")
     big_text = "x" * 60000
     with patch.object(trace_mod, "current", return_value=fake), \
          patch.object(
@@ -191,7 +191,7 @@ def test_mcp_handler_truncation_emits_trace_event() -> None:
 
 def test_mcp_handler_no_truncation_for_small_output() -> None:
     """A small output is returned verbatim — no truncation, no footer."""
-    server = _seed_server("small")
+    _seed_server("small")
     with patch.object(
         mcp_client, "call_tool",
         return_value=[{"type": "text", "text": "short"}],
@@ -206,7 +206,7 @@ def test_mcp_handler_no_truncation_for_small_output() -> None:
 
 def test_mcp_handler_crash_evicts_and_unregisters() -> None:
     """call_tool raises → server evicted, tools unregistered, warning logged."""
-    server = _seed_server("crashy")
+    _seed_server("crashy")
     # Pre-register two tools for this server so we can confirm unregistration.
     from loom.agent.tool_registry import Tool
     for tname in ("mcp__crashy__a", "mcp__crashy__b"):
@@ -264,7 +264,7 @@ def test_mcp_handler_records_request_trace() -> None:
             self.events.append((event, fields))
 
     fake = _FakeTrace()
-    server = _seed_server("trace")
+    _seed_server("trace")
     order: list[str] = []
 
     def _call(server, tool_name, arguments):

@@ -26,8 +26,6 @@ live in tests/test_mcp_manager.py to mirror the LSP test split.
 from __future__ import annotations
 
 import os
-import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -40,7 +38,7 @@ from loom.agent.config import (
     MCPServerConfig,
     load_config,
 )
-from loom.agent.mcp_client import MCPServer, mcp_tool_to_loom_tool
+from loom.agent.mcp_client import MCPError, MCPServer, mcp_tool_to_loom_tool
 from loom.agent.tool_registry import Tool
 from loom.agent.tools import (
     TOOL_REGISTRY,
@@ -48,7 +46,6 @@ from loom.agent.tools import (
     get_tool_handlers,
     get_tools,
 )
-
 
 # ── 1. MCPConfig defaults ──────────────────────────────────────────────────
 
@@ -191,6 +188,7 @@ def test_mcp_config_env_not_inheriting_os_environ() -> None:
 def test_mcp_client_start_does_not_inherit_environ(monkeypatch: pytest.MonkeyPatch) -> None:
     """start() Popen call uses env=server.env only (no os.environ merge)."""
     import subprocess
+
     import loom.agent.mcp_client as mc
     captured: dict = {}
 
@@ -222,7 +220,7 @@ def test_mcp_client_start_does_not_inherit_environ(monkeypatch: pytest.MonkeyPat
         server = MCPServer(
             name="fs", command="x", env={"GITHUB_TOKEN": "ghp_abc"},
         )
-        with pytest.raises(Exception):  # MCPError or EOFError variant
+        with pytest.raises((MCPError, EOFError)):  # start() raises MCPError; EOFError variant possible
             mc.start(server)
         assert "env" in captured, "Popen not called?"
         env = captured["env"]
