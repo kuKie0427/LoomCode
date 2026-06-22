@@ -40,6 +40,7 @@ from loom.eval.cases import (
     mcp_subagent,  # noqa: F401
     mcp_wire,  # noqa: F401
     microcompact_counter,  # noqa: F401
+    multi_model_p0,  # noqa: F401
     permission_canonicalize,  # noqa: F401
     permission_deny_expanded,  # noqa: F401
     permission_persistence,  # noqa: F401

@@ -6,7 +6,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import dotenv
 from loguru import logger
@@ -18,7 +18,7 @@ from loom.agent.context import Context
 from loom.agent.hooks import Hooks
 from loom.agent.llm import LLMClient, StreamEvent
 from loom.agent.prompt import AGENTS_MD_STATIC_LIMIT, SystemPrompt
-from loom.agent.system_prompt import get_system_prompt, invalidate_system_prompt
+from loom.agent.system_prompt import get_system_prompt
 from loom.agent.tools import (
     get_tool_handlers,
     get_tools,
@@ -308,7 +308,7 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
             tokens_at_last_checkpoint = context.current_tokens(messages)
             max_turns = _active_config.max_turns
             for turn in range(max_turns):
-                from loom.agent.tool_errors import detect_repeated_failures, build_retry_guidance
+                from loom.agent.tool_errors import build_retry_guidance, detect_repeated_failures
                 detection = detect_repeated_failures(messages)
                 if detection is not None and (not messages or messages[-1].get("role") != "user" or "<system-reminder>" not in str(messages[-1].get("content", ""))[:200]):
                     messages.append({"role": "user", "content": build_retry_guidance(detection)})
@@ -329,14 +329,23 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                     cb["on_assistant_message_start"]()
                 if stream_text is not None:
                     # ===== STREAMING PATH =====
-                    from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
+                    from loom.agent.providers.types import (
+                        ProviderResponse,
+                        StopReason,
+                        TextBlock,
+                        ToolUseBlock,
+                        Usage,
+                    )
                     content_blocks: list = []
                     input_tokens = 0
                     output_tokens = 0
+                    cache_read_tokens = 0
+                    cache_creation_tokens = 0
+                    reasoning_tokens = 0
                     stop_reason = "end_turn"
                     for ev in stream_text(_get_system_prompt(), messages, cast(list, get_tools()), LLM_CONFIG.max_output_tokens):
                         if ev.kind == "text":
-                            content_blocks.append(TextBlock(type="text", text=ev.text))
+                            content_blocks.append(TextBlock(text=ev.text))
                             if cb["on_text_delta"] is not None:
                                 cb["on_text_delta"](ev.text)
                         elif ev.kind == "thinking":
@@ -344,7 +353,6 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                                 cb["on_thinking_delta"](ev.text)
                         elif ev.kind == "tool_use":
                             content_blocks.append(ToolUseBlock(
-                                type="tool_use",
                                 id=ev.tool_id,
                                 name=ev.tool_name,
                                 input=ev.tool_input or {},
@@ -354,17 +362,25 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                                 input_tokens = ev.input_tokens
                             if ev.output_tokens:
                                 output_tokens = ev.output_tokens
+                            if ev.cache_read_tokens:
+                                cache_read_tokens = ev.cache_read_tokens
+                            if ev.cache_creation_tokens:
+                                cache_creation_tokens = ev.cache_creation_tokens
+                            if ev.reasoning_tokens:
+                                reasoning_tokens = ev.reasoning_tokens
                             if ev.stop_reason:
                                 stop_reason = ev.stop_reason
-                    response = Message(
-                        id="stream-" + uuid.uuid4().hex[:8],
-                        type="message",
-                        role="assistant",
-                        content=content_blocks,
+                    response = ProviderResponse(
                         model=llm_client.model,
-                        stop_reason=cast(Any, stop_reason),
-                        stop_sequence=None,
-                        usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens),
+                        content=content_blocks,
+                        stop_reason=StopReason(stop_reason) if stop_reason in StopReason._value2member_map_ else StopReason.END_TURN,
+                        usage=Usage(
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                            cache_read_tokens=cache_read_tokens,
+                            cache_creation_tokens=cache_creation_tokens,
+                            reasoning_tokens=reasoning_tokens,
+                        ),
                     )
                 else:
                     # ===== SYNC PATH (unchanged) =====
@@ -379,7 +395,7 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                     )
                 context.update(len(messages), response)
                 if tr is not None:
-                    from loom.agent.cost import usage_from_response, record_turn
+                    from loom.agent.cost import record_turn, usage_from_response
                     usage = usage_from_response(response.usage)
                     cost = record_turn(usage, llm_client.model)
                     tr.record("llm_response", stop_reason=response.stop_reason,

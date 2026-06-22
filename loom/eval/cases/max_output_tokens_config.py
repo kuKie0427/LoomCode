@@ -100,7 +100,7 @@ class ConfigLlmMaxOutputTokensOverridableViaHarnessToml(EvalCase):
             class FakeAsyncClient:
                 messages = FakeAsyncMessages()
 
-            client.async_client = FakeAsyncClient()  # type: ignore[assignment]
+            client.async_client = FakeAsyncClient()
             client._cancel_event = type(client._cancel_event)()
 
             gen = client.stream_iter("sys", [], [])

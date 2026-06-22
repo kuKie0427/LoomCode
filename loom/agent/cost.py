@@ -11,10 +11,8 @@ Override via harness.toml [pricing.<model>] per_model.
 
 from __future__ import annotations
 
-import json
 import logging
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
 
 _logger = logging.getLogger(__name__)
@@ -93,16 +91,25 @@ def compute_cost(model: str, usage: TokenUsage) -> CostBreakdown:
 
 
 def usage_from_response(usage: Any) -> TokenUsage:
-    """Extract TokenUsage from an Anthropic response.usage object.
+    """Extract TokenUsage from a Usage object (provider-agnostic) or
+    Anthropic response.usage (legacy).
 
-    Supports cache_creation_input_tokens and cache_read_input_tokens
-    fields which appear on prompt-cached responses.
+    Accepts:
+      - loom.agent.providers.types.Usage dataclass (new)
+      - anthropic.types.Usage (legacy, has cache_creation_input_tokens /
+        cache_read_input_tokens attribute names)
     """
+    cache_read = getattr(usage, "cache_read_tokens", None)
+    if cache_read is None:
+        cache_read = getattr(usage, "cache_read_input_tokens", 0)
+    cache_creation = getattr(usage, "cache_creation_tokens", None)
+    if cache_creation is None:
+        cache_creation = getattr(usage, "cache_creation_input_tokens", 0)
     return TokenUsage(
         input_tokens=getattr(usage, "input_tokens", 0) or 0,
         output_tokens=getattr(usage, "output_tokens", 0) or 0,
-        cache_read_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
-        cache_creation_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0,
+        cache_read_tokens=cache_read or 0,
+        cache_creation_tokens=cache_creation or 0,
     )
 
 

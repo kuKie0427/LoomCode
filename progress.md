@@ -6287,3 +6287,75 @@ per AGENTS.md rule #6,本 feature 的 verification command(`ruff check . && mypy
 - **`f-chore-fix-snapshot-hash-flake`** — 写 normalize 脚本(提取 `<text>` 段 + normalize `terminal-X` hash ID)再比,根治 3 个 rotating snapshot flake。~1-2h。
 - 或者:commit 当前三段 prompt 写 + ruff 修(user 没明确要求 commit,working tree 有 ~15 modified + 1 untracked)
 - 或者:补齐 loom 单模板 → 多模板(opencode 8 个 per-model 模板)
+
+## Session: f-multi-model-providers-p0-foundation (2026-06-23)
+
+### What was done
+
+Phase P0 of the multi-model roadmap. Built the foundation abstraction layer (provider-agnostic LLMClient), refactored existing call sites to use it, added tests + eval cases. No new providers beyond Anthropic yet — that's P1.
+
+### Architecture changes
+
+- **New: `loom/agent/providers/` package** (5 files, ~500 LOC)
+  - `types.py` — StreamEvent, Usage, ToolDefinition, ContentBlock (TextBlock/ThinkingBlock/ToolUseBlock/ToolResultBlock), StopReason enum, ProviderRequest/Response, ProviderError with 8 codes
+  - `base.py` — LLMProvider ABC + PricingInfo dataclass
+  - `registry.py` — `parse_model_id()` (default anthropic on no prefix), `get_provider()` raises on unknown, `register()` class decorator
+  - `anthropic.py` — AnthropicProvider: ports existing stream logic with cache_control, error mapping (401/429/400/5xx), 6 supported models, pricing table
+  - `__init__.py` — Public API surface
+
+- **Refactored: `loom/agent/llm.py`** — LLMClient is now a thin facade: parses model → instantiates provider → delegates `stream_iter` to `self._provider.stream()`. Preserves public API for backward compat (StreamEvent, with_cache_control, with_tool_cache_control, MIN_CACHEABLE_TOKENS, self.client, self.async_client all still work).
+
+- **Refactored: `loom/agent/loop.py`** — Streaming path constructs `ProviderResponse` (not anthropic.types.Message) from accumulated StreamEvents. Removed `from anthropic.types import` line.
+
+- **Refactored: `loom/agent/cost.py`** — `usage_from_response()` accepts both new `Usage` dataclass and legacy `anthropic.types.Usage` (has `cache_creation_input_tokens` / `cache_read_input_tokens`).
+
+### Tests + eval
+
+- **New: `tests/test_providers.py`** — 23 tests (parse_model_id, get_provider, AnthropicProvider context/pricing, registry, types contracts)
+- **New: `loom/eval/cases/multi_model_p0.py`** — 11 eval cases locking the contract (parse defaults, unknown raises, context_window, pricing shape, Usage dataclass, ContentBlock union, loop.py no longer imports anthropic.types, LLMClient delegates, change_model works, registry contains anthropic)
+
+### Gate results
+
+| Check | Result |
+|---|---|
+| `uv run ruff check .` | All checks passed |
+| `uv run mypy loom/` | Success, 0 issues in 147 source files (2 pre-existing notes in context.py:81-82, loop.py:268) |
+| `uv run pytest -q -m 'not snapshot'` | **1037 passed** (was 1014, +23 new in test_providers.py) |
+| `uv run python -m loom.cli eval --filter multi-model-p0 --fail-under 100` | **11/11 passed** |
+| Smoke `loom run --plain` | Starts cleanly, reads input, no crash |
+
+### Scope deviations (from P0 plan)
+
+1. **Subagent delegation failed** (platform billing error on first attempt) → implemented Waves 1+2+3+4 myself in this session instead of 4 sub-sessions. ~600 LOC across 7 files.
+2. **Sync path NOT removed** from `loop.py` — still calls `llm_client.client.messages.create` in the `else` branch (when `stream_text` is None). P3 polish scope. P0 streaming path refactored to use Provider types.
+3. **context.py and tools.py:spawn_subagent** still call `Anthropic()` SDK directly — left as-is. Will be addressed in P3 when OpenAI provider is added.
+4. **Pre-existing ruff B007** (`turn` in loop.py:310) was flagged by my full-project ruff but was pre-existing from commit 58baddd (f-tool-error-semantics). Out of scope.
+
+### What works now
+
+- `LLMClient(model="anthropic/claude-sonnet-4-5")` → uses AnthropicProvider
+- `LLMClient(model="deepseek-v4-flash")` → backwards compat, defaults to anthropic, works as before
+- `client.change_model("claude-opus-4-1")` → reuses same provider (no re-instantiation)
+- `client.change_model("openai/gpt-4o")` → would instantiate OpenAIProvider (P1; raises ProviderError until then)
+- `parse_model_id("openrouter/anthropic/claude-3.5-sonnet")` → ("openrouter", "anthropic/claude-3.5-sonnet") — model_id preserves /
+
+### What's next (P1)
+
+- OpenAIProvider (Chat Completions API, gpt-4o, gpt-4-turbo, o1, o3-mini, etc.)
+- OpenAICompatibleProvider for DeepSeek, Ollama, OpenRouter (one class, profile-driven baseURL)
+- Pricing tables per provider
+- Tests with `MockProvider` for unit tests that currently mock the Anthropic SDK
+
+### Files changed
+
+- Created: `loom/agent/providers/__init__.py`, `types.py`, `base.py`, `registry.py`, `anthropic.py`
+- Created: `tests/test_providers.py`
+- Created: `loom/eval/cases/multi_model_p0.py`
+- Modified: `loom/agent/llm.py` (rewritten as thin facade)
+- Modified: `loom/agent/loop.py` (streaming path refactored to Provider types)
+- Modified: `loom/agent/cost.py` (`usage_from_response` accepts both Usage and legacy)
+- Modified: `tests/test_models.py` (patch path + model format expectations updated)
+- Modified: `loom/eval/cases/__init__.py` (register multi_model_p0)
+- Modified: `loom/eval/cases/max_output_tokens_config.py` (removed unused type: ignore)
+- Modified: `feature_list.json` (P0 status + evidence)
+
