@@ -19,7 +19,7 @@ class SessionEndSkipWhenNoInitSh(EvalCase):
     def run(self) -> EvalResult:
         with tempfile.TemporaryDirectory() as tmpdir:
             result = subprocess.run(
-                [sys.executable, "-m", "loom.cli", "run"],
+                [sys.executable, "-m", "loom.cli", "run", "--plain"],
                 input="exit\n",
                 cwd=tmpdir,
                 capture_output=True,
@@ -56,7 +56,7 @@ class SessionEndRunsInitShWhenExists(EvalCase):
             init_sh.chmod(init_sh.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
             result = subprocess.run(
-                [sys.executable, "-m", "loom.cli", "run"],
+                [sys.executable, "-m", "loom.cli", "run", "--plain"],
                 input="exit\n",
                 cwd=tmpdir,
                 capture_output=True,
@@ -103,7 +103,7 @@ class SessionEndWarnsOnInitShFailure(EvalCase):
             init_sh.chmod(init_sh.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
             result = subprocess.run(
-                [sys.executable, "-m", "loom.cli", "run"],
+                [sys.executable, "-m", "loom.cli", "run", "--plain"],
                 input="exit\n",
                 cwd=tmpdir,
                 capture_output=True,

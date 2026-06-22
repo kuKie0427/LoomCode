@@ -47,7 +47,7 @@ class LoomRunQuitDoesNotBlockOnInitSh(EvalCase):
 
             t0 = time.monotonic()
             result = subprocess.run(
-                ["uv", "run", "python", "-m", "loom.cli", "run"],
+                ["uv", "run", "python", "-m", "loom.cli", "run", "--plain"],
                 input="exit\n",
                 text=True,
                 capture_output=True,

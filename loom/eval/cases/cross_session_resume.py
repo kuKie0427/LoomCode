@@ -257,7 +257,7 @@ class CheckpointResumeCliRestoresHistory(EvalCase):
         env = os.environ.copy()
         env["PYTHONPATH"] = str(REPO_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
         proc = subprocess.run(
-            [sys.executable, "-m", "loom.cli", "run", "--resume"],
+            [sys.executable, "-m", "loom.cli", "run", "--plain", "--resume"],
             cwd=wd,
             input="exit\n",
             capture_output=True,

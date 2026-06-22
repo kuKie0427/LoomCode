@@ -7,6 +7,7 @@ from loom.eval.cases import (
     autocompact_fallback,  # noqa: F401
     ci,  # noqa: F401
     cli_lazy_imports,  # noqa: F401
+    cli_run_tui,  # noqa: F401
     cold_archive,  # noqa: F401
     cold_start_continuity,  # noqa: F401
     conversation_export,  # noqa: F401

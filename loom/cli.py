@@ -89,10 +89,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Skip the self-test (eval runner) dimension",
     )
 
-    run_p = sub.add_parser("run", help="Run the loom coding agent REPL")
+    run_p = sub.add_parser("run", help="Run the loom coding agent (default: full Textual TUI; use --plain for bare REPL)")
     run_p.add_argument("--resume", action="store_true", help="Resume from checkpoint if present")
+    run_p.add_argument("--plain", action="store_true", help="Use bare REPL instead of TUI (for CI/scripts/no-TTY)")
+    run_p.add_argument("--model", default=None, help="Override LLM model (TUI mode only)")
 
-    tui_p = sub.add_parser("tui", help="Launch the Textual TUI")
+    tui_p = sub.add_parser("tui", help="Launch the Textual TUI (alias of 'loom run'; kept for backwards compat")
     tui_p.add_argument("--resume", action="store_true", help="Resume from checkpoint")
     tui_p.add_argument("--model", default=None, help="Override LLM model")
 
@@ -185,8 +187,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "run":
-        from loom.agent import run_repl  # only needed for run subcommand
-        run_repl(resume=args.resume)
+        if getattr(args, "plain", False):
+            from loom.agent import run_repl  # only needed for --plain path
+            run_repl(resume=args.resume)
+        else:
+            from loom.tui.app import AgentTUIApp
+            AgentTUIApp(resume=args.resume, model=args.model).run()
         return 0
 
     if args.command == "tui":
