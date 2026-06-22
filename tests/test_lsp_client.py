@@ -11,7 +11,9 @@ import pytest
 from loom.agent.lsp_client import (
     LSPError,
     LSPServer,
+    find_references,
     goto_definition,
+    rename_symbol,
     shutdown,
     start,
 )
@@ -227,7 +229,8 @@ def test_shutdown_is_idempotent():
 
 def test_lsp_module_public_api():
     from loom.agent import lsp_client
-    for name in ("LSPServer", "LSPError", "start", "shutdown", "goto_definition"):
+    for name in ("LSPServer", "LSPError", "start", "shutdown", "goto_definition",
+                 "find_references", "rename_symbol"):
         assert hasattr(lsp_client, name), f"missing {name}"
 
 
@@ -242,3 +245,108 @@ def test_real_definition_via_fake_matches_lsp_spec_format():
     assert "end" in locs[0]["range"]
     assert "line" in locs[0]["range"]["start"]
     assert "character" in locs[0]["range"]["start"]
+
+
+def test_find_references_returns_locations():
+    def responder(req):
+        if req.get("method") == "initialize":
+            return {"jsonrpc": "2.0", "id": req["id"], "result": {"capabilities": {}}}
+        if req.get("method") == "textDocument/references":
+            assert req["params"]["context"]["includeDeclaration"] is True
+            return {
+                "jsonrpc": "2.0", "id": req["id"],
+                "result": [
+                    {"uri": "file:///a.py", "range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 4}}},
+                    {"uri": "file:///b.py", "range": {"start": {"line": 5, "character": 2}, "end": {"line": 5, "character": 6}}},
+                ],
+            }
+        return None
+    server = _make_server_with_fake(responder)
+    start(server)
+    refs = find_references(server, "/a.py", line=0, character=0)
+    assert len(refs) == 2
+    assert refs[0]["uri"] == "file:///a.py"
+
+
+def test_find_references_include_declaration_false():
+    captured = {}
+    def responder(req):
+        if req.get("method") == "initialize":
+            return {"jsonrpc": "2.0", "id": req["id"], "result": {"capabilities": {}}}
+        if req.get("method") == "textDocument/references":
+            captured["include"] = req["params"]["context"]["includeDeclaration"]
+            return {"jsonrpc": "2.0", "id": req["id"], "result": []}
+        return None
+    server = _make_server_with_fake(responder)
+    start(server)
+    find_references(server, "/a.py", line=0, character=0, include_declaration=False)
+    assert captured["include"] is False
+
+
+def test_find_references_empty():
+    def responder(req):
+        if req.get("method") == "initialize":
+            return {"jsonrpc": "2.0", "id": req["id"], "result": {"capabilities": {}}}
+        if req.get("method") == "textDocument/references":
+            return {"jsonrpc": "2.0", "id": req["id"], "result": None}
+        return None
+    server = _make_server_with_fake(responder)
+    start(server)
+    refs = find_references(server, "/a.py", line=0, character=0)
+    assert refs == []
+
+
+def test_find_references_without_start_raises():
+    server = LSPServer(name="pylsp", command="ignored")
+    with pytest.raises(LSPError, match="not started"):
+        find_references(server, "/a.py", line=0, character=0)
+
+
+def test_rename_symbol_returns_workspace_edit():
+    def responder(req):
+        if req.get("method") == "initialize":
+            return {"jsonrpc": "2.0", "id": req["id"], "result": {"capabilities": {}}}
+        if req.get("method") == "textDocument/rename":
+            assert req["params"]["newName"] == "new_func"
+            return {
+                "jsonrpc": "2.0", "id": req["id"],
+                "result": {
+                    "documentChanges": [
+                        {"textDocument": {"uri": "file:///x.py", "version": 1},
+                         "edits": [{"range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 8}}, "newText": "new_func"}]}
+                    ]
+                },
+            }
+        return None
+    server = _make_server_with_fake(responder)
+    start(server)
+    edit = rename_symbol(server, "/x.py", line=0, character=0, new_name="new_func")
+    assert edit is not None
+    assert "documentChanges" in edit
+
+
+def test_rename_symbol_returns_none_when_cancelled():
+    def responder(req):
+        if req.get("method") == "initialize":
+            return {"jsonrpc": "2.0", "id": req["id"], "result": {"capabilities": {}}}
+        if req.get("method") == "textDocument/rename":
+            return {"jsonrpc": "2.0", "id": req["id"], "result": None}
+        return None
+    server = _make_server_with_fake(responder)
+    start(server)
+    assert rename_symbol(server, "/x.py", line=0, character=0, new_name="x") is None
+
+
+def test_rename_symbol_rejects_empty_name():
+    server = _make_server_with_fake(_make_pylsp_responder())
+    start(server)
+    with pytest.raises(ValueError, match="non-empty"):
+        rename_symbol(server, "/x.py", line=0, character=0, new_name="")
+    with pytest.raises(ValueError, match="non-empty"):
+        rename_symbol(server, "/x.py", line=0, character=0, new_name="   ")
+
+
+def test_rename_symbol_without_start_raises():
+    server = LSPServer(name="pylsp", command="ignored")
+    with pytest.raises(LSPError, match="not started"):
+        rename_symbol(server, "/x.py", line=0, character=0, new_name="x")

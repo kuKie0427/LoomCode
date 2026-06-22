@@ -86,3 +86,46 @@ class ColdArchiveLargeSessionSimulated(EvalCase):
             if len(sample) != 10 or sample[0]["idx"] != 5_000:
                 return EvalResult(name=self.name, passed=False, detail=f"slice wrong: {sample[0]}")
         return EvalResult(name=self.name, passed=True, detail="10K-turn session chunked + rehydrated correctly")
+
+class ColdArchiveToolRegistered(EvalCase):
+    name = "cold-archive-tool-registered"
+    description = "cold_archive + cold_load tools are registered in TOOL_REGISTRY"
+
+    def run(self) -> EvalResult:
+        from loom.agent.tools import TOOL_REGISTRY
+        for name in ("cold_archive", "cold_load"):
+            if name not in TOOL_REGISTRY.names():
+                return EvalResult(name=self.name, passed=False, detail=f"{name} not registered")
+        return EvalResult(name=self.name, passed=True, detail="both tools registered with correct schemas")
+
+
+class ColdArchiveToolRoundTrip(EvalCase):
+    name = "cold-archive-tool-round-trip"
+    description = "run_cold_archive + run_cold_load round-trip 30 turns end-to-end"
+
+    def run(self) -> EvalResult:
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from loom.agent import tools
+
+        original_workdir = tools.WORKDIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                wd = Path(d)
+                tools.WORKDIR = wd
+                turns = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"msg{i}", "idx": i}
+                         for i in range(30)]
+                archive_out = tools.run_cold_archive(turns_json=json.dumps(turns), chunk_size=10)
+                if "archived 30 turns" not in archive_out:
+                    return EvalResult(name=self.name, passed=False, detail=f"archive: {archive_out}")
+                loaded_json = tools.run_cold_load(start_turn=5, end_turn=25)
+                loaded = json.loads(loaded_json)
+                if len(loaded) != 20:
+                    return EvalResult(name=self.name, passed=False, detail=f"got {len(loaded)} turns")
+                if loaded[0]["idx"] != 5 or loaded[-1]["idx"] != 24:
+                    return EvalResult(name=self.name, passed=False, detail="indices wrong")
+        finally:
+            tools.WORKDIR = original_workdir
+        return EvalResult(name=self.name, passed=True, detail="tool round-trip correct")

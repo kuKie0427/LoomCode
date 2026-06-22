@@ -14,6 +14,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from loom import __version__
+
 
 def _run_evals_with_baseline(workdir: Path, args) -> tuple[int, list]:
     """Wrap run_evals to support --baseline / --diff-baseline flags."""
@@ -42,7 +44,6 @@ def _run_evals_with_baseline(workdir: Path, args) -> tuple[int, list]:
         print(f"\nBaseline saved to {workdir / '.minicode' / 'eval-baseline.json'}")
     return score, results
 
-from loom import __version__
 
 _MAX_LOOP_CALL_DEPTH = 3
 

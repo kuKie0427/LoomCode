@@ -572,6 +572,50 @@ def run_memory_write(entry: str, heading: str | None = None) -> str:
     return f"Appended {len(entry)} chars to MEMORY.md"
 
 
+def run_cold_archive(turns_json: str, dest: str | None = None, chunk_size: int = 50) -> str:
+    """Archive a JSON-serialized list of turns to cold storage.
+
+    `turns_json` must be a JSON array string (use bash + jq or similar to
+    serialize prior to calling). Writes manifest + gzipped JSONL chunks
+    to .minicode/cold-storage/ (or `dest` if provided). Returns a summary
+    line with total turns + chunk count.
+    """
+    import json as _json
+    from pathlib import Path as _P
+    from loom.agent.cold_archive import archive as _archive
+    try:
+        turns = _json.loads(turns_json)
+        if not isinstance(turns, list):
+            return f"Error: cold_archive expected JSON array, got {type(turns).__name__}"
+    except _json.JSONDecodeError as exc:
+        return f"Error: cold_archive invalid JSON: {exc}"
+    target = _P(dest) if dest else (WORKDIR / ".minicode" / "cold-storage")
+    manifest = _archive(turns, target, chunk_size=chunk_size)
+    return (
+        f"archived {manifest.total_turns} turns ({manifest.total_tokens} est tokens) "
+        f"into {len(manifest.chunks)} chunk(s) at {target}"
+    )
+
+
+def run_cold_load(start_turn: int, end_turn: int, dest: str | None = None) -> str:
+    """Rehydrate turns [start_turn, end_turn) from cold storage.
+
+    Returns the turns as a JSON array string so the model can parse them.
+    Returns an error string on bad range / missing manifest.
+    """
+    from pathlib import Path as _P
+    from loom.agent.cold_archive import rehydrate as _rehydrate
+    target = _P(dest) if dest else (WORKDIR / ".minicode" / "cold-storage")
+    try:
+        turns = _rehydrate(target, start_turn, end_turn)
+    except FileNotFoundError as exc:
+        return f"Error: cold_load {exc}"
+    except ValueError as exc:
+        return f"Error: cold_load {exc}"
+    import json as _json
+    return _json.dumps(turns, ensure_ascii=False)
+
+
 def run_load_skill(name: str) -> str:
     skill = build_skill_index(WORKDIR).get(name)
     if skill is None:
@@ -792,6 +836,29 @@ TOOL_REGISTRY.register(Tool(
     input_schema={"type": "object", "properties": {"target": {"type": "string"}}, "required": []},
     handler=run_verify,
     is_read_only=False,
+))
+TOOL_REGISTRY.register(Tool(
+    name="cold_archive",
+    description=(
+        "Archive a JSON array of turns to gzipped cold storage at "
+        ".minicode/cold-storage/ (or `dest` if provided). Use this when a "
+        "session grows past the active context budget — older turns can be "
+        "moved to disk and rehydrated later via `cold_load`."
+    ),
+    input_schema={"type": "object", "properties": {"turns_json": {"type": "string"}, "dest": {"type": "string"}, "chunk_size": {"type": "integer"}}, "required": ["turns_json"]},
+    handler=run_cold_archive,
+    is_read_only=False,
+))
+TOOL_REGISTRY.register(Tool(
+    name="cold_load",
+    description=(
+        "Rehydrate turns [start_turn, end_turn) from cold storage as a JSON "
+        "array string. Use this when the agent needs to reference content "
+        "from a prior session or turn range that was archived via cold_archive."
+    ),
+    input_schema={"type": "object", "properties": {"start_turn": {"type": "integer"}, "end_turn": {"type": "integer"}, "dest": {"type": "string"}}, "required": ["start_turn", "end_turn"]},
+    handler=run_cold_load,
+    is_read_only=True,
 ))
 
 TOOLS = TOOL_REGISTRY.to_anthropic_schema()

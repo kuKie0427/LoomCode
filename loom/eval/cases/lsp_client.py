@@ -90,3 +90,64 @@ class LSPClientGotoDefinitionEmpty(EvalCase):
         if locs != []:
             return EvalResult(name=self.name, passed=False, detail=f"expected [], got {locs}")
         return EvalResult(name=self.name, passed=True, detail="null response returns empty list")
+
+
+class LSPClientFindReferences(EvalCase):
+    name = "lsp-client-find-references"
+    description = "find_references forwards includeDeclaration and parses Location[]"
+
+    def run(self) -> EvalResult:
+        from loom.agent.lsp_client import LSPServer, find_references, start
+        from tests.test_lsp_client import FakeLSPProcess
+
+        def responder(req):
+            if req.get("method") == "initialize":
+                return {"jsonrpc": "2.0", "id": req["id"], "result": {"capabilities": {}}}
+            if req.get("method") == "textDocument/references":
+                return {
+                    "jsonrpc": "2.0", "id": req["id"],
+                    "result": [
+                        {"uri": "file:///a.py", "range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 4}}},
+                    ],
+                }
+            return None
+
+        server = LSPServer(name="pylsp", command="ignored")
+        server.process = FakeLSPProcess(responder)  # type: ignore[assignment]
+        start(server)
+        refs = find_references(server, "/a.py", line=0, character=0)
+        if len(refs) != 1 or refs[0]["uri"] != "file:///a.py":
+            return EvalResult(name=self.name, passed=False, detail=f"got {refs}")
+        return EvalResult(name=self.name, passed=True, detail="references response parsed correctly")
+
+
+class LSPClientRenameSymbol(EvalCase):
+    name = "lsp-client-rename-symbol"
+    description = "rename_symbol sends newName and parses WorkspaceEdit"
+
+    def run(self) -> EvalResult:
+        from loom.agent.lsp_client import LSPServer, rename_symbol, start
+        from tests.test_lsp_client import FakeLSPProcess
+
+        def responder(req):
+            if req.get("method") == "initialize":
+                return {"jsonrpc": "2.0", "id": req["id"], "result": {"capabilities": {}}}
+            if req.get("method") == "textDocument/rename":
+                return {
+                    "jsonrpc": "2.0", "id": req["id"],
+                    "result": {
+                        "documentChanges": [
+                            {"textDocument": {"uri": "file:///x.py", "version": 1},
+                             "edits": [{"range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 8}}, "newText": "renamed"}]}
+                        ]
+                    },
+                }
+            return None
+
+        server = LSPServer(name="pylsp", command="ignored")
+        server.process = FakeLSPProcess(responder)  # type: ignore[assignment]
+        start(server)
+        edit = rename_symbol(server, "/x.py", line=0, character=0, new_name="renamed")
+        if edit is None or "documentChanges" not in edit:
+            return EvalResult(name=self.name, passed=False, detail=f"got {edit}")
+        return EvalResult(name=self.name, passed=True, detail="rename WorkspaceEdit parsed correctly")

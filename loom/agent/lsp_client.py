@@ -186,6 +186,79 @@ def goto_definition(
     return [result]
 
 
+def find_references(
+    server: LSPServer,
+    file_path: str | Path,
+    line: int,
+    character: int,
+    *,
+    include_declaration: bool = True,
+    timeout: float = 30.0,
+) -> list[dict]:
+    """Send textDocument/references and return list of Location dicts.
+
+    `include_declaration` is forwarded as `context.includeDeclaration`.
+    Returns [] if the server responds with `null`.
+    """
+    if server.process is None:
+        raise LSPError("LSP server not started — call start() first")
+    proc = server.process
+    req_id = _next_id(server)
+    _send(proc, {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "method": "textDocument/references",
+        "params": {
+            "textDocument": {"uri": f"file://{file_path}"},
+            "position": {"line": line, "character": character},
+            "context": {"includeDeclaration": include_declaration},
+        },
+    })
+    resp = _read_response(proc, req_id, timeout=timeout)
+    if "error" in resp:
+        raise LSPError(f"references failed: {resp['error']}")
+    result = resp.get("result")
+    if result is None:
+        return []
+    return result
+
+
+def rename_symbol(
+    server: LSPServer,
+    file_path: str | Path,
+    line: int,
+    character: int,
+    new_name: str,
+    timeout: float = 30.0,
+) -> dict | None:
+    """Send textDocument/rename and return the WorkspaceEdit dict (or None on cancel).
+
+    The server returns either a `WorkspaceEdit` (mapping of URI -> TextEdit[])
+    or `null` if the user/server cancelled the rename. Raises LSPError on
+    protocol error.
+    """
+    if server.process is None:
+        raise LSPError("LSP server not started — call start() first")
+    if not new_name or not new_name.strip():
+        raise ValueError("rename_symbol requires non-empty new_name")
+    proc = server.process
+    req_id = _next_id(server)
+    _send(proc, {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "method": "textDocument/rename",
+        "params": {
+            "textDocument": {"uri": f"file://{file_path}"},
+            "position": {"line": line, "character": character},
+            "newName": new_name,
+        },
+    })
+    resp = _read_response(proc, req_id, timeout=timeout)
+    if "error" in resp:
+        raise LSPError(f"rename failed: {resp['error']}")
+    return resp.get("result")
+
+
 def shutdown(server: LSPServer) -> None:
     """Send shutdown + exit notifications, then terminate process.
 
