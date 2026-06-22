@@ -191,11 +191,14 @@ class TestToolRegistration:
         assert "lsp_find_references" in names
         assert "lsp_rename_symbol" in names
 
-    def test_lsp_tools_NOT_in_sub_tools(self) -> None:
+    def test_lsp_tools_in_sub_tools(self) -> None:
+        # PL-4 (f-lsp-subagent-docs) added the 3 LSP tools to SUB_TOOLS so
+        # subagents (e.g. task_refactor_across_files) can use them. Earlier
+        # this asserted NOT_in; the invariant flipped.
         sub_names = {t["name"] for t in SUB_TOOLS}
-        assert "lsp_goto_definition" not in sub_names
-        assert "lsp_find_references" not in sub_names
-        assert "lsp_rename_symbol" not in sub_names
+        assert "lsp_goto_definition" in sub_names
+        assert "lsp_find_references" in sub_names
+        assert "lsp_rename_symbol" in sub_names
 
     def test_lsp_tool_read_only_flags(self) -> None:
         assert TOOL_REGISTRY.get("lsp_goto_definition").is_read_only is True

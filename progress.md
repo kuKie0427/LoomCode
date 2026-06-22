@@ -5638,3 +5638,104 @@ landed:
 
 ### 下次 session
 新 session 加载 `.sisyphus/plans/loop-lsp-p4.md` 开始 PL-4(最后一个 phase)。范围:SUB_TOOLS 加 3 个 LSP + docs/lsp.md + README 收尾 + R4 SIGKLL 清理一句。预估 1.5h。
+
+---
+
+## Session: f-lsp-subagent-docs — PL-4 子智能体接入 + docs + README 收尾 (2026-06-22 evening, session 4)
+
+### 背景
+- PL-1~3 把 LSP wire 到主 agent,但 SUB_TOOLS 还没加 LSP — 子智能体(`task_refactor_across_files` / `task_investigate_code` / `task_fix_failing_test`)调不了 LSP,只能 grep。
+- README 仍承认 "No LSP server installed by default" — 实际 PL-1~3 已经完整接入,只是还没收尾文档。
+- 本 phase 收尾:SUB_TOOLS 接入 + docs/lsp.md + README 更新 + R4 SIGKILL 文档。
+
+### 范围
+- `loom/agent/tools.py` (+9): `SUB_TOOLS` list 末尾加 3 个 LSP tool 定义(descriptions 强调 "Use AFTER grep",line/character minimum:0)。`SUB_HANDLERS` dict 加 3 个 entry,identity-routed 到已有 `run_lsp_*` handler(不复制实现)。
+- `docs/lsp.md` (新增, 213 行, 7 节): §1 What & Why (BYO server philosophy) + §2 3 语言 install hints + §3 harness.toml 完整 3 语言配置示例 + §4 使用模式(grep→lsp_goto 双步 + 决策记录为何不做 find_symbol_by_name 高层封装)+ §5 限制(0-indexed 含 R6 _coerce_lsp_line 自动纠正、documentChanges 不支持、lazy spawn + SessionEnd shutdown、per-server lock、Unix-only R8)+ §6 故障排查(server not found / startup failure / timeout / permission denied / **R4 SIGKILL 清理: `pkill -f pylsp`** / **R2 journal 残留: `/tmp/loom-lsp-rollback-*.json` 文件**,loom 下次 SessionStart 会警告,用户用 `git diff` 检查 + `git checkout` 恢复,loom 不自动恢复)+ §7 设计决策(BYO server、lazy startup、per-server not global lock、2-pass permission for rename、journal not full-content backup)。
+- `README.md` (-2/+1): 删除 "No LSP server installed by default" 行;"does well" Native tools bullet 追加 "+ 3 LSP tools (goto_definition / find_references / rename_symbol with 2-pass permission gate and journal-backed rollback)"。
+- `tests/test_lsp_subagent.py` (新增, 10 测试, 3 class): TestSubToolsContainsLSP (3) + TestSubHandlersLSPRouted (3 callable + 3 identity-equal) + TestSubHandlersFailClosed (1 — 无 LSP config 时返回字符串错误不抛 traceback)。
+- `loom/eval/cases/lsp_subagent.py` (新增, 2 EvalCase): lsp-subagent-tools-exposed、lsp-subagent-handlers-routed。
+- `loom/eval/cases/__init__.py` (+1): 按字母序加 `from . import lsp_subagent`。
+- `tests/test_lsp_wire.py` (inversion): `test_lsp_tools_NOT_in_sub_tools` → `test_lsp_tools_in_sub_tools`(PL-4 翻转了 invariant,测试名改 + 断言翻转 + 注释说明)。这是合法的 inversion,不是删除测试。
+
+### 验证(真实输出,WR #3 真证据)
+- `uv run pytest tests/test_lsp_subagent.py -v` → **10 passed in 0.15s**
+- `uv run pytest tests/test_lsp_subagent.py tests/test_lsp_rename.py tests/test_lsp_permission.py tests/test_lsp_manager.py tests/test_lsp_client.py tests/test_lsp_wire.py` → **85 passed in 0.38s**(PL-3 是 75,+10)
+- `uv run python -m loom.cli eval --filter lsp --fail-under 100` → **23/23 passed**(PL-3 是 21,+2 lsp-subagent)
+- `uv run python -m loom.cli eval --kind harness --fail-under 100` → **344/344 passed**(PL-3 是 342,+2)— **无 PL-3 那种 hook 签名 bug,子智能体这次跑了 full harness eval**
+- `uv run ruff check loom/` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in **134 source files**(PL-3 是 133,+1 新 `loom/eval/cases/lsp_subagent.py`)
+- `uv run pytest -m 'not snapshot' -q` → **934 passed, 8 deselected**(PL-3 是 924,+10)
+- `grep -rn fake_block loom/agent/` → **EXIT=1(无匹配)— R3 CRITICAL 修复(PL-3)仍然 intact**
+- `uv run python -m loom.cli audit . --json` → **87/100**(经 `git stash --include-untracked` + re-audit on clean tree 验证为 pre-existing;5 个 harness subsystems 全 5/5 满分,bottleneck 是 self-test timeout 0/1 — audit 命令自己跑 eval 超时,跟 LSP wire-up 完全无关;**不是 PL-4 回归**)
+
+### 子智能体表现(PL-3 lesson 应用成功)
+- PL-3 子智能体漏掉 SessionStart hook 签名 bug,因为它只跑了 `--filter lsp` eval,没跑 full harness eval。
+- PL-4 brief 明确要求"必须跑 full harness eval",并警告"PL-3 subagent skipped it and missed a bug"。
+- **子智能体这次跑了 full harness eval(344/344),没漏掉任何回归**。PL-3 lesson 应用成功。
+
+### 已知非回归(WR #5)
+- `tests/test_tui_snapshot.py::test_empty_layout` 仍失败(PL-1 时已确认 pre-existing)。
+- `loom audit` 87/100 是 pre-existing(self-test timeout,非 LSP 相关)。
+
+---
+
+## 🎉 LSP Wire-up Roadmap COMPLETE
+
+### 4 phase 全部 done
+
+| Phase | Commit | 行数 | 新测试 | 新 eval | 关键修复 |
+|---|---|---|---|---|---|
+| PL-1 | `12a6a67` | 738 | 23 | 3 | R6 行号纠正 |
+| PL-2 | `9d0124e` | 854 | 11 | 6 | R1+A 死锁、R5 trace、R7 evict |
+| PL-3 | `8f0bb32` | 1466 | 22 | 6 | **R3 CRITICAL**、R2 journal、R8 |
+| PL-4 | (本 commit) | ~330 | 10 | 2 | R4 docs、子智能体接入 |
+| **Total** | — | **~3390** | **66** | **17** | **8/8 Oracle 风险全修** |
+
+### Oracle 8 风险最终状态
+
+| # | 风险 | 严重度 | 修复 phase | 状态 |
+|---|---|---|---|---|
+| R1+A | LSP `_read_response` 死锁 | 🟡 | PL-2 | ✅ |
+| R2 | SIGKILL 中途 rename 半改 | 🟡 | PL-3 journal + SessionStart recovery | ✅ |
+| **R3** | **fake_block permission bypass** | 🔴 **CRITICAL** | PL-3 真 PermissionRule + 2-pass find_rule | ✅ |
+| R4 | SIGKILL 孤儿 server | 🟢 | PL-4 docs (`pkill -f pylsp`) | ✅ |
+| R5 | 冷启动无 UX 提示 | 🟢 | PL-2 `tr.record("lsp_request")` | ✅ |
+| R6 | 1/0-indexed 混淆 | 🟡 | PL-1 `_coerce_lsp_line` | ✅ |
+| R7 | Server 崩溃后不重启 | 🟡 | PL-2 evict on LSPError/EOFError | ✅ |
+| R8 | Windows URI | 🟢 | PL-3 docstring 注释 | ✅ |
+
+**8/8 全修。** 1 CRITICAL + 5 CONCERNING + 2 SAFE 全部落地。
+
+### Oracle 评审价值
+
+- 原始计划(我没让 Oracle 评审前)有 **R3 CRITICAL**:fake_block 的 input key 是 `"files"` 但 `_outside_workspace` 查 `args["path"]` → **任何 rename 都能改 /etc/hosts,完全绕过 permission**。
+- Oracle 评审抓住这个 + 7 个其它风险,全部吸收进原 4 phase(WIP=1 不破)。
+- PL-3 委派前我又让 Oracle 评审 R3 关键代码草稿,确认修复设计正确 + 4 个 minor 修订点。
+- **没有 Oracle 评审,这个 CRITICAL 安全 bypass 会直接合并进 main**。
+
+### 子智能体委派模式
+
+- 每个 phase 写详细 brief 到 `/tmp/loom-delegation/pl{N}-brief.md`,然后用短 prompt 引用文件(避开 JSON 大字符串解析问题)。
+- 每个 phase 委派给 `deep` 类别 Sisyphus-Junior + `harness-engineering` skill。
+- 我亲自跑所有 verification 命令确认(WR #6/#11:不自我宣告通过、验证子智能体工作)。
+- PL-3 抓到子智能体漏掉的 SessionStart hook 签名 bug(它只跑 LSP-filtered eval,我跑 full harness eval 抓到)。PL-4 brief 明确警告,子智能体这次跑了 full eval,没漏。
+
+### LSP 工具能力总结
+
+Agent(主 + 子)现在可以调 3 个 LSP 工具:
+- `lsp_goto_definition(path, line, character)` — 找符号定义,返回 `path:line:col`
+- `lsp_find_references(path, line, character, include_declaration=True)` — 找所有引用
+- `lsp_rename_symbol(path, line, character, new_name)` — 跨文件重命名,2-pass permission gate + journal-backed rollback
+
+配置:`harness.toml [lsp.<lang>]` section 声明 server + extensions,按文件扩展名路由。Lazy 启动,SessionEnd shutdown。Per-server lock 防并发串读。Server 崩溃自动 evict + 下次重启。
+
+支持 pylsp(Python)、typescript-language-server(TS/JS)、gopls(Go)。本机没装也能跑 — fail-closed 返回字符串错误,不崩溃。
+
+### 下次 session
+
+LSP wire-up roadmap 完成。可以考虑下一个 roadmap:
+- **MCP wire-up**:`loom/agent/mcp_client.py` 已完整(177 行),但跟 LSP 一样没接入 TOOL_REGISTRY。可以走类似 4-phase roadmap(plumbing → wire → permission → docs)。
+- **TDD auto-iteration**:`loom/agent/tdd.py` 是 scaffolding,可以让 agent loop 自动迭代 test-fix 循环。
+- **Long-context cold storage 自动驱逐**:cold_archive 工具存在但 agent loop 层不自动调用。
+
+或者用 loom 自己(它现在有 LSP 了!)做别的事。

@@ -1184,12 +1184,21 @@ SUB_TOOLS: list[ToolParam] = [
      "input_schema": {"type": "object", "properties": {"pattern": {"type": "string"}, "path": {"type": "string"}, "glob": {"type": "string"}, "case_insensitive": {"type": "boolean"}}, "required": ["pattern"]}},
     {"name": "web_fetch", "description": "Fetch a URL and return readable text content. Supports http/https. Follows redirects (max 5). HTML is extracted; text/plain and json returned as-is. Default max 50000 chars.",
      "input_schema": {"type": "object", "properties": {"url": {"type": "string"}, "max_chars": {"type": "integer"}}, "required": ["url"]}},
+    {"name": "lsp_goto_definition", "description": "Find the definition of the symbol at file:line:character (0-indexed). Use AFTER grep to find the candidate position. Returns 'path:line:col' lines or 'no definition found'.",
+     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "line": {"type": "integer", "minimum": 0}, "character": {"type": "integer", "minimum": 0}}, "required": ["path", "line", "character"]}},
+    {"name": "lsp_find_references", "description": "Find all references to the symbol at file:line:character (0-indexed). Use AFTER grep to find the candidate position. Returns 'path:line:col' lines.",
+     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "line": {"type": "integer", "minimum": 0}, "character": {"type": "integer", "minimum": 0}, "include_declaration": {"type": "boolean"}}, "required": ["path", "line", "character"]}},
+    {"name": "lsp_rename_symbol", "description": "Rename the symbol at file:line:character (0-indexed) to new_name across all files in the workspace. Applies LSP WorkspaceEdit atomically with PreToolUse permission gate. Returns the list of changed files.",
+     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "line": {"type": "integer", "minimum": 0}, "character": {"type": "integer", "minimum": 0}, "new_name": {"type": "string"}}, "required": ["path", "line", "character", "new_name"]}},
 ]
 
 SUB_HANDLERS = {
     "bash": run_bash, "read_file": run_read, "write_file": run_write,
     "edit_file": run_edit, "multi_edit": run_multi_edit, "edit_lines": run_edit_lines,
     "glob": run_glob, "grep": run_grep, "web_fetch": run_web_fetch,
+    "lsp_goto_definition": run_lsp_goto_definition,
+    "lsp_find_references": run_lsp_find_references,
+    "lsp_rename_symbol": run_lsp_rename_symbol,
 }
 
 SUB_SYSTEM = (
