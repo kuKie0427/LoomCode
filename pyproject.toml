@@ -30,6 +30,7 @@ dev = [
 
 [project.scripts]
 loom = "loom.cli:main"
+loomcode = "loom.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["loom"]

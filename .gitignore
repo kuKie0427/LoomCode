@@ -12,6 +12,7 @@ wheels/
 .sisyphus/
 
 claude-code-src/
+opencode-dev/
 
 # Harness reference skill (not part of the loop product)
 harness-creator/
