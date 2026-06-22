@@ -181,6 +181,20 @@ def _on_session_end(*args):
         logger.warning("LSP shutdown_all raised", exc_info=True)
 hooks.register_hook("SessionEnd", _on_session_end)
 
+# PL-3: detect orphan LSP rollback journals from a prior crashed run.
+# If a previous loom process died mid-rename, files listed in /tmp/
+# loom-lsp-rollback-<PID>.json may be inconsistent. We log a warning
+# and let the user decide whether to inspect + restore. Failures are
+# swallowed so one bad journal can't break SessionStart (and therefore
+# the whole session).
+def _on_session_start(event, *args):
+    try:
+        from loom.agent.lsp_apply import recover_stale_journals as _lsp_recover
+        _lsp_recover(WORKDIR)
+    except Exception:
+        logger.warning("LSP journal recovery raised", exc_info=True)
+hooks.register_hook("SessionStart", _on_session_start)
+
 llm_client = LLMClient(model=os.getenv("MODEL", "deepseek-v4-flash"))
 
 

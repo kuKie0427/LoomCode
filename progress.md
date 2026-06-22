@@ -5569,3 +5569,72 @@ landed:
 
 ### 下次 session
 新 session 加载 `.sisyphus/plans/loop-lsp-p3.md` 开始 PL-3。**关键提醒**:PL-3 包含 Oracle 标记的 R3 CRITICAL 修复(fake_block permission bypass),必须严格按计划走真规则路径,绝不构造 fake_block。
+
+---
+
+## Session: f-lsp-rename-apply — PL-3 LSP rename 落盘 + R3 CRITICAL fix + R2 journal (2026-06-22 evening, session 3)
+
+### 背景
+- PL-2 让 lsp_* 工具能真调 LSP server,但 rename 只返回 WorkspaceEdit JSON,不落盘。
+- 本 phase 实现 rename 落盘 + 修复 Oracle 标记的 **R3 CRITICAL**:原计划用 fake_block 调 PreToolUse,但 fake_block.input 用 `"files"` key 而 `_outside_workspace` 查 `args["path"]` → 永远空 → **任何 rename 都能改 /etc/hosts,完全绕过 permission**。
+- 修复路径:真 `PermissionRule` + 2-pass `find_rule` 校验。绝不构造 fake_block。
+
+### Oracle 评审(2026-06-22 evening)
+- 委派前让 Oracle 评审 R3 关键代码草稿(4 个 draft)。Oracle 给出整体 SAFE 评审 + 4 个 minor 修订点:
+  - Amendment A: `_lsp_rename_outside_workspace` 把 `workdir = Path.cwd().resolve()` 移到 `if not files` 之前(一致性)
+  - Amendment B: **跳过 `matches_rule`**,直接用 `find_rule`(已存在,更简单)
+  - Amendment C: 第二 pass 用 `DEFAULT_POLICY`(非 `self.policy`)是 defense-in-depth,加代码注释说明不可被 harness.toml 关闭
+  - Amendment D: `apply_workspace_edit` docstring 加 warning(caller 必须先验 workspace 边界)
+- Oracle 还点出 `parse_workspace_edit` 必须返回所有 Paths(含 edits 为空的)— 已加入测试。
+
+### 范围
+- `loom/agent/permissions.py` (+36): `_lsp_rename_outside_workspace(args)` — 早期 pass(无 `_resolved_files`)fallback 到 `_outside_workspace({"path": args.get("path")})`;晚期 pass 遍历 `_resolved_files`,每个 `Path(f).resolve().relative_to(workdir)`,任一在外 → True。`DEFAULT_POLICY.rules` 加 `PermissionRule(tools=("lsp_rename_symbol",), check=_lsp_rename_outside_workspace, message="LSP rename would change files outside the workspace")`。**无 `matches_rule` 方法**(Amendment B)。
+- `loom/agent/lsp_apply.py` (新增, ~210 行): `parse_workspace_edit` + `apply_text_edits` + `_write_journal`/`_delete_journal` + `apply_workspace_edit` + `recover_stale_journals` + `_pid_alive`。Journal 写 `/tmp/loom-lsp-rollback-<PID>.json` 含 `{pid, files: {abs_path: sha256}}`(只存 sha256 防暴大)。Apply 流程:parse → read all originals → compute new_contents → **write journal BEFORE any os.replace** → 逐文件 `.tmp + os.replace` → 成功删 journal → 异常 in-process rollback(从内存 originals restore);rollback 也失败时保留 journal 给用户兜底。Unix-only docstring(R8)。Amendment D docstring warning。
+- `loom/agent/tools.py` (+52): `run_lsp_rename_symbol` 重写为 2-pass flow。第一 pass 由 `_run_tool_block` 自动触发 PreToolUse → `find_rule("lsp_rename_symbol", block.input)` → 早期 entry-path 校验。LSP 调用走 PL-2 的 `get_or_start` + `get_server_lock`(R5 trace + R7 eviction 保留)。第二 pass:解析 WorkspaceEdit → `augmented_args["_resolved_files"] = [str(p) for p in plan]` → `DEFAULT_POLICY.find_rule("lsp_rename_symbol", augmented_args)` → 非 None 则阻断。Amendment C 代码注释解释为何用 `DEFAULT_POLICY` 而非 `self.policy`(defense-in-depth,不可被 harness.toml 关闭)。**无 fake_block**。
+- `loom/agent/loop.py` (+14): `_on_session_start(event, *args)` hook 注册到 SessionStart,调 `lsp_apply.recover_stale_journals(WORKDIR)` in try/except。
+- `tests/test_lsp_permission.py` (新增, 8 测试): 含 `test_lsp_rename_handler_does_not_construct_fake_block`(用 `inspect.getsource()` + grep,R3 回归守护)。
+- `tests/test_lsp_rename.py` (新增, 14 测试): parse/apply/journal/rollback/recover 全覆盖,含 `test_parse_workspace_edit_includes_empty_edits_lists`(Oracle watch-out)+ `test_apply_workspace_edit_keeps_journal_on_rollback_failure`。
+- `loom/eval/cases/lsp_rename.py` (新增, 6 EvalCase): `lsp-rename-permission-real-rule-not-fake-block`(R3 回归守护,grep 源码找 fake_block)+ `lsp-rename-blocks-out-of-workspace-resolved-file` + `lsp-rename-rollback-on-partial-failure` + `lsp-rename-rejects-non-file-uri` + `lsp-rename-journal-recovered-on-session-start` + `lsp-rename-unix-path-only-comment-present`(R8 docstring 守护)。
+- `loom/eval/cases/__init__.py` (+1): 按字母序加 `from . import lsp_rename`。
+
+### 验证(真实输出,WR #3 真证据)
+- `uv run pytest tests/test_lsp_rename.py tests/test_lsp_permission.py tests/test_lsp_manager.py tests/test_lsp_client.py tests/test_lsp_wire.py` → **75 passed in 0.28s**
+- `uv run python -m loom.cli eval --filter lsp --fail-under 100` → **21/21 passed**(6 lsp-client + 6 lsp-manager + 6 lsp-rename + 3 lsp-wire)
+- `uv run ruff check loom/` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in **133 source files**(PL-2 是 131,+2 新模块)
+- `uv run pytest -m 'not snapshot' -q` → **924 passed, 8 deselected**(PL-2 是 901,+23 新测试)
+- `grep -rn fake_block loom/agent/` → **EXIT=1(无匹配)— R3 CRITICAL 修复确认**
+- `uv run python -m loom.cli eval --kind harness --fail-under 100` → **342/342 passed**(PL-2 是 336,+6 新)
+
+### 子智能体漏掉的 bug(我亲自验证时抓到,WR #6/#11 价值)
+- 子智能体报告"342/342"但**只跑了 LSP-filtered eval,没跑 full harness eval**。
+- 我跑 full harness eval 发现 3 个失败:`session-start-trigger-no-args`、`log-hook-session-start-logged`、`resume-success-rate-benchmark`。
+- 根因:子智能体写的 `_on_session_start()` 签名没参数,但 `Hooks.trigger_hooks` 内部 `callback(event, *args)` **总是把 `event` 作为第一个 positional arg 传给 callback**。所以每个 hook callback 必须至少接受 `event`。
+- 修复:改成 `_on_session_start(event, *args)` 匹配 PL-2 的 `_on_session_end(*args)` 模式。
+- 修后 342/342 全过。**这个 bug 子智能体自己的验证没抓到,因为它没跑 full harness eval**。Working Rule #6(不自我宣告通过)+ #11(验证子智能体工作)的具体体现。
+
+### 已知非回归(WR #5)
+- `tests/test_tui_snapshot.py::test_empty_layout` 仍失败(PL-1 时已确认 pre-existing)。
+
+### Roadmap 进展
+- PL-1 ✅ DONE: 工具注册 + config + R6
+- PL-2 ✅ DONE: server 生命周期 + R1+A + R5 + R7
+- **PL-3 ✅ DONE: rename 落盘 + R3 CRITICAL fix + R2 journal + R8 注释**
+- PL-4: SUB_TOOLS + docs + README 收尾 + R4 SIGKILL 文档
+
+### Oracle 8 风险最终状态
+| # | 风险 | 状态 |
+|---|---|---|
+| R1+A | LSP `_read_response` 死锁 | ✅ PL-2 |
+| R2 | SIGKILL 中途 rename 半改 | ✅ PL-3 journal |
+| R3 | **CRITICAL** fake_block permission bypass | ✅ PL-3 真 rule |
+| R4 | SIGKILL 孤儿 server | ⏳ PL-4 docs |
+| R5 | 冷启动无 UX 提示 | ✅ PL-2 trace |
+| R6 | 1/0-indexed 混淆 | ✅ PL-1 |
+| R7 | Server 崩溃后不重启 | ✅ PL-2 evict |
+| R8 | Windows URI | ✅ PL-3 注释 |
+
+7/8 已修,最后 R4 是 PL-4 一句 docs 的事。
+
+### 下次 session
+新 session 加载 `.sisyphus/plans/loop-lsp-p4.md` 开始 PL-4(最后一个 phase)。范围:SUB_TOOLS 加 3 个 LSP + docs/lsp.md + README 收尾 + R4 SIGKLL 清理一句。预估 1.5h。

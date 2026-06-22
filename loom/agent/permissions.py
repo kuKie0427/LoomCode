@@ -80,6 +80,37 @@ def _outside_workspace(args: dict) -> bool:
         return True
 
 
+def _lsp_rename_outside_workspace(args: dict) -> bool:
+    """Permission rule for ``lsp_rename_symbol`` — invoked in TWO passes.
+
+    Pass 1 (PreToolUse, automatic via ``Hooks.check_permission_hook``): the
+    handler has not yet called the LSP server, so ``_resolved_files`` is
+    absent. We fall back to ``_outside_workspace`` on the entry ``path``.
+
+    Pass 2 (post-LSP, manual from the handler via ``find_rule``): the LSP
+    server has returned a ``WorkspaceEdit`` whose keys are every file that
+    will be touched. We check each one is within WORKDIR. The check is
+    hardened against ``../`` traversal via ``Path.resolve().relative_to``.
+
+    Defense-in-depth: even if a future ``harness.toml`` override replaces
+    DEFAULT_POLICY for the first pass, the handler MUST keep the second
+    pass hardcoded to DEFAULT_POLICY (not ``hooks.policy``) so a malicious
+    or buggy LSP server cannot bypass the workspace boundary via a
+    user-overridden policy.
+    """
+    files = args.get("_resolved_files")
+    workdir = WORKDIR.resolve()
+    if not files:
+        # Early pass (PreToolUse): only entry path known.
+        return _outside_workspace({"path": args.get("path", "")})
+    for f in files:
+        try:
+            Path(f).resolve().relative_to(workdir)
+        except (ValueError, OSError):
+            return True
+    return False
+
+
 def _destructive_bash(args: dict) -> bool:
     cmd = args.get("command", "")
     return any(kw in cmd for kw in ("rm ", "> /etc/", "chmod 777"))
@@ -142,6 +173,11 @@ DEFAULT_POLICY = PermissionPolicy(
             tools=("bash",),
             check=_destructive_bash,
             message="Potentially destructive command",
+        ),
+        PermissionRule(
+            tools=("lsp_rename_symbol",),
+            check=_lsp_rename_outside_workspace,
+            message="LSP rename would change files outside the workspace",
         ),
     ),
 )

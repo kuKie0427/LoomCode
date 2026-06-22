@@ -775,16 +775,25 @@ def run_lsp_find_references(
 
 
 def run_lsp_rename_symbol(path: str, line: int, character: int, new_name: str) -> str:
-    """Compute the WorkspaceEdit to rename the symbol at file:line:character.
+    """Rename the symbol at file:line:character via LSP and apply to disk.
+
+    Two-pass permission flow (R3 fix — direct rule check, no second hook trigger):
+
+    1. PreToolUse (automatic via ``_run_tool_block`` →
+       ``Hooks.check_permission_hook`` → ``DEFAULT_POLICY.find_rule``):
+       checks the entry ``path`` is inside the workspace.
+    2. Post-LSP (manual, here in the handler): we now have the full
+       ``WorkspaceEdit`` from the LSP server and can check EVERY file the
+       rename will touch. The handler invokes ``DEFAULT_POLICY.find_rule``
+       again with ``_resolved_files`` injected so the same rule — no
+       duplication — validates the expanded file set.
 
     line/character are 0-indexed per LSP spec — use AFTER grep to find the
-    candidate position and subtract 1. PL-1 returns the WorkspaceEdit as a
-    JSON string; PL-3 will add the apply-to-disk step. Fail-closed the same
-    way as the other two LSP tools.
+    candidate position and subtract 1. Fail-closed the same way as the
+    other two LSP tools.
     """
-    import json as _json
-
     from loom.agent import lsp_client
+    from loom.agent.lsp_apply import apply_workspace_edit, parse_workspace_edit
     from loom.agent.lsp_manager import (
         _ACTIVE_SERVERS,
         _LOCK as _LSP_LOCK,
@@ -793,6 +802,7 @@ def run_lsp_rename_symbol(path: str, line: int, character: int, new_name: str) -
         get_server_lock,
     )
     from loom.agent.loop import _active_config
+    from loom.agent.permissions import DEFAULT_POLICY
 
     try:
         target_path = safe_path(path)
@@ -821,8 +831,34 @@ def run_lsp_rename_symbol(path: str, line: int, character: int, new_name: str) -
         except ValueError as exc:
             return f"Error: {exc}"
     if edit is None:
-        return "no rename possible at that position"
-    return f"WorkspaceEdit ready (apply not implemented until PL-3): {_json.dumps(edit)}"
+        return "rename cancelled (server returned null)"
+
+    try:
+        plan = parse_workspace_edit(edit)
+    except (ValueError, NotImplementedError) as exc:
+        return f"Cannot apply WorkspaceEdit: {exc}"
+
+    # SECOND PASS: now we know every file the rename will touch.
+    # We use DEFAULT_POLICY (not the Hooks instance's potentially-overridden
+    # policy) intentionally — this is non-overridable defense-in-depth
+    # against LSP server bugs/malice, not user preference.
+    # If harness.toml policy override is ever implemented, this second pass
+    # must stay hardcoded to DEFAULT_POLICY or call _lsp_rename_outside_workspace
+    # directly (bypassing find_rule) to remain non-overridable.
+    augmented_args = {
+        "path": path, "line": line, "character": character, "new_name": new_name,
+        "_resolved_files": [str(p) for p in plan.keys()],
+    }
+    blocking_rule = DEFAULT_POLICY.find_rule("lsp_rename_symbol", augmented_args)
+    if blocking_rule is not None:
+        return f"Rename blocked by permission policy: {blocking_rule.message}"
+
+    try:
+        results = apply_workspace_edit(edit)
+    except Exception as exc:
+        return f"Apply failed (in-process rollback attempted): {exc}"
+    file_list = "\n  ".join(str(p) for p in results.keys())
+    return f"Renamed to '{new_name}' in {len(results)} files:\n  {file_list}"
 
 
 TOOL_REGISTRY = ToolRegistry()
