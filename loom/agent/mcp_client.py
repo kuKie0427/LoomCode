@@ -40,6 +40,7 @@ class MCPServer:
     command: str
     args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
+    cwd: str | None = None  # M13: optional CWD override for the server process
     process: _ProcessLike | None = None
     tools: list[dict] = field(default_factory=list)
     request_id: int = 0
@@ -107,10 +108,14 @@ def start(server: MCPServer) -> None:
     """
     if server.process is None:
         cmd = [server.command] + list(server.args)
-        env = {**__import__("os").environ, **server.env}
+        # M11: do NOT inherit the loom process environment. Prevents leaking
+        # ANTHROPIC_API_KEY and other secrets to MCP servers. Users must
+        # explicitly declare PATH / HOME in `env` if their server needs them.
+        env = {**server.env}
         server.process = subprocess.Popen(
             cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=env,
+            cwd=server.cwd,  # M13: honor per-server working directory (None → inherit loom CWD)
         )
     init_request = {
         "jsonrpc": "2.0", "id": server._next_id(),
@@ -168,10 +173,38 @@ def call_tool(server: MCPServer, tool_name: str, arguments: dict, timeout: float
     return response.get("result", {}).get("content", [])
 
 
-def mcp_tool_to_loom_tool(server: MCPServer, mcp_tool: dict) -> dict:
-    """Convert an MCP tool descriptor to a loom tool schema."""
+def _validate_input_schema(schema: Any) -> bool:
+    """M4: validate that an MCP tool's inputSchema is a usable object schema.
+
+    Returns True if the schema is a dict with type='object' and a 'properties'
+    dict (per JSON Schema spec for tool inputs). False for anything else —
+    missing schema, wrong type, missing properties. Caller should skip the
+    tool and warn rather than register a tool that will confuse the LLM.
+    """
+    if not isinstance(schema, dict):
+        return False
+    if schema.get("type") != "object":
+        return False
+    if not isinstance(schema.get("properties"), dict):
+        return False
+    return True
+
+
+def mcp_tool_to_loom_tool(server: MCPServer, mcp_tool: dict) -> dict | None:
+    """Convert an MCP tool descriptor to a loom tool schema.
+
+    M2: tool name uses double-underscore separator (``mcp__server__tool``)
+    to mirror the Anthropic prompt-cache format and to make the namespace
+    unambiguous against native tool names.
+
+    M4: if inputSchema is malformed, return None so the caller can skip +
+    warn instead of registering a tool that will fail at call time.
+    """
+    raw_schema = mcp_tool.get("inputSchema", {"type": "object", "properties": {}})
+    if not _validate_input_schema(raw_schema):
+        return None
     return {
-        "name": f"mcp_{server.name}_{mcp_tool.get('name', '?')}",
+        "name": f"mcp__{server.name}__{mcp_tool.get('name', '?')}",
         "description": f"[MCP:{server.name}] {mcp_tool.get('description', '')}",
-        "input_schema": mcp_tool.get("inputSchema", {"type": "object", "properties": {}}),
+        "input_schema": raw_schema,
     }

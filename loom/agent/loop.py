@@ -20,8 +20,8 @@ from loom.agent.llm import LLMClient, StreamEvent
 from loom.agent.prompt import AGENTS_MD_STATIC_LIMIT, SystemPrompt
 from loom.agent.system_prompt import get_system_prompt, invalidate_system_prompt
 from loom.agent.tools import (
-    TOOL_HANDLERS,
-    TOOLS,
+    get_tool_handlers,
+    get_tools,
 )
 from loom.agent.user_hooks import discover_user_hooks, make_shell_callback
 from loom.memory import load_session_continuity, load_tier1, load_tier2
@@ -181,6 +181,18 @@ def _on_session_end(*args):
         logger.warning("LSP shutdown_all raised", exc_info=True)
 hooks.register_hook("SessionEnd", _on_session_end)
 
+# PM-1: shut down any MCP servers we started during the session, and
+# unregister their tools so stale entries don't leak into the next session.
+# Coexists with _on_session_end (LSP) — both fire on SessionEnd; the
+# manager functions are independent.
+def _on_session_end_mcp(event, *args):
+    try:
+        from loom.agent.mcp_manager import shutdown_all as _mcp_shutdown_all
+        _mcp_shutdown_all()
+    except Exception:
+        logger.warning("MCP shutdown_all raised", exc_info=True)
+hooks.register_hook("SessionEnd", _on_session_end_mcp)
+
 # PL-3: detect orphan LSP rollback journals from a prior crashed run.
 # If a previous loom process died mid-rename, files listed in /tmp/
 # loom-lsp-rollback-<PID>.json may be inconsistent. We log a warning
@@ -194,6 +206,20 @@ def _on_session_start(event, *args):
     except Exception:
         logger.warning("LSP journal recovery raised", exc_info=True)
 hooks.register_hook("SessionStart", _on_session_start)
+
+# PM-1: kick off background discovery for every [mcp.servers.*] entry.
+# SessionStart already has the LSP journal-recovery hook above; this MCP
+# hook is independent and both must fire. Signature MUST be (event, *args)
+# because trigger_hooks calls callback(event, *args) — the LSP PL-3
+# lesson was: a missing `event` first arg silently breaks the hook under
+# real driver paths.
+def _on_session_start_mcp(event, *args):
+    try:
+        from loom.agent.mcp_manager import start_discovery as _mcp_start_discovery
+        _mcp_start_discovery(_active_config)
+    except Exception:
+        logger.warning("MCP discovery startup raised", exc_info=True)
+hooks.register_hook("SessionStart", _on_session_start_mcp)
 
 llm_client = LLMClient(model=os.getenv("MODEL", "deepseek-v4-flash"))
 
@@ -212,7 +238,7 @@ def _run_tool_block(block, hooks) -> dict:
             tr.record("tool_denied", tool=block.name, reason=str(blocked)[:200])
         return {"type": "tool_result", "tool_use_id": block.id,
                 "content": blocked, "is_error": True}
-    handler = TOOL_HANDLERS.get(block.name)
+    handler = get_tool_handlers().get(block.name)
     if block.name == "task":
         cb = _active_callbacks
         raw_desc = str(block.input.get("description", ""))
@@ -308,7 +334,7 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                     input_tokens = 0
                     output_tokens = 0
                     stop_reason = "end_turn"
-                    for ev in stream_text(_get_system_prompt(), messages, cast(list, TOOLS), LLM_CONFIG.max_output_tokens):
+                    for ev in stream_text(_get_system_prompt(), messages, cast(list, get_tools()), LLM_CONFIG.max_output_tokens):
                         if ev.kind == "text":
                             content_blocks.append(TextBlock(type="text", text=ev.text))
                             if cb["on_text_delta"] is not None:
@@ -343,11 +369,12 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                 else:
                     # ===== SYNC PATH (unchanged) =====
                     from loom.agent.llm import with_cache_control, with_tool_cache_control
+                    current_tools = get_tools()
                     response = llm_client.client.messages.create(
                         model=llm_client.model,
                         system=with_cache_control(_get_system_prompt()),
                         messages=messages,
-                        tools=with_tool_cache_control(cast(list, TOOLS)) if TOOLS else cast(list, TOOLS),
+                        tools=with_tool_cache_control(cast(list, current_tools)) if current_tools else cast(list, current_tools),
                         max_tokens=LLM_CONFIG.max_output_tokens,
                     )
                 context.update(len(messages), response)

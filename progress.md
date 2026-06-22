@@ -5739,3 +5739,84 @@ LSP wire-up roadmap 完成。可以考虑下一个 roadmap:
 - **Long-context cold storage 自动驱逐**:cold_archive 工具存在但 agent loop 层不自动调用。
 
 或者用 loom 自己(它现在有 LSP 了!)做别的事。
+
+---
+
+## Session: f-mcp-wire-config-manager — PM-1 MCP config + manager + discovery + 注册 (2026-06-22 evening, session 5)
+
+### 背景
+- LSP wire-up roadmap 4 phase 全 done(commits 12a6a67 / 9d0124e / 8f0bb32 / 6ab0af7)。loom 现在有 3 个 LSP 工具,主 agent + 子智能体均可调,2-pass permission + journal rollback 完整。
+- README 仍承认 "MCP integration is plumbing only: discovered tools are not yet wired into the agent's TOOL_REGISTRY at startup"。`mcp_client.py`(177 行)完整但未接入。
+- 本 roadmap 把 MCP 接入。Oracle 评审发现 13 个风险(1 设计级 + 1 CRITICAL + 1 安全 + 5 CONCERNING + 5 SAFE),全部吸收进 4 phase。
+- **PM-1 跟 LSP PL-1+PL-2 范围融合** — 因为 MCP 工具是动态发现的,不能像 LSP 那样先注册 stub 再接生命周期。PM-1 必须包含 config + manager + discovery + registration 一起。
+
+### Oracle 评审(2026-06-22 evening)
+- 委派前让 Oracle 评审 9 个设计问题(roadmap split / permission model / namespace / untrusted server / input_schema / crash recovery / result size / discovery timing / subagent access)。
+- Oracle 给出 13 个设计决策 + 16 个风险点(M1-M16):
+  - **5 个 CRITICAL/安全级**:M1 phase split / M5 permission 绕过 / M9 subagent 调危险工具 / M11 env 泄漏 API key / M14 TOOLS snapshot 不更新
+  - **7 个 CONCERNING**:M2 前缀冲突 / M3 duplicate server name / M4 malformed schema / M7 output 撑爆 / M8 startup blocking / M10 request_id race / M15 register 无锁
+  - **4 个 SAFE**:M6 crash 无提示 / M12 content list 不展平 / M13 缺 cwd / M16 stderr 不读
+- 4-phase split:PM-1(config + manager + discovery + 注册)→ PM-2(permission gate)→ PM-3(handler safety)→ PM-4(subagent + docs)。
+- 关键决策:工具前缀用双下划线 `mcp__server__tool`(匹配 Claude Code 约定,防内部工具冲突)、permission 用 config-driven 3-state(deny/auto_approve/prompt)、subagent access 默认 false per-server opt-in、env 不继承 os.environ(防 API key 泄漏)、discovery 用 background thread(不 block startup)。
+
+### 范围(PM-1)
+- `loom/agent/mcp_client.py` (+43): M2 双下划线前缀 `mcp__server__tool` / M4 `_validate_input_schema()` + malformed → 返回 None / M13 `MCPServer.cwd` 字段 / M11 `env={**server.env}` 不继承 `os.environ`(安全:防 ANTHROPIC_API_KEY 泄漏)。
+- `loom/agent/config.py` (+102): `MCPServerConfig`(name/command/args/env/cwd/subagent_access)+ `MCPConfig`(servers=())+ `_parse_mcp_section()` 含 M3 duplicate name 验证 + `HarnessConfig.mcp` 字段 + `_SKELETON` 注释示例。
+- `loom/agent/tool_registry.py` (+32): `_LOCK = threading.Lock()` + `register/disable/enable` 加锁(M15)+ 新 `unregister(name)` 方法(MCP crash recovery + shutdown cleanup 用)。
+- `loom/agent/tools.py` (+81): M14 `TOOLS`/`TOOL_HANDLERS` 改 lazy via `get_tools()`/`get_tool_handlers()` 函数;live dict/list containers 通过 `_resync_from_registry()` 同步(保留 `mocker.patch.dict` 测试模式);module-level 名字保留为 backwards-compat alias。
+- `loom/agent/mcp_manager.py` (新增, ~210 行): `_LOCK` + `_ACTIVE_SERVERS` + `_PER_SERVER_LOCKS`(M10 per-server lock)+ `_DISCOVERY_THREADS`。`start_discovery(config)` SessionStart hook 起 daemon thread per server(M8 background discovery,non-blocking)。`_discover_server(spec)` try `mcp_client.start()` → 注册所有发现的工具(malformed schema 跳过 + warning,duplicate name 跳过 + warning,ALL 异常 catch 在 thread 内不崩主进程)。`_make_mcp_handler(server_name, tool_name)` 闭包:get server → acquire per-server lock → `call_tool` → on Exception evict server(pop 字典 + unregister `mcp__{name}__*` tools)+ `logger.warning` + 返回错误字符串。`shutdown_all()` SessionEnd hook:stop 所有 server + unregister 它们的 tools。
+- `loom/agent/loop.py` (+37): `_on_session_start_mcp(event, *args)` + `_on_session_end_mcp(event, *args)` hooks 跟 LSP hooks 并列。**关键:签名 `(event, *args)` per LSP PL-3 lesson** — `trigger_hooks` 调 `callback(event, *args)`,每个 hook callback 必须接受 `event` 作为第一个 positional arg。子智能体主动跑了 full harness eval(PL-3 lesson 应用),没重蹈 PL-3 覆辙。`get_tools()`/`get_tool_handlers()` callers 更新。
+- `tests/test_mcp_wire.py` (新增, 19 测试): config default/parse-minimal/parse-full/duplicate-name/missing-command/non-string-command/env-must-be-string-table/env-not-inheriting-os-environ(M11)/mcp_client_start_does_not_inherit_environ(M11)/double-underscore-prefix(M2)/malformed-schema-returns-none(M4)/missing-schema-returns-default/get_tools-lazy/get_tool_handlers-lazy/register-thread-safe(M15)/unregister-removes-tool/unregister-missing-silent。
+- `tests/test_mcp_manager.py` (新增, 8 测试): manager lifecycle + discovery + shutdown + per-server lock + crash eviction。
+- `loom/eval/cases/mcp_wire.py` (新增, 4 EvalCase): mcp-wire-config-default-empty / mcp-wire-double-underscore-prefix(M2 守护)/ mcp-wire-duplicate-server-name-rejected(M3 守护)/ mcp-wire-malformed-schema-skipped(M4 守护)。
+- `loom/eval/cases/__init__.py` (+1): 按字母序加 `mcp_wire`。
+- `tests/test_mcp_client.py` (+5): 更新 M2 双下划线 prefix 回归。
+
+### 验证(真实输出,WR #3 真证据)
+- `uv run pytest tests/test_mcp_wire.py -v` → **19 passed in 0.26s**
+- `uv run pytest tests/test_mcp_wire.py tests/test_mcp_manager.py tests/test_mcp_client.py` → **37 passed in 0.32s**(19 wire + 8 manager + 10 client)
+- `uv run python -m loom.cli eval --filter mcp --fail-under 100` → **10/10 passed**(6 pre-existing + 4 new mcp-wire)
+- `uv run python -m loom.cli eval --kind harness --fail-under 100` → **348/348 passed**(LSP PL-4 是 344,+4 new)— **无回归,子智能体主动跑了 full harness eval**
+- `uv run ruff check loom/` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in **136 source files**(LSP PL-4 是 134,+2 新 `mcp_manager.py` + `mcp_wire.py` eval)
+- `uv run pytest -m 'not snapshot' -q` → **961 passed, 8 deselected**(LSP PL-4 是 934,+27 new)
+- `grep -rn fake_block loom/agent/` → **EXIT=1(无匹配)— R3 CRITICAL 修复(LSP PL-3)仍 intact**
+
+### Oracle 16 风险进展
+| # | 风险 | 状态 |
+|---|---|---|
+| M1 | Phase split 错 | ✅ PM-1(已吸收) |
+| M2 | 工具前缀单下划线冲突 | ✅ PM-1 双下划线 |
+| M3 | Duplicate server name | ✅ PM-1 config 验证 |
+| M4 | Malformed inputSchema | ✅ PM-1 注册时验证 |
+| M5 | Permission 绕过 | ⏳ PM-2 |
+| M6 | Crash 无 visible 提示 | ⏳ PM-3 |
+| M7 | Output 撑爆上下文 | ⏳ PM-3 |
+| M8 | Startup blocking | ✅ PM-1 background thread |
+| M9 | Subagent 调危险 MCP | ⏳ PM-4 |
+| M10 | request_id race | ✅ PM-1 per-server lock |
+| M11 | env 泄漏 API key | ✅ PM-1 不继承 os.environ |
+| M12 | content list 不展平 | ⏳ PM-3 |
+| M13 | 缺 cwd 字段 | ✅ PM-1 加字段 |
+| M14 | TOOLS snapshot 不更新 | ✅ PM-1 lazy 化 |
+| M15 | register 无锁 | ✅ PM-1 加锁 |
+| M16 | stderr 不读 | ⏳ PM-3 |
+
+**10/16 已修**(含 4 个 CRITICAL/安全级 M1/M11/M14 + 设计级),6 个待 PM-2/3/4。
+
+### 子智能体表现(PL-3 lesson 应用成功)
+- LSP PL-3 子智能体漏掉 SessionStart hook 签名 bug(只跑 `--filter lsp`,没跑 full harness eval)。
+- PM-1 brief 明确警告 + 要求跑 full harness eval。
+- **子智能体主动跑了 full harness eval(348/348),hook 签名正确 `(event, *args)`,没漏任何回归**。PL-3 lesson 完全应用。
+
+### 已知非回归(WR #5)
+- `tests/test_tui_snapshot.py::test_empty_layout` 仍失败(PL-1 时已确认 pre-existing)。
+
+### Roadmap 进展
+- PM-1 ✅ DONE: config + manager + discovery + 注册 + mcp__ 前缀 + 10/16 风险修
+- PM-2: permission gate(M5 CRITICAL)
+- PM-3: handler safety(M6/M7/M12/M16)
+- PM-4: subagent opt-in(M9)+ docs + README
+
+### 下次 session
+新 session 加载 `.sisyphus/plans/loop-mcp-p2.md` 开始 PM-2。**关键提醒**:PM-2 包含 M5 permission CRITICAL — 绝不静默放行任何 MCP 调用,用 config-driven 3-state(deny 硬阻断 / auto_approve 静默放行 / neither → y/N prompt),绝不构造 fake_block(LSP R3 lesson)。

@@ -170,6 +170,45 @@ class LSPConfig:
 
 
 @dataclass(frozen=True)
+class MCPServerConfig:
+    """Configuration for one MCP server entry in harness.toml.
+
+    Example:
+        [mcp.servers.github]
+        command = "npx"
+        args = ["-y", "@modelcontextprotocol/server-github"]
+        env = {GITHUB_TOKEN = "ghp_..."}
+        subagent_access = false
+
+    PM-1: config-only; lifecycle handled by mcp_manager.
+    PM-2: will add per-server permission gate.
+    PM-4: subagent_access gates whether subagents can see this server's tools.
+    """
+
+    name: str
+    command: str
+    args: tuple[str, ...] = ()
+    env: dict[str, str] = field(default_factory=dict)
+    cwd: str | None = None
+    subagent_access: bool = False
+
+
+@dataclass(frozen=True)
+class MCPConfig:
+    """Per-project MCP server map. Empty tuple = no servers configured.
+
+    PM-1: only `servers` exists. PM-2 will add a `permissions` field for
+    per-server auto_approve / deny lists (the M5 gate).
+    """
+
+    servers: tuple[MCPServerConfig, ...] = ()
+
+    @classmethod
+    def from_defaults(cls) -> MCPConfig:
+        return cls(servers=())
+
+
+@dataclass(frozen=True)
 class HarnessConfig:
     policy: PermissionPolicy
     checkpoint: CheckpointConfig
@@ -179,6 +218,7 @@ class HarnessConfig:
     llm: LLMConfig = field(default_factory=LLMConfig.from_defaults)
     max_turns: int = 100
     lsp: LSPConfig = field(default_factory=LSPConfig.from_defaults)
+    mcp: MCPConfig = field(default_factory=MCPConfig.from_defaults)
 
     @classmethod
     def from_defaults(cls) -> HarnessConfig:
@@ -410,6 +450,61 @@ def _parse_lsp_section(section: dict | None) -> LSPConfig:
     return LSPConfig(servers=tuple(servers))
 
 
+def _parse_mcp_section(section: dict | None) -> MCPConfig:
+    """Parse a top-level [mcp.servers.*] block from harness.toml.
+
+    Schema (per [mcp.servers.<name>] subtable):
+      command          : str (required)
+      args             : list[str] (optional, default [])
+      env              : dict[str, str] (optional, default {}) — explicit env
+      cwd              : str (optional, default None)
+      subagent_access  : bool (optional, default false)
+
+    PM-1: only validates and exposes the spec. mcp_manager wires the lifecycle.
+    """
+    if not section:
+        return MCPConfig.from_defaults()
+    if not isinstance(section, dict):
+        raise ConfigError("[mcp] must be a table")
+    servers_raw = section.get("servers", {})
+    if not isinstance(servers_raw, dict):
+        raise ConfigError("[mcp.servers] must be a table of server specs")
+    servers: list[MCPServerConfig] = []
+    seen: set[str] = set()  # M3: duplicate name guard
+    for name, cfg in servers_raw.items():
+        if not isinstance(cfg, dict):
+            raise ConfigError(f"[mcp.servers.{name}] must be a table")
+        if name in seen:  # M3
+            raise ConfigError(f"duplicate MCP server name '{name}'")
+        seen.add(name)
+        command = cfg.get("command")
+        if not isinstance(command, str) or not command:
+            raise ConfigError(f"[mcp.servers.{name}].command must be a non-empty string")
+        raw_args = cfg.get("args", [])
+        if not isinstance(raw_args, list) or not all(isinstance(a, str) for a in raw_args):
+            raise ConfigError(f"[mcp.servers.{name}].args must be a list of strings")
+        env_raw = cfg.get("env", {})
+        if not isinstance(env_raw, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in env_raw.items()
+        ):
+            raise ConfigError(f"[mcp.servers.{name}].env must be a table of strings")
+        cwd = cfg.get("cwd")
+        if cwd is not None and not isinstance(cwd, str):
+            raise ConfigError(f"[mcp.servers.{name}].cwd must be a string or absent")
+        subagent = cfg.get("subagent_access", False)
+        if not isinstance(subagent, bool):
+            raise ConfigError(f"[mcp.servers.{name}].subagent_access must be a boolean")
+        servers.append(MCPServerConfig(
+            name=name,
+            command=command,
+            args=tuple(raw_args),
+            env=dict(env_raw),
+            cwd=cwd,
+            subagent_access=subagent,
+        ))
+    return MCPConfig(servers=tuple(servers))
+
+
 def load_config(workdir: Path) -> HarnessConfig:
     """Read `<workdir>/harness.toml` and return a HarnessConfig.
 
@@ -438,6 +533,7 @@ def load_config(workdir: Path) -> HarnessConfig:
         llm=_parse_llm_section(data.get("llm")),
         max_turns=_parse_agent_section(data.get("agent")),
         lsp=_parse_lsp_section(data.get("lsp")),
+        mcp=_parse_mcp_section(data.get("mcp")),
     )
 
 
@@ -486,4 +582,10 @@ _SKELETON = """# harness.toml — per-project loom agent config
 # command = "typescript-language-server"
 # args = ["--stdio"]
 # extensions = [".ts", ".tsx", ".js", ".jsx"]
+
+# [mcp.servers.github]
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-github"]
+# env = {GITHUB_TOKEN = "ghp_..."}  # 注意:不继承 loom 进程环境,只传显式声明的
+# subagent_access = false   # PM-4:子智能体是否可用此 server 的工具
 """

@@ -195,7 +195,7 @@ def test_mcp_tool_to_loom_tool_conversion():
         "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}},
     }
     out = mcp_tool_to_loom_tool(server, mcp_tool)
-    assert out["name"] == "mcp_fs_read_file"
+    assert out["name"] == "mcp__fs__read_file"  # M2: double underscore separator
     assert "[MCP:fs]" in out["description"]
     assert "input_schema" in out
 
@@ -203,7 +203,8 @@ def test_mcp_tool_to_loom_tool_conversion():
 def test_mcp_tool_to_loom_tool_handles_missing_fields():
     server = MCPServer(name="x", command="ignored")
     out = mcp_tool_to_loom_tool(server, {})
-    assert out["name"].startswith("mcp_x_")
+    # No inputSchema → defaults to {"type": "object", "properties": {}} which validates
+    assert out["name"] == "mcp__x__?"  # M2: double underscore + "?" for missing name
     assert "input_schema" in out
 
 

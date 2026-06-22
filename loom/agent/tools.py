@@ -1162,8 +1162,56 @@ TOOL_REGISTRY.register(Tool(
     is_read_only=False,
 ))
 
-TOOLS = TOOL_REGISTRY.to_anthropic_schema()
-TOOL_HANDLERS = {name: TOOL_REGISTRY.handler_for(name) for name in TOOL_REGISTRY.names()}
+def get_tools() -> list[ToolParam]:
+    """M14: return the current Anthropic-format tool schema.
+
+    Lazy: reflects dynamic MCP registrations (M8 / mcp_manager.start_discovery
+    may register tools into TOOL_REGISTRY after module load). Returns a copy
+    of the live module-level ``TOOLS`` list — callers can mutate the result
+    without affecting the shared state.
+    """
+    return list(TOOLS)
+
+
+def get_tool_handlers() -> dict:
+    """M14: return the current name → handler mapping.
+
+    Lazy: reflects dynamic MCP registrations. Returns the live module-level
+    ``TOOL_HANDLERS`` dict (not a copy) so test mocks using
+    ``mocker.patch.dict(loom.agent.tools.TOOL_HANDLERS, ...)`` see the
+    injected handlers through this function.
+    """
+    return TOOL_HANDLERS
+
+
+def _resync_from_registry() -> None:
+    """Rebuild the module-level ``TOOLS`` / ``TOOL_HANDLERS`` from ``TOOL_REGISTRY``.
+
+    Called once at module load (after all native tool registrations) and
+    again by mcp_manager after every MCP tool registration. This keeps the
+    deprecated module-level aliases consistent with the live registry without
+    forcing every read to walk the registry.
+    """
+    TOOL_HANDLERS.clear()
+    TOOLS.clear()
+    for tool in TOOL_REGISTRY.all():
+        if tool.enabled:
+            TOOLS.append({
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": tool.input_schema,
+            })
+        handler = TOOL_REGISTRY.handler_for(tool.name)
+        if handler is not None:
+            TOOL_HANDLERS[tool.name] = handler
+
+
+# Live module-level containers. Populated initially by _resync_from_registry()
+# after all native tool registrations below; mcp_manager calls
+# _resync_from_registry() after every MCP tool register to keep these
+# up-to-date. External imports that read these see the current state.
+TOOLS: list[ToolParam] = []
+TOOL_HANDLERS: dict = {}
 
 SUB_TOOLS: list[ToolParam] = [
     {"name": "bash", "description": "Run a shell command.",
@@ -1276,18 +1324,30 @@ def spawn_subagent(description: str, llm_client=None, hooks=None) -> str:
     return f"[done: {turn_count} turns, {tool_call_count} tool calls]\n{result}"
 
 
-TOOLS.append({
-    "name": "task",
-    "description": "Launch a subagent to handle a complex subtask. Returns only the final conclusion.",
-    "input_schema": {"type": "object", "properties": {"description": {"type": "string"}}, "required": ["description"]},
-})
-
-
 def run_task(description: str) -> str:
     return spawn_subagent(description)
 
 
-TOOL_HANDLERS["task"] = run_task
+# Register "task" via TOOL_REGISTRY (instead of mutating the module-level
+# snapshots) so it participates in the live get_tools()/get_tool_handlers()
+# resolution. M14: the snapshots are kept in sync via _resync_from_registry().
+TOOL_REGISTRY.register(Tool(
+    name="task",
+    description=(
+        "Launch a subagent to handle a complex subtask. Returns only the "
+        "final conclusion."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {"description": {"type": "string"}},
+        "required": ["description"],
+    },
+    handler=run_task,
+    is_read_only=False,
+    is_concurrent_safe=False,
+    enabled=True,
+))
+_resync_from_registry()
 
 
 def _run_template_subagent(template_name: str, args: dict) -> str:
@@ -1328,3 +1388,4 @@ for _tpl_name in ("investigate_code", "refactor_across_files", "fix_failing_test
     _tool = _make_template_tool(_tpl_name)
     if _tool is not None:
         TOOL_REGISTRY.register(_tool)
+_resync_from_registry()  # Final resync: include template subagent tools.

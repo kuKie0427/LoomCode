@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -18,21 +19,34 @@ class Tool:
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
+        # M15: serialise mutations to the registry so concurrent
+        # background discovery threads (e.g. mcp_manager) cannot race
+        # with the agent loop. Reads (get/names/handler_for) are not
+        # guarded — they iterate a dict and Python's GIL protects against
+        # torn pointers; the lock guards the *mutation* surface.
+        self._LOCK = threading.Lock()
 
     def register(self, tool: Tool) -> None:
-        if tool.name in self._tools:
-            raise ValueError(f"Tool {tool.name!r} already registered")
-        self._tools[tool.name] = tool
+        with self._LOCK:
+            if tool.name in self._tools:
+                raise ValueError(f"Tool {tool.name!r} already registered")
+            self._tools[tool.name] = tool
+
+    def unregister(self, name: str) -> None:
+        with self._LOCK:
+            self._tools.pop(name, None)
 
     def disable(self, name: str) -> None:
-        tool = self._tools.get(name)
-        if tool is not None:
-            tool.enabled = False
+        with self._LOCK:
+            tool = self._tools.get(name)
+            if tool is not None:
+                tool.enabled = False
 
     def enable(self, name: str) -> None:
-        tool = self._tools.get(name)
-        if tool is not None:
-            tool.enabled = True
+        with self._LOCK:
+            tool = self._tools.get(name)
+            if tool is not None:
+                tool.enabled = True
 
     def is_enabled(self, name: str) -> bool:
         tool = self._tools.get(name)
