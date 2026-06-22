@@ -630,6 +630,153 @@ def run_load_skill(name: str) -> str:
     return skill.body
 
 
+def _coerce_lsp_line(target_path: Path, line: int) -> int:
+    """R6 mitigation: auto-correct probable 1-indexed line numbers.
+
+    LLMs frequently confuse grep 1-indexed line output with the LSP spec's
+    0-indexed line numbers. If the supplied `line` is exactly the file's
+    line count, the agent almost certainly passed the 1-indexed `cat -n`
+    output it saw in `read_file`. We decrement and log a warning so the
+    audit trail records the auto-correction.
+
+    OSError reading the file → return the original line (let the LSP
+    server's own out-of-range error be the source of truth).
+    """
+    try:
+        text = target_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return line
+    file_lines = text.splitlines()
+    if (
+        line > 0
+        and line >= len(file_lines)
+        and (line - 1) < len(file_lines)
+    ):
+        logger.warning(
+            "LSP line {} out of range for {} ({} lines); "
+            "auto-correcting to {} (1-indexed → 0-indexed)",
+            line, target_path, len(file_lines), line - 1,
+        )
+        return line - 1
+    return line
+
+
+def _format_locations(locs: list[dict]) -> str:
+    """Render LSP Location dicts as `path:line:col` lines (1-indexed for display)."""
+    out: list[str] = []
+    for loc in locs:
+        uri = loc.get("uri", "")
+        path = uri[len("file://"):] if uri.startswith("file://") else uri
+        rng = loc.get("range", {}).get("start", {})
+        out.append(f"{path}:{int(rng.get('line', 0)) + 1}:{int(rng.get('character', 0)) + 1}")
+    return "\n".join(out)
+
+
+def run_lsp_goto_definition(path: str, line: int, character: int) -> str:
+    """Find the definition of the symbol at file:line:character.
+
+    line/character are 0-indexed per LSP spec — use AFTER grep to find the
+    candidate position and subtract 1. Fail-closed: missing config →
+    "No LSP server configured"; manager not implemented (PL-2 stub) →
+    "LSP unavailable"; LSPError → "LSP error: ..."; safe_path violation
+    → "Error: ...".
+    """
+    from loom.agent import lsp_client
+    from loom.agent.lsp_manager import get_or_start
+
+    try:
+        target_path = safe_path(path)
+    except ValueError as exc:
+        return f"Error: {exc}"
+    line = _coerce_lsp_line(target_path, line)
+    try:
+        server = get_or_start(target_path)
+    except (NotImplementedError, FileNotFoundError, lsp_client.LSPError) as exc:
+        return f"LSP unavailable: {exc}"
+    if server is None:
+        return f"No LSP server configured for {Path(path).suffix} files"
+    try:
+        locs = lsp_client.goto_definition(server, str(target_path), line, character)
+    except lsp_client.LSPError as exc:
+        return f"LSP error: {exc}"
+    if not locs:
+        return "no definition found"
+    return _format_locations(locs)
+
+
+def run_lsp_find_references(
+    path: str,
+    line: int,
+    character: int,
+    include_declaration: bool = True,
+) -> str:
+    """Find all references to the symbol at file:line:character.
+
+    line/character are 0-indexed per LSP spec — use AFTER grep to find the
+    candidate position and subtract 1. Returns `path:line:col` lines,
+    "no references found", or a fail-closed error string. Read-only.
+    """
+    from loom.agent import lsp_client
+    from loom.agent.lsp_manager import get_or_start
+
+    try:
+        target_path = safe_path(path)
+    except ValueError as exc:
+        return f"Error: {exc}"
+    line = _coerce_lsp_line(target_path, line)
+    try:
+        server = get_or_start(target_path)
+    except (NotImplementedError, FileNotFoundError, lsp_client.LSPError) as exc:
+        return f"LSP unavailable: {exc}"
+    if server is None:
+        return f"No LSP server configured for {Path(path).suffix} files"
+    try:
+        locs = lsp_client.find_references(
+            server, str(target_path), line, character,
+            include_declaration=include_declaration,
+        )
+    except lsp_client.LSPError as exc:
+        return f"LSP error: {exc}"
+    if not locs:
+        return "no references found"
+    return _format_locations(locs)
+
+
+def run_lsp_rename_symbol(path: str, line: int, character: int, new_name: str) -> str:
+    """Compute the WorkspaceEdit to rename the symbol at file:line:character.
+
+    line/character are 0-indexed per LSP spec — use AFTER grep to find the
+    candidate position and subtract 1. PL-1 returns the WorkspaceEdit as a
+    JSON string; PL-3 will add the apply-to-disk step. Fail-closed the same
+    way as the other two LSP tools.
+    """
+    import json as _json
+
+    from loom.agent import lsp_client
+    from loom.agent.lsp_manager import get_or_start
+
+    try:
+        target_path = safe_path(path)
+    except ValueError as exc:
+        return f"Error: {exc}"
+    line = _coerce_lsp_line(target_path, line)
+    try:
+        server = get_or_start(target_path)
+    except (NotImplementedError, FileNotFoundError, lsp_client.LSPError) as exc:
+        return f"LSP unavailable: {exc}"
+    if server is None:
+        return f"No LSP server configured for {Path(path).suffix} files"
+    try:
+        edit = lsp_client.rename_symbol(server, str(target_path), line, character, new_name)
+    except lsp_client.LSPError as exc:
+        return f"LSP error: {exc}"
+    except ValueError as exc:
+        return f"Error: {exc}"
+    if edit is None:
+        return "no rename possible at that position"
+    return f"WorkspaceEdit ready (apply not implemented until PL-3): {_json.dumps(edit)}"
+
+
 TOOL_REGISTRY = ToolRegistry()
 TOOL_REGISTRY.register(Tool(
     name="bash",
@@ -859,6 +1006,76 @@ TOOL_REGISTRY.register(Tool(
     input_schema={"type": "object", "properties": {"start_turn": {"type": "integer"}, "end_turn": {"type": "integer"}, "dest": {"type": "string"}}, "required": ["start_turn", "end_turn"]},
     handler=run_cold_load,
     is_read_only=True,
+))
+TOOL_REGISTRY.register(Tool(
+    name="lsp_goto_definition",
+    description=(
+        "Jump to the definition of the symbol at file:line:character via LSP. "
+        "line/character are 0-indexed (LSP spec). Use AFTER grep to find the "
+        "candidate position and subtract 1 to convert from grep's 1-indexed "
+        "output. Returns `path:line:col` lines (1-indexed for display), "
+        "'no definition found', or a fail-closed error string when no LSP "
+        "server is configured for the file's extension."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Workspace-relative file path."},
+            "line": {"type": "integer", "description": "0-indexed line (LSP spec)."},
+            "character": {"type": "integer", "description": "0-indexed character offset (LSP spec)."},
+        },
+        "required": ["path", "line", "character"],
+    },
+    handler=run_lsp_goto_definition,
+    is_read_only=True,
+))
+TOOL_REGISTRY.register(Tool(
+    name="lsp_find_references",
+    description=(
+        "Find every reference to the symbol at file:line:character via LSP. "
+        "line/character are 0-indexed (LSP spec). Use AFTER grep to find the "
+        "candidate position and subtract 1 to convert from grep's 1-indexed "
+        "output. `include_declaration` defaults to true. Returns "
+        "`path:line:col` lines, 'no references found', or a fail-closed "
+        "error string when no LSP server is configured for the file's "
+        "extension."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Workspace-relative file path."},
+            "line": {"type": "integer", "description": "0-indexed line (LSP spec)."},
+            "character": {"type": "integer", "description": "0-indexed character offset (LSP spec)."},
+            "include_declaration": {"type": "boolean", "description": "Include the declaration site itself (default true)."},
+        },
+        "required": ["path", "line", "character"],
+    },
+    handler=run_lsp_find_references,
+    is_read_only=True,
+))
+TOOL_REGISTRY.register(Tool(
+    name="lsp_rename_symbol",
+    description=(
+        "Compute the LSP WorkspaceEdit for renaming the symbol at "
+        "file:line:character. line/character are 0-indexed (LSP spec). Use "
+        "AFTER grep to find the candidate position and subtract 1 to convert "
+        "from grep's 1-indexed output. PL-1 returns the WorkspaceEdit as a "
+        "JSON string only (apply is wired up in PL-3). Returns a fail-closed "
+        "error string when no LSP server is configured for the file's "
+        "extension."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Workspace-relative file path."},
+            "line": {"type": "integer", "description": "0-indexed line (LSP spec)."},
+            "character": {"type": "integer", "description": "0-indexed character offset (LSP spec)."},
+            "new_name": {"type": "string", "description": "Replacement identifier (non-empty, no whitespace)."},
+        },
+        "required": ["path", "line", "character", "new_name"],
+    },
+    handler=run_lsp_rename_symbol,
+    is_read_only=False,
 ))
 
 TOOLS = TOOL_REGISTRY.to_anthropic_schema()

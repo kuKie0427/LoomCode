@@ -5485,3 +5485,44 @@ landed:
 - f-lsp-integration-p3: pylsp subprocess + 3 commands (goto/find/rename)
 - f-long-context-stability-p3: >1M token sessions with cold storage
 - f-harness-as-product-polish-p4: `loom eval init` + GitHub Action
+
+---
+
+## Session: f-lsp-wire-tool-registry — PL-1 LSP 工具接入 (2026-06-22 evening)
+
+### 背景
+- README 长期承认 LSP "client supports pylsp/typescript-language-server/gopls; bring-your-own server via the LSPServer dataclass" — `lsp_client.py` (290 行 JSON-RPC 客户端 + 18 单元测试 + 6 eval case) 完整,但**从未注册到 TOOL_REGISTRY**,agent 看不到。
+- 用户找符号引用只能用 grep,无法分辨同名 / import 别名 / 字符串引用,精度差。
+- Roadmap: `.sisyphus/plans/loop-lsp-roadmap.md` + 4 个 phase (PL-1 ~ PL-4)。Oracle 评审发现 8 个风险(1 CRITICAL + 5 CONCERNING),全部吸收进原 4 phase,WIP=1 不破。
+
+### PL-1 范围(本次)
+- `loom/agent/config.py` (+98): `LSPServerSpec` + `LSPConfig` frozen dataclasses,`find_for(file_path)` 按扩展名路由,`_parse_lsp_section()` with `ConfigError` messages 跟现有 `_parse_checkpoint_section` 风格一致。
+- `loom/agent/tools.py` (+217): 3 个 `run_lsp_*` handler 全部 fail-closed,`_coerce_lsp_line()` R6 mitigation(LLM 常把 grep 的 1-indexed 行号当 LSP 的 0-indexed → 自动减 1 + warning),`_format_locations()` 辅助函数,`TOOL_REGISTRY.register(Tool(...))` ×3。
+- `loom/agent/lsp_manager.py` (新增,33 行 stub):`get_or_start` / `shutdown_all` 仅抛 `NotImplementedError("PL-2: lsp_manager not yet wired")`。Handlers 捕获此异常返回 `"LSP unavailable: ..."` 字符串。PL-2 才填实现。
+- `tests/test_lsp_wire.py` (新增,238 行,23 tests,6 class-based 分组)
+- `loom/eval/cases/lsp_wire.py` (新增,3 EvalCase) + `__init__.py` 注册
+
+### 验证(真实输出,WR #3 真证据)
+- `uv run pytest tests/test_lsp_wire.py -v` → **23 passed in 0.06s**
+- `uv run python -m loom.cli eval --filter lsp-wire --fail-under 100` → **3/3 passed**
+- `uv run python -m loom.cli eval --kind harness --fail-under 100` → **330/330 passed** (was 327 + 3 new)
+- `uv run ruff check loom/` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in 130 source files
+- `uv run pytest -m 'not snapshot' -q` → **890 passed, 8 deselected** (was 875 + 23 new)
+
+### 已知非回归(WR #5: 不修非要求的 pre-existing 问题)
+- `./init.sh` 在 `tests/test_tui_snapshot.py::test_empty_layout` 失败。**经 `git stash --include-untracked` 验证为 pre-existing**:清空我所有改动后同一测试仍失败。不属于 PL-1 范围,未修复。
+
+### 委派 / 执行模式
+- 计划文件 `.sisyphus/plans/loop-lsp-p1.md` 写好后委派给 `deep` 类别 Sisyphus-Junior。
+- 委派任务在 30min 监控 timeout 超时,但 `git status --short` 显示改动范围**完全符合 PL-1 scope**(WR #11 验证):4 修改 + 3 新增,无任何 out-of-scope 文件。子智能体大概率干完但未发出完成信号。
+- 我亲自跑了所有 verification 命令确认,而非依赖子智能体的自我报告(WR #6: no self-declared passing)。
+
+### Roadmap 进展
+- PL-1 ✅ DONE: LSP 工具注册 + config schema + R6
+- PL-2: lazy server 生命周期 + R1+A `_read_response` 修复 + R5 trace event + R7 死 server 驱逐
+- PL-3: rename 落盘 + R3 CRITICAL permission 真规则(非 fake_block)+ R2 journal-backed rollback
+- PL-4: SUB_TOOLS 接入 + docs/lsp.md + README 收尾 + R4 文档
+
+### 下次 session
+新 session 加载 `.sisyphus/plans/loop-lsp-p2.md` 开始 PL-2。可保留 `feature_list.json` 中 `f-lsp-wire-tool-registry: done` 的 evidence 作为 PL-1 完成证据。

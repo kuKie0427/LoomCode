@@ -122,6 +122,54 @@ class TelemetryConfig:
 
 
 @dataclass(frozen=True)
+class LSPServerSpec:
+    """Configuration for one LSP server entry in harness.toml.
+
+    Example:
+        [lsp.python]
+        command = "pylsp"
+        args = ["--check-parent-process"]
+        extensions = [".py"]
+
+    PL-2 (lsp_manager) uses these specs to lazily spawn / cache subprocesses
+    for matching file extensions. PL-1 only validates the schema; no server
+    is started at config-load time.
+    """
+
+    name: str
+    command: str
+    args: tuple[str, ...] = ()
+    extensions: tuple[str, ...] = ()
+
+    def matches(self, file_path: str | Path) -> bool:
+        suffix = Path(file_path).suffix
+        if not suffix:
+            return False
+        return suffix in self.extensions
+
+
+@dataclass(frozen=True)
+class LSPConfig:
+    """Per-project LSP server map. Empty tuple = no servers configured.
+
+    `find_for(file_path)` returns the first server whose `extensions`
+    matches the file's suffix, or None. Used by PL-2's lsp_manager.
+    """
+
+    servers: tuple[LSPServerSpec, ...] = ()
+
+    @classmethod
+    def from_defaults(cls) -> LSPConfig:
+        return cls(servers=())
+
+    def find_for(self, file_path: str | Path) -> LSPServerSpec | None:
+        for spec in self.servers:
+            if spec.matches(file_path):
+                return spec
+        return None
+
+
+@dataclass(frozen=True)
 class HarnessConfig:
     policy: PermissionPolicy
     checkpoint: CheckpointConfig
@@ -130,6 +178,7 @@ class HarnessConfig:
     run_init_sh_on_session_end: bool = True
     llm: LLMConfig = field(default_factory=LLMConfig.from_defaults)
     max_turns: int = 100
+    lsp: LSPConfig = field(default_factory=LSPConfig.from_defaults)
 
     @classmethod
     def from_defaults(cls) -> HarnessConfig:
@@ -323,6 +372,44 @@ def _parse_llm_section(section: dict | None) -> LLMConfig:
     return LLMConfig(max_output_tokens=max_tokens)
 
 
+def _parse_lsp_section(section: dict | None) -> LSPConfig:
+    """Parse a top-level [lsp.*] block from harness.toml.
+
+    Schema (per [lsp.<name>] subtable):
+      command    : str (required)
+      extensions : list[str] (required, e.g. [".py"])
+      args       : list[str] (optional)
+
+    PL-1 only validates and exposes the spec. PL-2 wires the lifecycle.
+    """
+    if not section:
+        return LSPConfig.from_defaults()
+    if not isinstance(section, dict):
+        raise ConfigError("[lsp] must be a table of server specs")
+    servers: list[LSPServerSpec] = []
+    for name, cfg in section.items():
+        if not isinstance(cfg, dict):
+            raise ConfigError(f"[lsp.{name}] must be a table")
+        command = cfg.get("command")
+        if not isinstance(command, str) or not command:
+            raise ConfigError(f"[lsp.{name}].command must be a non-empty string")
+        extensions = cfg.get("extensions")
+        if not isinstance(extensions, list) or not all(isinstance(e, str) for e in extensions):
+            raise ConfigError(f"[lsp.{name}].extensions must be a list of strings")
+        if not extensions:
+            raise ConfigError(f"[lsp.{name}].extensions must be a non-empty list of strings")
+        raw_args = cfg.get("args", [])
+        if not isinstance(raw_args, list) or not all(isinstance(a, str) for a in raw_args):
+            raise ConfigError(f"[lsp.{name}].args must be a list of strings")
+        servers.append(LSPServerSpec(
+            name=name,
+            command=command,
+            args=tuple(raw_args),
+            extensions=tuple(extensions),
+        ))
+    return LSPConfig(servers=tuple(servers))
+
+
 def load_config(workdir: Path) -> HarnessConfig:
     """Read `<workdir>/harness.toml` and return a HarnessConfig.
 
@@ -350,6 +437,7 @@ def load_config(workdir: Path) -> HarnessConfig:
         disabled_tools=_parse_tools_section(data.get("tools")),
         llm=_parse_llm_section(data.get("llm")),
         max_turns=_parse_agent_section(data.get("agent")),
+        lsp=_parse_lsp_section(data.get("lsp")),
     )
 
 
@@ -388,4 +476,14 @@ _SKELETON = """# harness.toml — per-project loom agent config
 
 # [llm]
 # max_output_tokens = 8000  # ceiling on tokens emitted per response (default 8000)
+
+# [lsp.python]
+# command = "pylsp"
+# args = ["--check-parent-process"]
+# extensions = [".py"]
+
+# [lsp.typescript]
+# command = "typescript-language-server"
+# args = ["--stdio"]
+# extensions = [".ts", ".tsx", ".js", ".jsx"]
 """
