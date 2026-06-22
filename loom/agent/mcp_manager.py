@@ -30,7 +30,12 @@ returned by ``mcp_client.call_tool`` into a string (M12), truncate the
 result at 50KB with a footer + trace event (M7), emit a visible
 ``logger.warning`` and evict the server on call failure (M6), and record
 an ``mcp_request`` trace event before the per-server lock (R5). PM-4
-will gate subagent access via ``spec.subagent_access``.
+gates subagent access via ``spec.subagent_access`` (M9): opt-in
+servers have their tools mirrored into ``SUB_TOOLS`` / ``SUB_HANDLERS``
+so ``spawn_subagent`` can call them. Default ``subagent_access=False``
+keeps MCP tools out of the subagent surface entirely. The 3-state
+permission gate from PM-2 still fires for subagent tool calls because
+``PreToolUse`` runs inside ``spawn_subagent`` too.
 """
 
 from __future__ import annotations
@@ -138,6 +143,16 @@ def _discover_server(spec: MCPServerConfig) -> None:
                 "MCP tool '%s' from '%s' duplicate name, skipping",
                 mcp_tool.get("name", "?"), spec.name,
             )
+        else:
+            # M9: opt-in subagent access. Default False — most MCP servers
+            # are too privileged (push, drop_table, network write) to expose
+            # to a subagent loop without explicit per-server opt-in. When
+            # True, mirror the same tool into SUB_TOOLS / SUB_HANDLERS so
+            # ``spawn_subagent`` can call it. The 3-state permission gate
+            # from PM-2 still fires inside the subagent loop because
+            # PreToolUse is dispatched there too.
+            if spec.subagent_access:
+                _add_to_sub_tools(loom_tool_dict, handler)
     # Keep the live TOOLS / TOOL_HANDLERS aliases in sync (M14).
     try:
         tools_mod._resync_from_registry()
@@ -301,6 +316,30 @@ def get_server_lock(name: str) -> threading.Lock:
     return _PER_SERVER_LOCKS[name]
 
 
+def _add_to_sub_tools(tool_dict: dict, handler) -> None:
+    """Mirror an MCP tool into ``SUB_TOOLS`` / ``SUB_HANDLERS`` for subagent use.
+
+    Called from ``_discover_server`` only when ``MCPServerConfig.subagent_access``
+    is True. Uses the SAME handler instance registered in the main
+    ``TOOL_REGISTRY`` (no copy-paste), so all of PM-2's 3-state permission
+    gate, PM-3's output-shape mitigations, and M6 crash recovery apply
+    unchanged when a subagent calls the tool via ``spawn_subagent``.
+
+    M9: default ``subagent_access=False`` means this function is never
+    called for the common case. A server that wants its tools available
+    to ``spawn_subagent`` must explicitly opt in.
+    """
+    from loom.agent import tools as tools_mod  # late import: avoid cycles
+    from anthropic.types import ToolParam
+    sub_tool: ToolParam = {
+        "name": tool_dict["name"],
+        "description": tool_dict["description"],
+        "input_schema": tool_dict["input_schema"],
+    }
+    tools_mod.SUB_TOOLS.append(sub_tool)
+    tools_mod.SUB_HANDLERS[tool_dict["name"]] = handler
+
+
 def shutdown_all() -> None:
     """SessionEnd hook: stop all started servers, unregister their tools.
 
@@ -309,6 +348,10 @@ def shutdown_all() -> None:
     the per-server locks. Tool unregistration ensures stale MCP tools do
     not linger into a future session that re-runs start_discovery with
     a different tool set.
+
+    M9: also clears ``SUB_TOOLS`` / ``SUB_HANDLERS`` of any tools
+    belonging to a shut-down server so a subagent that fires after
+    shutdown does not see dangling tools that route to a dead subprocess.
     """
     from loom.agent import tools as tools_mod  # late import
     tool_registry = tools_mod.TOOL_REGISTRY
@@ -327,6 +370,17 @@ def shutdown_all() -> None:
                         tool_registry.unregister(tool_name)
                     except Exception:
                         pass
+            # M9: clean up subagent surfaces too. Filter in-place to
+            # preserve module identity (SUB_TOOLS is a list other code
+            # may have a reference to; rebinding the name would hide
+            # any concurrent append from the subagent's view).
+            tools_mod.SUB_TOOLS[:] = [
+                t for t in tools_mod.SUB_TOOLS
+                if not t.get("name", "").startswith(f"mcp__{name}__")
+            ]
+            for hname in list(tools_mod.SUB_HANDLERS.keys()):
+                if hname.startswith(f"mcp__{name}__"):
+                    del tools_mod.SUB_HANDLERS[hname]
         _PER_SERVER_LOCKS.clear()
     # Refresh the live aliases after bulk unregistration.
     try:

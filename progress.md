@@ -5951,3 +5951,122 @@ LSP wire-up roadmap 完成。可以考虑下一个 roadmap:
 
 ### 下次 session
 新 session 加载 `.sisyphus/plans/loop-mcp-p4.md` 开始 PM-4(最后一个 phase)。范围:subagent_access=true 的 server 把 mcp__* 工具加进 SUB_TOOLS + docs/mcp.md + README 收尾。预估 2h。完成后整个 MCP wire-up roadmap done。
+
+---
+
+## Session: f-mcp-subagent-docs — PM-4 MCP subagent opt-in + docs + README(完成 MCP roadmap) (2026-06-22 evening, session 8)
+
+### 背景
+- PM-1~3 把 MCP 完整接入主 agent(config + manager + discovery + permission + handler safety),但子智能体还看不到 MCP 工具,README 仍承认 "MCP integration is plumbing only"。
+- 本 phase 收尾:subagent_access opt-in(M9,最后一个 Oracle 风险)+ docs/mcp.md + README 更新。**完成整个 4-phase MCP roadmap**。
+
+### 范围
+- `loom/agent/mcp_manager.py` (+56): `_discover_server` 加 `if spec.subagent_access: _add_to_sub_tools(loom_tool_dict, handler)` 在 `TOOL_REGISTRY.register` 之后。新 `_add_to_sub_tools(tool_dict, handler)` helper:append 到 `loom.agent.tools.SUB_TOOLS` list + 设 `SUB_HANDLERS[name] = handler`(**同一个 handler 实例,无 copy-paste**,所以 PM-2/PM-3 所有 mitigations 都适用)。`shutdown_all()` 扩展:in-place filter `SUB_TOOLS`(保留 module identity 给 `mocker.patch.dict` 测试)+ 删 `mcp__<name>__*` keys 从 `SUB_HANDLERS`。
+- `docs/mcp.md` (新增, 207 行, 9 节): §1 What & Why + §2 3 个常用 MCP server install 命令(Filesystem/GitHub/SQLite)+ §3 完整 3-server `harness.toml` 示例含 `[mcp.permissions]` + §4 3-state permission 模型(deny/auto_approve/prompt,绝不静默放行)+ §5 discovery timing(SessionStart background thread)+ §6 限制(双下划线、不继承 os.environ、50KB 截断、crash → unregister + warn、per-server lock、Unix-only)+ §7 故障排查(含 **SIGKILL 孤儿清理 `pkill -f mcp-server-*`**、**API key 泄漏排查:loom 不传 os.environ**、stderr 收集、crash 后 stale tools)+ §8 subagent_access 解释(默认 false,opt-in per server,**子智能体调 mcp__* 仍走 PreToolUse 3-state gate — 关键安全保证**)+ §9 8 个设计决策。
+- `README.md` (-2/+1): 删除 "MCP integration is plumbing only" 行;"Production-ready" bullet 的 "stdio MCP client" 扩展为 "stdio MCP client with config-driven 3-state permission gate (deny/auto_approve/prompt) and per-server subagent opt-in"。
+- `tests/test_mcp_subagent.py` (新增, 6 测试): `test_subagent_access_true_adds_to_sub_tools` / `test_subagent_access_false_does_not_add_to_sub_tools`(M9 默认 false 守护)/ `test_sub_tools_mcp_handler_same_as_tool_registry`(identity check,同 handler 无 copy-paste)/ `test_shutdown_all_clears_sub_tools` / **`test_subagent_call_mcp_goes_through_permission_gate`**(关键安全:子智能体 PreToolUse fire + `_check_mcp_permissions` 调用 — 子智能体不能绕过 3-state gate)/ `test_subagent_access_only_affects_specified_server`(per-server opt-in)。
+- `loom/eval/cases/mcp_subagent.py` (新增, 2 EvalCase): mcp-subagent-opt-in-adds-to-sub-tools / mcp-subagent-default-excluded-from-sub-tools。
+- `loom/eval/cases/__init__.py` (+1): 按字母序加 `mcp_subagent`。
+
+### 验证(真实输出,WR #3 真证据)
+- `uv run pytest tests/test_mcp_subagent.py -v` → **6 passed in 0.06s**
+- `uv run pytest tests/test_mcp_subagent.py tests/test_mcp_handler.py tests/test_mcp_permission.py tests/test_mcp_wire.py tests/test_mcp_manager.py tests/test_mcp_client.py` → **80 passed in 0.29s**(6 subagent + 19 handler + 18 permission + 19 wire + 8 manager + 10 client)
+- `uv run python -m loom.cli eval --filter mcp --fail-under 100` → **19/19 passed**(17 pre-existing PM-3 + 2 new mcp-subagent)
+- `uv run python -m loom.cli eval --kind harness --fail-under 100` → **357/357 passed**(PM-3 是 355,+2 new)— **无回归**
+- `uv run ruff check loom/` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in **139 source files**(PM-3 是 138,+1 新 `mcp_subagent.py` eval)
+- `uv run pytest -m 'not snapshot' -q` → **1004 passed, 8 deselected**(PM-3 是 998,+6 new)— **破 1000 测试大关**
+- `grep -rn fake_block loom/agent/` → **EXIT=1(无匹配)— R3 CRITICAL 修复(LSP PL-3)仍 intact**
+- `uv run python -m loom.cli audit . --json` → **87/100**(pre-existing self-test timeout,非回归)
+
+---
+
+## 🎉 MCP Wire-up Roadmap COMPLETE
+
+### 4 phase 全部 done
+
+| Phase | Commit | 行数 | 新测试 | 新 eval | 关键修复 |
+|---|---|---|---|---|---|
+| PM-1 | `8406909` | 1429 | 27 | 4 | M1/M2/M3/M4/M8/M10/M11/M13/M14/M15(10 个) |
+| PM-2 | `e8df56b` | 808 | 18 | 4 | **M5 CRITICAL** permission gate |
+| PM-3 | `58da1dc` | 979 | 19 | 3 | M6/M7/M12/M16 + PM-1 latent `return _handler` bug |
+| PM-4 | (本 commit) | ~640 | 6 | 2 | M9 subagent opt-in + docs + README |
+| **Total** | — | **~3856** | **70** | **13** | **16/16 Oracle 风险全修** |
+
+### Oracle 16 风险最终状态
+
+| # | 风险 | 严重度 | 修复 phase | 状态 |
+|---|---|---|---|---|
+| M1 | Phase split 错 | 🔴 设计级 | PM-1(已吸收) | ✅ |
+| M2 | 工具前缀单下划线冲突 | 🟡 | PM-1 双下划线 | ✅ |
+| M3 | Duplicate server name | 🟡 | PM-1 config 验证 | ✅ |
+| M4 | Malformed inputSchema | 🟡 | PM-1 注册时验证 | ✅ |
+| **M5** | **Permission 绕过** | 🔴 **CRITICAL** | PM-2 3-state gate | ✅ |
+| M6 | Crash 无 visible 提示 | 🟢 | PM-3 logger.warning | ✅ |
+| M7 | Output 撑爆上下文 | 🟡 | PM-3 50KB 截断 | ✅ |
+| M8 | Startup blocking | 🟡 | PM-1 background thread | ✅ |
+| **M9** | **Subagent 调危险 MCP** | 🔴 **CRITICAL** | **PM-4 opt-in + 3-state gate 仍适用** | ✅ |
+| M10 | request_id race | 🟡 | PM-1 per-server lock | ✅ |
+| **M11** | **env 泄漏 API key** | 🔴 安全 | PM-1 不继承 os.environ | ✅ |
+| M12 | content list 不展平 | 🟢 | PM-3 _flatten_mcp_content | ✅ |
+| M13 | 缺 cwd 字段 | 🟢 | PM-1 加字段 | ✅ |
+| **M14** | **TOOLS snapshot 不更新** | 🔴 设计级 | PM-1 lazy 化 | ✅ |
+| M15 | register 无锁 | 🟡 | PM-1 加锁 | ✅ |
+| M16 | stderr 不读 | 🟢 | PM-3 _read_stderr_tail | ✅ |
+
+**16/16 全修。** 4 个 CRITICAL/安全级(M5/M9/M11/M14)+ 2 个设计级(M1/M14)+ 7 个 CONCERNING + 3 个 SAFE 全部落地。
+
+### Oracle 评审价值(再次体现)
+- 原始计划(我没让 Oracle 评审前)会漏掉 M5 CRITICAL(permission 绕过)+ M9 CRITICAL(subagent 调危险工具)+ M11 安全(env 泄漏 API key)+ M14 设计级(TOOLS snapshot 不更新)。
+- Oracle 评审抓住 16 个风险,全部吸收进原 4 phase(WIP=1 不破)。
+- **没有 Oracle 评审,这 4 个 CRITICAL/安全级问题会直接合并进 main**。
+
+### 子智能体委派模式(8 个 session 总结)
+- 每个 phase 写详细 brief 到 `/tmp/loom-delegation/pm{N}-brief.md`,然后用短 prompt 引用文件(避开 JSON 大字符串解析问题)。
+- 每个 phase 委派给 `deep` 类别 Sisyphus-Junior + `harness-engineering` skill。
+- 我亲自跑所有 verification 命令确认(WR #6/#11:不自我宣告通过、验证子智能体工作)。
+- **3 个 LSP-style lesson 现在都编码成 regression test**:
+  1. PL-3:"跑 full harness eval"(不只 `--filter`)
+  2. PM-2:"MagicMock block attribute 非 bool,需 isinstance guard"
+  3. PM-3:"registration 测试不验证可调用性,要测 handler 真的能跑"
+- 子智能体在 PM-2 主动修了 MagicMock 兼容性 bug,在 PM-3 主动修了 PM-1 latent `return _handler` bug — 都超出 brief 的工程判断。
+
+### MCP 工具能力总结(主 agent + 子智能体 opt-in)
+
+Agent(主 + opt-in 子智能体)现在可以调任何 MCP 兼容 server 暴露的工具:
+- 工具名 `mcp__server__tool`(双下划线,匹配 Claude Code 约定)
+- 配置:`harness.toml [mcp.servers.<name>]` 声明 command/args/env/cwd/subagent_access
+- Discovery:SessionStart background thread per server,异步出现
+- Permission:3-state(deny 硬阻断 / auto_approve 静默放行 / neither → y/N prompt),绝不静默放行
+- Output:50KB 截断,content list 展平(text/image/resource)
+- Crash:visible `logger.warning` + evict server + unregister tools,下次 session 才重启
+- Stderr:start 失败时收集 tail 加到 MCPError 消息
+- Env:不继承 loom 进程环境(防 API key 泄漏),用户显式声明
+- Subagent:`subagent_access=true` opt-in per server,默认 false;子智能体调 mcp__* 仍走 3-state gate
+
+支持任何 MCP 兼容 server(Filesystem / GitHub / SQLite / Git / Database / etc.)。本机没装也能跑 — fail-closed 返回字符串错误,不崩溃。
+
+### LSP + MCP 两个 roadmap 总成果
+
+| 维度 | LSP | MCP | 合计 |
+|---|---|---|---|
+| Phases | 4 | 4 | 8 |
+| Commits | 4 | 4 | 8 |
+| 行数 | ~3561 | ~3856 | **~7417** |
+| 新测试 | 66 | 70 | **136** |
+| 新 eval | 17 | 13 | **30** |
+| Oracle 风险修 | 8/8 | 16/16 | **24/24** |
+| CRITICAL 修复 | 1(R3) | 4(M5/M9/M11/M14) | **5** |
+
+loom 从"分析可用性"→ "LSP 未接入是最大 gap"→ "MCP 也是 plumbing only"→ "两个 4-phase roadmap + Oracle 评审 + 24 风险全修"→ "136 新测试 + 30 新 eval + 0 回归 + 5 CRITICAL 安全 bypass 修复"。**1004 pytest + 357 harness eval + 139 mypy files clean**。
+
+### 下次 session
+
+LSP + MCP 两个 wire-up roadmap 都完成。可以考虑:
+- **TDD auto-iteration** — `loom/agent/tdd.py` 是 scaffolding,可让 agent loop 自动迭代 test-fix 循环。
+- **Long-context cold storage 自动驱逐** — cold_archive 工具存在但 agent loop 层不自动调用。
+- **用 loom 自己(它现在有 LSP + MCP 了!)做别的事**。
+- **审计 + 修 pre-existing issues**:`test_tui_snapshot.py::test_empty_layout`(从 PL-1 就存在)、audit 87/100(self-test timeout)。
+- **把 3 个 LSP-style lesson 推广成 Working Rules**:跑 full eval / MagicMock guard / handler 可调用性测试。
+
+或者就到此为止,你想休息一下。

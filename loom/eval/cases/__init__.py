@@ -36,6 +36,7 @@ from loom.eval.cases import (
     mcp_client,  # noqa: F401
     mcp_handler,  # noqa: F401
     mcp_permission,  # noqa: F401
+    mcp_subagent,  # noqa: F401
     mcp_wire,  # noqa: F401
     microcompact_counter,  # noqa: F401
     permission_canonicalize,  # noqa: F401
