@@ -170,6 +170,17 @@ def apply_config(config: HarnessConfig) -> None:
     hooks.disabled_tools = config.disabled_tools
 hooks.register_hook("AgentStop", context.microcompact)
 
+# PL-2: shut down any LSP servers we started during the session. Done on
+# SessionEnd (not AgentStop) so subagents that triggered get_or_start do
+# not each kill the parent's server; only the outermost session does.
+def _on_session_end(*args):
+    try:
+        from loom.agent.lsp_manager import shutdown_all as _lsp_shutdown_all
+        _lsp_shutdown_all()
+    except Exception:
+        logger.warning("LSP shutdown_all raised", exc_info=True)
+hooks.register_hook("SessionEnd", _on_session_end)
+
 llm_client = LLMClient(model=os.getenv("MODEL", "deepseek-v4-flash"))
 
 

@@ -5526,3 +5526,46 @@ landed:
 
 ### 下次 session
 新 session 加载 `.sisyphus/plans/loop-lsp-p2.md` 开始 PL-2。可保留 `feature_list.json` 中 `f-lsp-wire-tool-registry: done` 的 evidence 作为 PL-1 完成证据。
+
+---
+
+## Session: f-lsp-server-lifecycle — PL-2 LSP server 生命周期 + R1/R5/R7 (2026-06-22 evening, session 2)
+
+### 背景
+- PL-1 把 3 个 lsp_* 工具注册到 TOOL_REGISTRY,但 lsp_manager.py 是占位 stub,handler 全部 catch NotImplementedError 返回 "LSP unavailable: PL-2: lsp_manager not yet wired"。
+- 本 phase 把 stub 替换成真实现,lazy 启动 + 多语言路由 + SessionEnd 清理,并落实 Oracle 评审发现的 3 个 CONCERNING 风险(R1+A 死锁、R5 启动延迟无提示、R7 server 崩溃后不重启)。
+
+### 范围
+- `loom/agent/lsp_client.py` (+28): `_read_response` 区分 3 种消息 — matching response / server-to-client request (auto-reply `{result: None}`) / notification(stale id)→ drop。auto-reply `_send` 包 `try/except (OSError, BrokenPipeError)` 防死 server 崩我们。R1+A 死锁缓解。
+- `loom/agent/lsp_manager.py` (+97, 替换 PL-1 33 行 stub): `_LOCK` + `_ACTIVE_SERVERS` dict + `_PER_SERVER_LOCKS` dict;`get_or_start(file_path, config)` 在 `_LOCK` 内完成 check-then-spawn(TOCTOU-safe),`shutil.which()` 检查命令存在(友好 FileNotFoundError 含 install hint),`_ACTIVE_SERVERS[name]` 和 `_PER_SERVER_LOCKS[name]` **都在锁内设置**才释放;`get_server_lock(name)`;`shutdown_all()` 在 `_LOCK` 内 pop 每个调 `lsp_client.shutdown`(try/except,个别失败继续清),最后 `_PER_SERVER_LOCKS.clear()`。
+- `loom/agent/tools.py` (+100): 3 个 handler 重写 — `safe_path` → `_coerce_lsp_line`(R6 保留) → `get_or_start` catch `FileNotFoundError`+`LSPError` → None 时返回 "No LSP server configured" → `tr.record("lsp_request", server, method)` **在取锁之前**(R5) → `with get_server_lock(server.name):` 调 `lsp_client.X` catch `(LSPError, EOFError)` → 错误时 `with _LSP_LOCK: pop both dicts`(R7 eviction,`.pop(name, None)` 防 KeyError) → 返回 "LSP error: ... (server evicted; next call will restart it)"。
+- `loom/agent/loop.py` (+11): `_on_session_end(*args)` hook 注册到 SessionEnd,try/except 调 `lsp_manager.shutdown_all()`(不影响其它 SessionEnd callback)。
+- `tests/test_lsp_manager.py` (新增, 228 行, 9 mock 测试): no-config、extension-no-match、command-not-in-path、first-call-starts、second-call-reuses、concurrent-calls-share-one(ThreadPoolExecutor 5 workers, Popen 调 1 次)、shutdown-all-clears-dict、shutdown-all-continues-on-failure、per-server-lock-serializes-requests(真线程 + entry/exit 时间戳,assert 非重叠区间)。
+- `tests/test_lsp_client.py` (+93): 2 个 R1+A 新测试 — auto-replies-to-server-request、ignores-notifications。append 到文件末尾,没动任何已有测试。
+- `loom/eval/cases/lsp_manager.py` (新增, 291 行, 6 EvalCase): no-config-returns-none、missing-command-graceful、shutdown-all-idempotent、session-end-triggers-shutdown、read-response-auto-replies(R1+A 守护)、handler-evicts-dead-server-on-eof(R7 守护)。
+- `loom/eval/cases/__init__.py` (+1): 按字母序加 `from . import lsp_manager`。
+
+### 验证(真实输出,WR #3 真证据)
+- `uv run pytest tests/test_lsp_manager.py tests/test_lsp_client.py tests/test_lsp_wire.py -v` → **52 passed in 0.32s**
+- `uv run python -m loom.cli eval --filter lsp --fail-under 100` → **15/15 passed**(6 lsp-client + 6 lsp-manager + 3 lsp-wire)
+- `uv run ruff check loom/` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in **131 source files**(PL-1 是 130,+1 for 新 eval case module)
+- `uv run pytest -m 'not snapshot' -q` → **901 passed, 8 deselected**(PL-1 是 890,+11 新测试)
+- `uv run python -m loom.cli eval --kind harness --fail-under 100` → **336/336 passed**(PL-1 是 330,+6 新 eval case)
+
+### 已知非回归(WR #5: 不修非要求的 pre-existing 问题)
+- `tests/test_tui_snapshot.py::test_empty_layout` 仍失败(PL-1 时已确认 pre-existing,本 phase 没引入新失败)。
+
+### 委派 / 执行模式
+- 计划文件 `.sisyphus/plans/loop-lsp-p2.md` + `/tmp/loom-delegation/pl2-brief.md`(把超长 prompt 落盘后用文件引用,避开 JSON 大字符串解析问题)。
+- 委派给 `deep` 类别 Sisyphus-Junior,16m55s 完成 SUCCESS 信号(PL-1 是 30min timeout 但实际干完了,本 phase 直接成功)。
+- 我亲自跑 V1-V5 + 全 harness eval + git status scope 检查(WR #6/#11:不自我宣告通过)。改动 scope 完全符合 EXPECTED OUTCOME 8 项,无任何越界文件。`feature_list.json` diff 只有我加的 PL-2 entry(状态 in-progress,evidence null)— 子智能体未篡改。
+
+### Roadmap 进展
+- PL-1 ✅ DONE: 工具注册 + config + R6
+- **PL-2 ✅ DONE: server 生命周期 + R1+A + R5 + R7**
+- PL-3: rename 落盘 + **R3 CRITICAL permission 真规则**(非 fake_block)+ R2 journal-backed rollback
+- PL-4: SUB_TOOLS + docs + README 收尾 + R4
+
+### 下次 session
+新 session 加载 `.sisyphus/plans/loop-lsp-p3.md` 开始 PL-3。**关键提醒**:PL-3 包含 Oracle 标记的 R3 CRITICAL 修复(fake_block permission bypass),必须严格按计划走真规则路径,绝不构造 fake_block。

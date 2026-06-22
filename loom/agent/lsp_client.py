@@ -99,7 +99,21 @@ def _read_message(proc: _ProcessLike) -> dict:
 def _read_response(proc: _ProcessLike, expected_id: int, timeout: float = 30.0) -> dict:
     """Read messages until we get a response with id == expected_id.
 
-    Notifications and requests from the server (no id) are discarded.
+    Three message types are distinguished:
+
+    (a) response with matching id AND no method key → return it.
+    (b) server-to-client REQUEST (id AND method) → auto-reply with
+        ``{"id": msg["id"], "result": null}`` and continue reading.
+        Without this, e.g. ``window/showMessageRequest`` would block the
+        server forever waiting for a reply, and every subsequent call
+        would time out at 30s.
+    (c) notifications (method, no id) and stale-id responses → silently
+        drop and keep reading.
+
+    Writing the auto-reply may raise ``OSError`` / ``BrokenPipeError``
+    if the server has died between our last read and this write; we
+    swallow those because a dead server will surface as ``EOFError``
+    on the next read anyway.
     """
     import time
     deadline = time.monotonic() + timeout
@@ -108,8 +122,18 @@ def _read_response(proc: _ProcessLike, expected_id: int, timeout: float = 30.0) 
             msg = _read_message(proc)
         except (EOFError, ValueError):
             raise
-        if "id" in msg and msg["id"] == expected_id:
+        # Case A: matching response
+        if "id" in msg and msg["id"] == expected_id and "method" not in msg:
             return msg
+        # Case B: server-to-client REQUEST (has id AND method) → must respond
+        if "id" in msg and "method" in msg:
+            try:
+                _send(proc, {"jsonrpc": "2.0", "id": msg["id"], "result": None})
+            except (OSError, BrokenPipeError):
+                pass
+            continue
+        # Case C: notifications (method, no id) → silently drop
+        # Case D: stale responses for other ids → silently drop
     raise TimeoutError(f"LSP response timeout (id={expected_id})")
 
 

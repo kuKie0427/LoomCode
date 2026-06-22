@@ -682,7 +682,14 @@ def run_lsp_goto_definition(path: str, line: int, character: int) -> str:
     → "Error: ...".
     """
     from loom.agent import lsp_client
-    from loom.agent.lsp_manager import get_or_start
+    from loom.agent.lsp_manager import (
+        _ACTIVE_SERVERS,
+        _LOCK as _LSP_LOCK,
+        _PER_SERVER_LOCKS,
+        get_or_start,
+        get_server_lock,
+    )
+    from loom.agent.loop import _active_config
 
     try:
         target_path = safe_path(path)
@@ -690,15 +697,24 @@ def run_lsp_goto_definition(path: str, line: int, character: int) -> str:
         return f"Error: {exc}"
     line = _coerce_lsp_line(target_path, line)
     try:
-        server = get_or_start(target_path)
-    except (NotImplementedError, FileNotFoundError, lsp_client.LSPError) as exc:
+        server = get_or_start(target_path, _active_config)
+    except (FileNotFoundError, lsp_client.LSPError) as exc:
         return f"LSP unavailable: {exc}"
     if server is None:
         return f"No LSP server configured for {Path(path).suffix} files"
-    try:
-        locs = lsp_client.goto_definition(server, str(target_path), line, character)
-    except lsp_client.LSPError as exc:
-        return f"LSP error: {exc}"
+
+    tr = trace_mod.current()
+    if tr is not None:
+        tr.record("lsp_request", server=server.name, method="textDocument/definition")
+
+    with get_server_lock(server.name):
+        try:
+            locs = lsp_client.goto_definition(server, str(target_path), line, character)
+        except (lsp_client.LSPError, EOFError) as exc:
+            with _LSP_LOCK:
+                _ACTIVE_SERVERS.pop(server.name, None)
+                _PER_SERVER_LOCKS.pop(server.name, None)
+            return f"LSP error: {exc} (server evicted; next call will restart it)"
     if not locs:
         return "no definition found"
     return _format_locations(locs)
@@ -717,7 +733,14 @@ def run_lsp_find_references(
     "no references found", or a fail-closed error string. Read-only.
     """
     from loom.agent import lsp_client
-    from loom.agent.lsp_manager import get_or_start
+    from loom.agent.lsp_manager import (
+        _ACTIVE_SERVERS,
+        _LOCK as _LSP_LOCK,
+        _PER_SERVER_LOCKS,
+        get_or_start,
+        get_server_lock,
+    )
+    from loom.agent.loop import _active_config
 
     try:
         target_path = safe_path(path)
@@ -725,18 +748,27 @@ def run_lsp_find_references(
         return f"Error: {exc}"
     line = _coerce_lsp_line(target_path, line)
     try:
-        server = get_or_start(target_path)
-    except (NotImplementedError, FileNotFoundError, lsp_client.LSPError) as exc:
+        server = get_or_start(target_path, _active_config)
+    except (FileNotFoundError, lsp_client.LSPError) as exc:
         return f"LSP unavailable: {exc}"
     if server is None:
         return f"No LSP server configured for {Path(path).suffix} files"
-    try:
-        locs = lsp_client.find_references(
-            server, str(target_path), line, character,
-            include_declaration=include_declaration,
-        )
-    except lsp_client.LSPError as exc:
-        return f"LSP error: {exc}"
+
+    tr = trace_mod.current()
+    if tr is not None:
+        tr.record("lsp_request", server=server.name, method="textDocument/references")
+
+    with get_server_lock(server.name):
+        try:
+            locs = lsp_client.find_references(
+                server, str(target_path), line, character,
+                include_declaration=include_declaration,
+            )
+        except (lsp_client.LSPError, EOFError) as exc:
+            with _LSP_LOCK:
+                _ACTIVE_SERVERS.pop(server.name, None)
+                _PER_SERVER_LOCKS.pop(server.name, None)
+            return f"LSP error: {exc} (server evicted; next call will restart it)"
     if not locs:
         return "no references found"
     return _format_locations(locs)
@@ -753,7 +785,14 @@ def run_lsp_rename_symbol(path: str, line: int, character: int, new_name: str) -
     import json as _json
 
     from loom.agent import lsp_client
-    from loom.agent.lsp_manager import get_or_start
+    from loom.agent.lsp_manager import (
+        _ACTIVE_SERVERS,
+        _LOCK as _LSP_LOCK,
+        _PER_SERVER_LOCKS,
+        get_or_start,
+        get_server_lock,
+    )
+    from loom.agent.loop import _active_config
 
     try:
         target_path = safe_path(path)
@@ -761,17 +800,26 @@ def run_lsp_rename_symbol(path: str, line: int, character: int, new_name: str) -
         return f"Error: {exc}"
     line = _coerce_lsp_line(target_path, line)
     try:
-        server = get_or_start(target_path)
-    except (NotImplementedError, FileNotFoundError, lsp_client.LSPError) as exc:
+        server = get_or_start(target_path, _active_config)
+    except (FileNotFoundError, lsp_client.LSPError) as exc:
         return f"LSP unavailable: {exc}"
     if server is None:
         return f"No LSP server configured for {Path(path).suffix} files"
-    try:
-        edit = lsp_client.rename_symbol(server, str(target_path), line, character, new_name)
-    except lsp_client.LSPError as exc:
-        return f"LSP error: {exc}"
-    except ValueError as exc:
-        return f"Error: {exc}"
+
+    tr = trace_mod.current()
+    if tr is not None:
+        tr.record("lsp_request", server=server.name, method="textDocument/rename")
+
+    with get_server_lock(server.name):
+        try:
+            edit = lsp_client.rename_symbol(server, str(target_path), line, character, new_name)
+        except (lsp_client.LSPError, EOFError) as exc:
+            with _LSP_LOCK:
+                _ACTIVE_SERVERS.pop(server.name, None)
+                _PER_SERVER_LOCKS.pop(server.name, None)
+            return f"LSP error: {exc} (server evicted; next call will restart it)"
+        except ValueError as exc:
+            return f"Error: {exc}"
     if edit is None:
         return "no rename possible at that position"
     return f"WorkspaceEdit ready (apply not implemented until PL-3): {_json.dumps(edit)}"

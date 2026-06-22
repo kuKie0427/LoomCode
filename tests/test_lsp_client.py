@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from unittest.mock import patch
 
 import pytest
 
@@ -350,3 +351,93 @@ def test_rename_symbol_without_start_raises():
     server = LSPServer(name="pylsp", command="ignored")
     with pytest.raises(LSPError, match="not started"):
         rename_symbol(server, "/x.py", line=0, character=0, new_name="x")
+
+
+# ---------------------------------------------------------------------------
+# PL-2 R1+A: _read_response must auto-reply to server-to-client requests so
+# the server doesn't deadlock waiting for an answer.
+# ---------------------------------------------------------------------------
+
+
+def test_read_response_auto_replies_to_server_request() -> None:
+    """Server sends a window/showMessageRequest (has id AND method); client
+    must auto-reply with {result: None} and still return the real response."""
+    from loom.agent.lsp_client import _read_response
+    import loom.agent.lsp_client as lsp_client
+
+    server_request_id = 99
+    real_response_id = 1
+    captured_replies: list[dict] = []
+
+    def fake_send(proc, message):
+        captured_replies.append(message)
+
+    def responder(req):
+        if req.get("method") == "initialize":
+            return {"jsonrpc": "2.0", "id": req["id"], "result": {"capabilities": {}}}
+        return None
+
+    server = _make_server_with_fake(responder)
+    start(server)
+
+    # Use the FakeLSPProcess only for the initialize handshake; for the
+    # read_response exercise, inject messages directly via _read_message
+    # so we can interleave a server-to-client request before the response.
+    queued = iter([
+        {"jsonrpc": "2.0", "id": server_request_id,
+         "method": "window/showMessageRequest", "params": {"message": "hi?"}},
+        {"jsonrpc": "2.0", "id": real_response_id,
+         "result": {"uri": "file:///x.py",
+                    "range": {"start": {"line": 0, "character": 0},
+                              "end": {"line": 0, "character": 4}}}},
+    ])
+
+    def fake_read_message(proc):
+        return next(queued)
+
+    with patch.object(lsp_client, "_read_message", side_effect=fake_read_message), \
+         patch.object(lsp_client, "_send", side_effect=fake_send):
+        result = _read_response(server.process, real_response_id, timeout=2.0)
+
+    assert result["id"] == real_response_id
+    assert result["result"]["uri"] == "file:///x.py"
+    auto = [r for r in captured_replies if r.get("id") == server_request_id]
+    assert len(auto) == 1, f"expected 1 auto-reply, got {captured_replies!r}"
+    assert auto[0]["result"] is None
+    assert auto[0]["jsonrpc"] == "2.0"
+
+
+def test_read_response_ignores_notifications() -> None:
+    """Server sends a window/logMessage (method, no id) before the real
+    response; _read_response must drop the notification and return the
+    real response without crashing."""
+    from loom.agent.lsp_client import _read_response
+    import loom.agent.lsp_client as lsp_client
+
+    real_response_id = 1
+
+    def responder(req):
+        if req.get("method") == "initialize":
+            return {"jsonrpc": "2.0", "id": req["id"], "result": {"capabilities": {}}}
+        return None
+
+    server = _make_server_with_fake(responder)
+    start(server)
+
+    queued = iter([
+        {"jsonrpc": "2.0", "method": "window/logMessage",
+         "params": {"type": 3, "message": "indexing…"}},
+        {"jsonrpc": "2.0", "id": real_response_id,
+         "result": {"uri": "file:///x.py",
+                    "range": {"start": {"line": 0, "character": 0},
+                              "end": {"line": 0, "character": 4}}}},
+    ])
+
+    def fake_read_message(proc):
+        return next(queued)
+
+    with patch.object(lsp_client, "_read_message", side_effect=fake_read_message):
+        result = _read_response(server.process, real_response_id, timeout=2.0)
+
+    assert result["id"] == real_response_id
+    assert result["result"]["uri"] == "file:///x.py"
