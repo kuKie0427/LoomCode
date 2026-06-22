@@ -14,13 +14,14 @@ EXPECTED_FILES = (
     "session-handoff.md",
     "init.sh",
     "harness.toml",
+    ".github/workflows/loom-eval.yml",
 )
 
 
 class TestInitHappyPath:
     def test_creates_all_six_files(self, tmp_path: Path) -> None:
         results = init(tmp_path)
-        written = {r.path.name for r in results if r.status == "written"}
+        written = {r.path.relative_to(tmp_path).as_posix() for r in results if r.status == "written"}
         assert written == set(EXPECTED_FILES)
 
     def test_init_sh_is_executable(self, tmp_path: Path) -> None:
@@ -123,3 +124,35 @@ class TestInitOptions:
         init(new)
         assert new.is_dir()
         assert (new / "AGENTS.md").exists()
+
+
+class TestInitGitHubWorkflow:
+    def test_creates_loom_eval_workflow(self, tmp_path: Path) -> None:
+        init(tmp_path)
+        wf = tmp_path / ".github" / "workflows" / "loom-eval.yml"
+        assert wf.exists()
+
+    def test_workflow_is_valid_yaml(self, tmp_path: Path) -> None:
+        init(tmp_path)
+        wf = tmp_path / ".github" / "workflows" / "loom-eval.yml"
+        content = wf.read_text()
+        assert "name: loom eval" in content
+        assert "loom.cli eval" in content
+        assert "--fail-under" in content
+
+    def test_workflow_triggers_on_push_and_pr(self, tmp_path: Path) -> None:
+        init(tmp_path)
+        wf = tmp_path / ".github" / "workflows" / "loom-eval.yml"
+        content = wf.read_text()
+        assert "push:" in content
+        assert "pull_request:" in content
+
+    def test_workflow_skipped_when_exists(self, tmp_path: Path) -> None:
+        wf_dir = tmp_path / ".github" / "workflows"
+        wf_dir.mkdir(parents=True)
+        existing = wf_dir / "loom-eval.yml"
+        existing.write_text("# EXISTING WORKFLOW\n")
+        results = init(tmp_path)
+        statuses = {(r.path.name, r.status) for r in results}
+        assert ("loom-eval.yml", "skipped") in statuses
+        assert existing.read_text() == "# EXISTING WORKFLOW\n"

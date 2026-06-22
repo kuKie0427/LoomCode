@@ -104,6 +104,16 @@ def init(
         _write(dst, content, executable)
         results.append(FileResult(dst, "written"))
 
+    workflow_dir = target / ".github" / "workflows"
+    workflow_path = workflow_dir / "loom-eval.yml"
+    if workflow_path.exists() and not force:
+        results.append(FileResult(workflow_path, "skipped", "exists"))
+    else:
+        workflow_dir.mkdir(parents=True, exist_ok=True)
+        workflow_content = _render(_read_template("loom-eval.yml"), {"FAIL_UNDER": "100"})
+        _write(workflow_path, workflow_content, False)
+        results.append(FileResult(workflow_path, "written"))
+
     init_path = target / "init.sh"
     if init_path.exists() and not force:
         results.append(FileResult(init_path, "skipped", "exists"))
