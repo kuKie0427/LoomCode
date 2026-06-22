@@ -276,3 +276,77 @@ This is the final P3a + P3b atomic commit.
 - All 3 phases complete; roadmap closed.
 - Final state: StatusBar uses gear-rack ctx rail (WIDTH=14), 6-state engine badge, no `loom`/`esc ^l`, no ShuttleTickOverlay. #chrome 3→2 rows. 93-col budget verified for all states.
 - Evidence: `feature_list.json` (f-statusbar-revamp-sp2 status=done); `progress.md` (SP2 close section); `./init.sh` exits 0 with 554 pytest + 253/253 eval.
+
+---
+
+# Session Handoff — 2026-06-22 (Session 2)
+
+## TL;DR
+
+**20/23 roadmap features shipped.** Per user decision: stop here, ship 20/23. The 3 remaining are multi-day scope and documented below for next session.
+
+- 810 pytest tests passing (session-start: 555, +255)
+- 306/308 harness eval cases passing (99.4%, 2 pre-existing flakes)
+- 13/13 agent-quality cases passing
+- `uv run ruff check .` → 0 issues
+- `uv run mypy loom/` → 0 issues in 121 source files
+- 21 atomic commits since session start (baseline: 39ed5fd)
+
+## Session 2 — 3 Oracle-recommended achievable features landed
+
+Per Oracle's NOT_VERIFIED verdict, 3 features I'd marked as multi-day were flagged as achievable in-session. All 3 shipped:
+
+- `f-mcp-client-p3` (commit 888ae4b): stdio JSON-RPC client, 10 tests + 3 eval cases
+- `f-tdd-agent-mode-p4` (commit 1404f6e): `loom tdd` subcommand + reward-hacking guard, 14 tests + 4 eval cases
+- `f-repomap-p4` (commit 33c4c81, prior): stdlib ast codebase map, 10 tests + 4 eval cases
+
+## Remaining 3 features — what to read first next time
+
+### `f-lsp-integration-p3` (multi-day)
+- Mirror `loom/agent/mcp_client.py` shape — call it `loom/agent/lsp_client.py`
+- Backend: `python-lsp-server` (pylsp)
+- First commit: pylsp subprocess + initialize + `textDocument/definition` for Python
+- Test with a real file in a tempdir, assert location response shape
+
+### `f-long-context-stability-p3` (multi-day)
+- Add third compaction tier to `loom/agent/context.py`: `cold_archive`
+- `loom/agent/cold_archive.py`: `archive_turns(turns, dest)` + `rehydrate(dest, start, end)` + round-trip tests
+- No agent-loop integration in first commit (just the storage layer)
+
+### `f-harness-as-product-polish-p4` (multi-day)
+- `loom eval init` subcommand: bootstrap eval config from project's test command
+- `.github/workflows/loom-eval.yml`: install + `loom eval --fail-under 100`
+- First commit: just the YAML template + a single test that asserts it's valid YAML with the expected jobs
+
+## Patterns I established this session (per Working Rule #2)
+
+Every feature shipped with:
+- Tests written first (TDD)
+- Real evidence with command + output (Working Rule #2)
+- At least one harness eval case (Working Rule #8)
+- Atomic commit with descriptive message
+
+## TDD bugs caught (likely to recur)
+
+1. **subprocess output is bytes** in TimeoutExpired exception — decode with utf-8+replace
+2. **typing.Protocol vs dataclass** — for "any object with method X" types, use Protocol
+3. **Test injection requires pre-injected handles** — Popen-like APIs need `if process is None: Popen()` guards so tests can fake the process
+4. **Float accumulation in $ tracking** — round at write time, not arithmetic time
+5. **loguru %s vs {}** — loguru uses %-style
+6. **`monkey-patch` files need explicit import wiring** — Working Rule #9
+
+## Files to read first next time
+
+1. `feature_list.json` — 95 entries (20 roadmap done)
+2. `feature_list_roadmap.json` — original 23-feature plan
+3. `progress.md` — full session log
+4. `AGENTS.md` — 17 working rules
+5. This file (session-handoff.md) — full continuity
+
+## Outstanding maintenance
+
+None blocking. Two pre-existing flakes that count against `loom eval --fail-under 100`:
+- `loom-audit-scores-itself` — subprocess timeout under load
+- `tui-mouse-wheel-bubbles-from-child-markdown-to-chatlog` — timing-sensitive
+
+Both pass in isolation. If next session wants a clean 100% eval pass, the audit flake probably needs a longer subprocess timeout.
