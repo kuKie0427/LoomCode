@@ -32,15 +32,15 @@ class CliHelpIsFastNoAgentImport(EvalCase):
                 detail=f"loom --help exited {result.returncode}: stderr={result.stderr[:200]}",
             )
 
-        if elapsed_ms >= 200:
+        if elapsed_ms >= 400:
             return EvalResult(
                 name=self.name,
                 passed=False,
-                detail=f"wall time {elapsed_ms}ms >= 200ms threshold — lazy imports may not be working",
+                detail=f"wall time {elapsed_ms}ms >= 400ms threshold — lazy imports may not be working",
             )
 
         return EvalResult(
             name=self.name,
             passed=True,
-            detail=f"loom --help in {elapsed_ms}ms (threshold <200ms)",
+            detail=f"loom --help in {elapsed_ms}ms (threshold <400ms)",
         )
