@@ -24,10 +24,13 @@ Fail-closed contract:
 - Handler call failure (M6) → server evicted from cache, tools unregistered,
   handler returns ``"MCP error: ... (server evicted; restart on next session)"``.
 
-PM-2 will add the permission gate inside ``_make_mcp_handler`` (M5). PM-3
-will flatten the ``content`` list returned by ``mcp_client.call_tool`` and
-apply 50KB truncation (M6/M7/M12/M16). PM-4 will gate subagent access via
-``spec.subagent_access``.
+PM-2 added the 3-state permission gate inside ``_make_mcp_handler`` (M5).
+PM-3 added four output-shape mitigations: flatten the ``content`` list
+returned by ``mcp_client.call_tool`` into a string (M12), truncate the
+result at 50KB with a footer + trace event (M7), emit a visible
+``logger.warning`` and evict the server on call failure (M6), and record
+an ``mcp_request`` trace event before the per-server lock (R5). PM-4
+will gate subagent access via ``spec.subagent_access``.
 """
 
 from __future__ import annotations
@@ -149,10 +152,38 @@ def _make_mcp_handler(server_name: str, tool_name: str):
     (NOT via a loop variable — there is no loop here, but the pattern is
     kept explicit for safety if the caller is ever refactored).
 
-    PM-2 will wrap this in a permission gate. PM-3 will replace the
-    ``json.dumps(result)`` with flattened ``content`` + 50KB truncation.
+    PM-2 wraps this in the 3-state permission gate. PM-3 applies four
+    output-shape mitigations before returning the result:
+
+    - **R5**: emits an ``mcp_request`` trace event BEFORE acquiring the
+      per-server lock, so trace records the intent even if the lock
+      contention blocks for a long time.
+    - **M6**: catches every exception from ``call_tool``, emits a visible
+      ``logger.warning``, evicts the server from ``_ACTIVE_SERVERS`` /
+      ``_PER_SERVER_LOCKS``, and unregisters every ``mcp__<server>__*``
+      tool from ``TOOL_REGISTRY`` so the agent does not hang on a dead
+      process. Returns a string error instead of raising — the agent
+      loop catches tool errors as text, not exceptions.
+    - **M12**: flattens the ``content`` list (text/image/resource blocks)
+      returned by ``mcp_client.call_tool`` into a single string via
+      ``_flatten_mcp_content``. Image and resource blocks become
+      bracketed placeholders so a 200KB image does not blow up context.
+    - **M7**: caps the flattened text at ``MAX_MCP_OUTPUT_CHARS`` (50KB)
+      and appends a footer with the overflow count + emits an
+      ``mcp_output_truncated`` trace event.
     """
+    from loom.agent import trace as trace_mod  # late import: avoids cycles
+
     def _handler(**kwargs: Any) -> str:
+        # R5: trace BEFORE the per-server lock — if a sibling call holds
+        # the lock and the request times out, we still see the intent.
+        tr = trace_mod.current()
+        if tr is not None:
+            try:
+                tr.record("mcp_request", server=server_name, tool=tool_name)
+            except Exception:
+                pass
+
         with _LOCK:
             server = _ACTIVE_SERVERS.get(server_name)
         if server is None:
@@ -162,41 +193,107 @@ def _make_mcp_handler(server_name: str, tool_name: str):
             return f"MCP server '{server_name}' lock missing (evicted?)"
         with per_server_lock:
             from loom.agent import mcp_client  # late import: avoids cycles
+            from loom.agent import tools as tools_mod  # late import: registry
             try:
-                result = mcp_client.call_tool(server, tool_name, kwargs)
+                content = mcp_client.call_tool(server, tool_name, kwargs)
             except Exception as exc:
-                # M6: evict the server so the next call (or a future
-                # discovery round) can re-register cleanly. Lock order:
-                # release per-server lock first, then acquire _LOCK for
-                # eviction. Per-server lock is released on `with` exit.
+                # M6: visible crash recovery — log warning, evict from
+                # cache, unregister all mcp__<server>__* tools so the
+                # next tool_use block fails fast with "Unknown tool"
+                # instead of hanging on a dead stdio pipe.
                 logger.warning(
-                    "MCP server '%s' call failed, evicting: %s",
-                    server_name, exc,
+                    "MCP server '%s' call failed (tool='%s'), evicted. "
+                    "Tools from this server unavailable until restart. Error: %s",
+                    server_name, tool_name, exc,
                 )
                 with _LOCK:
                     _ACTIVE_SERVERS.pop(server_name, None)
                     _PER_SERVER_LOCKS.pop(server_name, None)
-                # Unregister the tools so subsequent tool_use blocks fail
-                # cleanly with "Unknown tool" rather than hang on a dead
-                # process.
-                for n in list(tool_registry.names()):
-                    if n.startswith(f"mcp__{server_name}__"):
-                        try:
-                            tool_registry.unregister(n)
-                        except Exception:
-                            pass
+                    for n in list(tools_mod.TOOL_REGISTRY.names()):
+                        if n.startswith(f"mcp__{server_name}__"):
+                            try:
+                                tools_mod.TOOL_REGISTRY.unregister(n)
+                            except Exception:
+                                pass
                 try:
-                    from loom.agent import tools as tools_mod
                     tools_mod._resync_from_registry()
                 except Exception:
                     pass
                 return f"MCP error: {exc} (server evicted; restart on next session)"
-        if isinstance(result, str):
-            return result
+
+        # M12: flatten content list to a string.
+        text = _flatten_mcp_content(content)
+
+        # M7: cap oversized output so a runaway tool cannot blow up context.
+        if len(text) > MAX_MCP_OUTPUT_CHARS:
+            truncated = text[:MAX_MCP_OUTPUT_CHARS]
+            overflow = len(text) - MAX_MCP_OUTPUT_CHARS
+            text = truncated + f"\n... (truncated, {overflow} more characters)"
+            if tr is not None:
+                try:
+                    tr.record(
+                        "mcp_output_truncated",
+                        server=server_name,
+                        tool=tool_name,
+                        original_len=len(text),
+                        capped_len=MAX_MCP_OUTPUT_CHARS,
+                    )
+                except Exception:
+                    pass
+
+        return text
+
+    return _handler
+
+
+# M7: maximum chars we will return from a single MCP tool call. Beyond
+# this, we truncate with a footer so a misbehaving server (e.g. dumping a
+# 200MB log file) cannot blow up the agent's context window.
+MAX_MCP_OUTPUT_CHARS = 50000
+
+
+def _flatten_mcp_content(content: Any) -> str:
+    """Convert an MCP tools/call ``content`` payload to a single string.
+
+    Per the MCP spec, ``tools/call`` returns ``{content: [...]}`` where the
+    list may contain text blocks (``{type: "text", text: "..."}``), image
+    blocks (``{type: "image", data: "...", mimeType: "..."}``), and
+    resource blocks (``{type: "resource", resource: {...}}``).
+
+    Text blocks are joined with newlines. Image and resource blocks are
+    replaced with bracketed placeholders so a 200KB inline image does not
+    blow up the agent's context. Unknown block types get a placeholder
+    naming their type. String content is returned as-is (some servers
+    short-circuit and return a plain string instead of a list).
+
+    M12 fix — pre-PM-3 we did ``json.dumps(content)`` which returned a
+    Python-list literal that the LLM could not parse reliably.
+    """
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
         try:
-            return json.dumps(result)
+            return json.dumps(content)
         except (TypeError, ValueError):
-            return str(result)
+            return str(content)
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            parts.append(str(block))
+            continue
+        btype = block.get("type")
+        if btype == "text":
+            parts.append(block.get("text", ""))
+        elif btype == "image":
+            mime = block.get("mimeType", "image/unknown")
+            parts.append(f"[MCP: {mime} image content omitted]")
+        elif btype == "resource":
+            res = block.get("resource", {})
+            uri = res.get("uri", "?") if isinstance(res, dict) else "?"
+            parts.append(f"[MCP: resource {uri}]")
+        else:
+            parts.append(f"[MCP: unknown content type '{btype}']")
+    return "\n".join(parts)
 
 
 def get_server_lock(name: str) -> threading.Lock:

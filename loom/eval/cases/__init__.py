@@ -34,6 +34,7 @@ from loom.eval.cases import (
     max_output_tokens_config,  # noqa: F401
     max_turns_guard,  # noqa: F401
     mcp_client,  # noqa: F401
+    mcp_handler,  # noqa: F401
     mcp_permission,  # noqa: F401
     mcp_wire,  # noqa: F401
     microcompact_counter,  # noqa: F401

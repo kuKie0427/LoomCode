@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import select
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -105,6 +106,14 @@ def start(server: MCPServer) -> None:
     If server.process is already set (e.g. injected by a test or by
     a future connection-pooling layer), skip Popen and just do the
     handshake. Otherwise spawn via Popen.
+
+    On handshake failure (initialize / tools/list), non-blocking reads
+    whatever the server's stderr has accumulated and appends a 2000-char
+    tail to the MCPError message (M16). This makes silent "server
+    refuses to start" failures actionable — e.g. Node.js ENOENT, missing
+    env vars, malformed config — without forcing the operator to dig
+    through logs. Wrapped in try/except so a dead/closed stderr does not
+    crash the error path.
     """
     if server.process is None:
         cmd = [server.command] + list(server.args)
@@ -112,39 +121,91 @@ def start(server: MCPServer) -> None:
         # ANTHROPIC_API_KEY and other secrets to MCP servers. Users must
         # explicitly declare PATH / HOME in `env` if their server needs them.
         env = {**server.env}
-        server.process = subprocess.Popen(
-            cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            env=env,
-            cwd=server.cwd,  # M13: honor per-server working directory (None → inherit loom CWD)
-        )
-    init_request = {
-        "jsonrpc": "2.0", "id": server._next_id(),
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "loom-mcp-client", "version": "0.1.0"},
-        },
-    }
-    _send_message(server.process, init_request)
-    response = _read_message(server.process, timeout=30)
-    if "error" in response:
-        raise MCPError(f"initialize failed: {response['error']}")
+        try:
+            server.process = subprocess.Popen(
+                cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                env=env,
+                cwd=server.cwd,  # M13: honor per-server working directory (None → inherit loom CWD)
+            )
+        except FileNotFoundError as exc:
+            # Friendly error like the LSP shutil.which pattern: tell the
+            # operator which command was missing (e.g. npx not on PATH).
+            raise MCPError(
+                f"command '{server.command}' not found: {exc}"
+            ) from exc
+    try:
+        init_request = {
+            "jsonrpc": "2.0", "id": server._next_id(),
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "loom-mcp-client", "version": "0.1.0"},
+            },
+        }
+        _send_message(server.process, init_request)
+        response = _read_message(server.process, timeout=30)
+        if "error" in response:
+            raise MCPError(f"initialize failed: {response['error']}")
 
-    initialized = {
-        "jsonrpc": "2.0", "method": "notifications/initialized", "params": {},
-    }
-    _send_message(server.process, initialized)
+        initialized = {
+            "jsonrpc": "2.0", "method": "notifications/initialized", "params": {},
+        }
+        _send_message(server.process, initialized)
 
-    list_request = {
-        "jsonrpc": "2.0", "id": server._next_id(),
-        "method": "tools/list", "params": {},
-    }
-    _send_message(server.process, list_request)
-    list_response = _read_message(server.process, timeout=30)
-    if "error" in list_response:
-        raise MCPError(f"tools/list failed: {list_response['error']}")
-    server.tools = list_response.get("result", {}).get("tools", [])
+        list_request = {
+            "jsonrpc": "2.0", "id": server._next_id(),
+            "method": "tools/list", "params": {},
+        }
+        _send_message(server.process, list_request)
+        list_response = _read_message(server.process, timeout=30)
+        if "error" in list_response:
+            raise MCPError(f"tools/list failed: {list_response['error']}")
+        server.tools = list_response.get("result", {}).get("tools", [])
+    except (MCPError, TimeoutError) as exc:
+        # M16: collect stderr tail (non-blocking) and append to the
+        # error message so operators see why the server failed to start.
+        stderr_tail = _read_stderr_tail(server)
+        if stderr_tail:
+            raise MCPError(
+                f"{exc}\nserver stderr tail:\n{stderr_tail[-2000:]}"
+            ) from exc
+        raise
+
+
+def _read_stderr_tail(server: MCPServer, max_bytes: int = 4096) -> str:
+    """Non-blocking read of whatever stderr currently has buffered.
+
+    Returns the decoded tail (utf-8, errors='replace') or "" if the
+    stream is closed, dead, or unreadable. Used by ``start`` on
+    handshake failure (M16) so the user sees the server's complaint
+    (e.g. missing API key, port conflict, syntax error) instead of a
+    bare "initialize failed".
+
+    The 0.1s ``select.select`` timeout prevents hanging when the server
+    has not yet written anything (e.g. it died at startup before any
+    output). Anything more elaborate (async, threads) would defeat the
+    purpose of a quick diagnostic.
+    """
+    if server.process is None or server.process.stderr is None:
+        return ""
+    try:
+        chunks: list[bytes] = []
+        # Read whatever's already buffered, in chunks, until empty.
+        while select.select([server.process.stderr], [], [], 0.1)[0]:
+            chunk = server.process.stderr.read(max_bytes)
+            if not chunk:
+                break
+            if isinstance(chunk, bytes):
+                chunks.append(chunk)
+            else:
+                chunks.append(chunk.encode("utf-8", errors="replace"))
+    except Exception:
+        # Dead pipe, non-blocking fd, etc. — diagnostic, not critical.
+        return ""
+    if not chunks:
+        return ""
+    return b"".join(chunks).decode("utf-8", errors="replace")
 
 
 def stop(server: MCPServer) -> None:

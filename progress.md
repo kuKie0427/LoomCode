@@ -5883,3 +5883,71 @@ LSP wire-up roadmap 完成。可以考虑下一个 roadmap:
 
 ### 下次 session
 新 session 加载 `.sisyphus/plans/loop-mcp-p3.md` 开始 PM-3。范围:handler output 展平(M12)+ 50KB 截断(M7)+ crash visible warning(M6)+ stderr 收集(M16)。
+
+---
+
+## Session: f-mcp-handler-safety — PM-3 MCP handler output + crash + stderr (M6/M7/M12/M16) (2026-06-22 evening, session 7)
+
+### 背景
+- PM-1 把 MCP 工具注册到 TOOL_REGISTRY,PM-2 加了 permission gate,但 handler 本身还是 PM-1 的简化版:直接 `json.dumps(result)` 返回,没展平 content list、没截断、crash 只 evict 不 visible warning、start 失败无 stderr 诊断。
+- 本 phase 落实 4 个 Oracle mitigations:M6(crash visible warning)+ M7(50KB 截断)+ M12(content list 展平)+ M16(stderr 收集)。
+
+### 范围
+- `loom/agent/mcp_client.py` (+127): 新 `_read_stderr_tail(proc, max_chars=2000)` helper(用 `select.select` 非阻塞读)。Popen 包 try/except `FileNotFoundError` → 友好 `MCPError(f"command '{cmd}' not found: {exc}")`。handshake(initialize + tools/list)包 try/except → 收 stderr tail 加到错误消息末尾 `raise MCPError(f"{exc}\nserver stderr tail:\n{stderr_tail[-2000:]}")`(M16)。stderr 收集本身包 try/except 防 dead stderr 崩错误路径。
+- `loom/agent/mcp_manager.py` (+151): `MAX_MCP_OUTPUT_CHARS = 50000`(M7)。`_flatten_mcp_content(content) -> str`(M12):text 块用 `\n` 拼,image 块 → `[MCP: {mimeType} image content omitted]`,resource 块 → `[MCP: resource {uri}]`,unknown → `[MCP: unknown content type '{type}']`,string passthrough,empty list → `""`。`_make_mcp_handler` 重写含 4 mitigations:R5 `tr.record("mcp_request", server, tool)` 在 per-server lock 之前;M6 on Exception:evict server + unregister 所有 `mcp__{name}__*` tools + `logger.warning("MCP server crashed, tools unavailable until restart")` + 返回错误字符串;M12 `content = _flatten_mcp_content(result)`;M7 if `len(text) > MAX_MCP_OUTPUT_CHARS`:截断 + `"\n... (truncated, {overflow} more characters)"` + `tr.record("mcp_output_truncated", ...)`。
+- `tests/test_mcp_handler.py` (新增, 19 测试): `_flatten_mcp_content` 7 cases + truncation 2 + crash 2 + trace 1 + stderr 3 + graceful-return 2 + loguru-lazy-format 1 + misc 1。
+- `loom/eval/cases/mcp_handler.py` (新增, 3 EvalCase): mcp-handler-flattens-content-list(M12 守护)/ mcp-handler-truncates-oversized-output(M7 守护)/ mcp-handler-crash-visible-warning(M6 守护)。
+- `loom/eval/cases/__init__.py` (+1): 按字母序加 `mcp_handler`。
+
+### 子智能体主动发现 + 修复的 PM-1 latent bug
+- PM-1 的 `_make_mcp_handler` **缺 `return _handler` 语句** — 闭包定义了但没返回,所以 `TOOL_REGISTRY.register` 拿到 `None` 作为 handler。
+- PM-1/PM-2 测试没抓到,因为它们只测 registration(`TOOL_REGISTRY.register` 静默接受了 None handler)。
+- PM-3 测试要真正调用 handler(测 M6/M7/M12 行为),才暴露这个 bug。
+- 子智能体主动加 `return _handler` + 把闭包捕获的 `tool_registry` 改成 late-import lookup(防 closure scope 问题)。
+- **这是第 3 个 LSP-style lesson**:**registration 测试不验证可调用性 — 永远测 handler 真的能跑**。前两个 lesson:PL-3 "跑 full harness eval"、PM-2 "MagicMock block attribute 非 bool"。三个 lesson 现在都编码成 regression test。
+
+### 子智能体处理的 loguru gotcha
+- `logger.add(sink)` 接收的是未格式化模板,不是渲染后的消息。
+- M6 visibility 测试最初 spy `logger.add` 的 sink,拿到的模板是 `"MCP server '{}' crashed..."` 而非渲染后的字符串。
+- 子智能体改 spy `mm.logger.warning` 直接 + 手动 apply `%` 插值,验证渲染后的消息含期望字串。
+
+### 验证(真实输出,WR #3 真证据)
+- `uv run pytest tests/test_mcp_handler.py -v` → **19 passed in 0.30s**
+- `uv run pytest tests/test_mcp_handler.py tests/test_mcp_permission.py tests/test_mcp_wire.py tests/test_mcp_manager.py tests/test_mcp_client.py` → **74 passed in 0.75s**(19 handler + 18 permission + 19 wire + 8 manager + 10 client)
+- `uv run python -m loom.cli eval --filter mcp --fail-under 100` → **17/17 passed**(14 pre-existing PM-2 + 3 new mcp-handler)
+- `uv run python -m loom.cli eval --kind harness --fail-under 100` → **355/355 passed**(PM-2 是 352,+3 new)— **无回归**
+- `uv run ruff check loom/` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in **138 source files**(PM-2 是 137,+1 新 `mcp_handler.py` eval)
+- `uv run pytest -m 'not snapshot' -q` → **998 passed, 8 deselected**(PM-2 是 979,+19 new)
+- `grep -rn fake_block loom/agent/` → **EXIT=1(无匹配)— R3 CRITICAL 修复(LSP PL-3)仍 intact**
+
+### Oracle 16 风险进展
+| # | 风险 | 状态 |
+|---|---|---|
+| M1 | Phase split 错 | ✅ PM-1 |
+| M2 | 工具前缀单下划线冲突 | ✅ PM-1 |
+| M3 | Duplicate server name | ✅ PM-1 |
+| M4 | Malformed inputSchema | ✅ PM-1 |
+| M5 | Permission 绕过 | ✅ PM-2 |
+| **M6** | **Crash 无 visible 提示** | ✅ **PM-3 logger.warning** |
+| **M7** | **Output 撑爆上下文** | ✅ **PM-3 50KB 截断** |
+| M8 | Startup blocking | ✅ PM-1 |
+| M9 | Subagent 调危险 MCP | ⏳ PM-4 |
+| M10 | request_id race | ✅ PM-1 |
+| M11 | env 泄漏 API key | ✅ PM-1 |
+| **M12** | **content list 不展平** | ✅ **PM-3 _flatten_mcp_content** |
+| M13 | 缺 cwd 字段 | ✅ PM-1 |
+| M14 | TOOLS snapshot 不更新 | ✅ PM-1 |
+| M15 | register 无锁 | ✅ PM-1 |
+| **M16** | **stderr 不读** | ✅ **PM-3 _read_stderr_tail** |
+
+**15/16 已修**(含 5 个 CRITICAL/安全级 + 4 个 PM-3 robustness),最后 1 个 M9 待 PM-4。
+
+### Roadmap 进展
+- PM-1 ✅ DONE: config + manager + discovery + 注册 + 10/16 风险修
+- PM-2 ✅ DONE: 3-state permission gate(M5 CRITICAL)
+- **PM-3 ✅ DONE: handler safety(M6/M7/M12/M16)+ 修 PM-1 latent `return _handler` bug**
+- PM-4: subagent opt-in(M9,最后一个风险)+ docs + README
+
+### 下次 session
+新 session 加载 `.sisyphus/plans/loop-mcp-p4.md` 开始 PM-4(最后一个 phase)。范围:subagent_access=true 的 server 把 mcp__* 工具加进 SUB_TOOLS + docs/mcp.md + README 收尾。预估 2h。完成后整个 MCP wire-up roadmap done。
