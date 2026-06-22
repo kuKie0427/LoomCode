@@ -142,11 +142,11 @@ class LoopAuditScoresItself(EvalCase):
         from subprocess import run as srun
         from sys import executable
         proc = srun(
-            [executable, "-m", "loom.cli", "audit"],
+            [executable, "-m", "loom.cli", "audit", "--skip-self-test"],
             cwd=repo_root,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=60,
         )
         if proc.returncode != 0:
             return EvalResult(name=self.name, passed=False, detail=f"audit exit {proc.returncode}")

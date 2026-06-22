@@ -102,7 +102,7 @@ class FailureModeLlmApi5xx(EvalCase):
 
 class FailureModeAutocompactFailsContextOverflow(EvalCase):
     name = "failure-mode-autocompact-fails-context-overflow"
-    description = "When _generate_summary returns None during context overflow, autocompact no-ops (no message loss)"
+    description = "When _generate_summary returns None during context overflow, autocompact raw-truncates instead of infinite-looping"
 
     def run(self) -> EvalResult:
         from loom.agent.context import Context
@@ -116,20 +116,24 @@ class FailureModeAutocompactFailsContextOverflow(EvalCase):
             {"role": "user", "content": "round 1 prompt"},
             {"role": "assistant", "content": [{"type": "text", "text": "OK2"}]},
         ]
-        original_len = len(messages)
 
         fake_client = MagicMock()
         with patch.object(Context, "_generate_summary", return_value=None):
             ctx.autocompact(cast(list[MessageParam], messages), fake_client, "fake-model", context_window=1000)
 
-        if len(messages) != original_len:
+        if not messages:
             return EvalResult(
                 name=self.name, passed=False,
-                detail=f"messages mutated despite summary=None: was {original_len}, now {len(messages)}",
+                detail="messages cleared to empty (would infinite-loop)",
+            )
+        if "system-reminder" not in str(messages[0]):
+            return EvalResult(
+                name=self.name, passed=False,
+                detail=f"first message is not the truncation marker: {messages[0]}",
             )
         return EvalResult(
             name=self.name, passed=True,
-            detail=f"preserved {len(messages)} messages after summary=None (no silent truncation)",
+            detail=f"raw-truncated to {len(messages)} message(s) with marker (no infinite loop)",
         )
 
 
