@@ -116,6 +116,35 @@ def _destructive_bash(args: dict) -> bool:
     return any(kw in cmd for kw in ("rm ", "> /etc/", "chmod 777"))
 
 
+def _mcp_pattern_matches(pattern: str, tool_name: str) -> bool:
+    """Match an MCP tool name against a permission pattern with ``*`` wildcard.
+
+    The tool name has the form ``mcp__server__tool`` (3 ``__``-separated
+    parts, per the M2 prefix). The pattern is written in
+    ``server__tool`` form (2 parts); the leading ``mcp__`` is stripped
+    from the tool name before comparison so users can write patterns
+    that read naturally.
+
+    Matching is segment-by-segment; ``*`` matches any single segment.
+    Segment count mismatch → no match. Examples:
+
+      - ``server__tool`` matches ``mcp__server__tool`` (exact)
+      - ``*__read_file`` matches ``mcp__fs__read_file``  (wildcard server)
+      - ``github__*`` matches ``mcp__github__create_issue`` (wildcard tool)
+      - ``*__*`` matches any ``mcp__server__tool``
+    """
+    p_parts = pattern.split("__")
+    t_parts = tool_name.split("__")
+    if t_parts and t_parts[0] == "mcp":
+        t_parts = t_parts[1:]
+    if len(p_parts) != len(t_parts):
+        return False
+    for p, t in zip(p_parts, t_parts):
+        if p != "*" and p != t:
+            return False
+    return True
+
+
 DEFAULT_POLICY = PermissionPolicy(
     deny_patterns=(
         # Original 9 (Task 2 baseline)

@@ -194,18 +194,48 @@ class MCPServerConfig:
 
 
 @dataclass(frozen=True)
-class MCPConfig:
-    """Per-project MCP server map. Empty tuple = no servers configured.
+class MCPPermissions:
+    """Per-project MCP permission rules (the M5 gate, PM-2).
 
-    PM-1: only `servers` exists. PM-2 will add a `permissions` field for
-    per-server auto_approve / deny lists (the M5 gate).
+    Patterns use ``*`` as a single-segment wildcard. The pattern is
+    matched against the ``server__tool`` suffix of a tool name
+    (stripping the leading ``mcp__``). Examples:
+
+      - ``github__search_code``  → exact match
+      - ``*__read_file``         → any server's read_file
+      - ``github__*``            → all github tools
+      - ``*__delete``            → any server's delete
+
+    Two lists, three-state semantics enforced in
+    ``Hooks._check_mcp_permissions``:
+
+    - ``deny``        : HARD block (no user override).
+    - ``auto_approve``: silent allow (no prompt).
+    - neither        : prompt user (y/N) — never silently allow.
+
+    The M5 invariant: **every mcp__* call must go through one of these
+    three states**. Never silently fall through to "allow by default".
+    """
+
+    auto_approve: tuple[str, ...] = ()
+    deny: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class MCPConfig:
+    """Per-project MCP server map + permission rules.
+
+    PM-1: ``servers`` only.
+    PM-2: adds ``permissions`` for the M5 permission gate
+           (deny / auto_approve / prompt user).
     """
 
     servers: tuple[MCPServerConfig, ...] = ()
+    permissions: MCPPermissions = field(default_factory=MCPPermissions)
 
     @classmethod
     def from_defaults(cls) -> MCPConfig:
-        return cls(servers=())
+        return cls(servers=(), permissions=MCPPermissions())
 
 
 @dataclass(frozen=True)
@@ -451,16 +481,22 @@ def _parse_lsp_section(section: dict | None) -> LSPConfig:
 
 
 def _parse_mcp_section(section: dict | None) -> MCPConfig:
-    """Parse a top-level [mcp.servers.*] block from harness.toml.
+    """Parse a top-level [mcp.*] block from harness.toml.
 
-    Schema (per [mcp.servers.<name>] subtable):
-      command          : str (required)
-      args             : list[str] (optional, default [])
-      env              : dict[str, str] (optional, default {}) — explicit env
-      cwd              : str (optional, default None)
-      subagent_access  : bool (optional, default false)
+    Schema:
+      [mcp.servers.<name>] subtable — server spec.
+        command          : str (required)
+        args             : list[str] (optional, default [])
+        env              : dict[str, str] (optional, default {}) — explicit env
+        cwd              : str (optional, default None)
+        subagent_access  : bool (optional, default false)
+
+      [mcp.permissions] subtable — PM-2 M5 permission gate.
+        auto_approve : list[str] (optional, default []) — patterns silent-allow
+        deny         : list[str] (optional, default []) — patterns hard-block
 
     PM-1: only validates and exposes the spec. mcp_manager wires the lifecycle.
+    PM-2: adds the permissions subtable consumed by Hooks._check_mcp_permissions.
     """
     if not section:
         return MCPConfig.from_defaults()
@@ -502,7 +538,33 @@ def _parse_mcp_section(section: dict | None) -> MCPConfig:
             cwd=cwd,
             subagent_access=subagent,
         ))
-    return MCPConfig(servers=tuple(servers))
+    permissions = _parse_mcp_permissions(section.get("permissions"))
+    return MCPConfig(servers=tuple(servers), permissions=permissions)
+
+
+def _parse_mcp_permissions(section: dict | None) -> MCPPermissions:
+    """Parse the [mcp.permissions] subtable (PM-2, M5 gate).
+
+    Schema:
+      auto_approve : list[str] — patterns silent-allow
+      deny         : list[str] — patterns hard-block
+
+    Each list must be a list of strings; any other type → ConfigError.
+    Empty/missing → empty tuple. Wildcard syntax (``*``) is documented
+    on :class:`MCPPermissions`; this function only validates the
+    container shape, not the pattern grammar.
+    """
+    if not section:
+        return MCPPermissions()
+    if not isinstance(section, dict):
+        raise ConfigError("[mcp.permissions] must be a table")
+    auto_approve = section.get("auto_approve", [])
+    if not isinstance(auto_approve, list) or not all(isinstance(p, str) for p in auto_approve):
+        raise ConfigError("[mcp.permissions].auto_approve must be a list of strings")
+    deny = section.get("deny", [])
+    if not isinstance(deny, list) or not all(isinstance(p, str) for p in deny):
+        raise ConfigError("[mcp.permissions].deny must be a list of strings")
+    return MCPPermissions(auto_approve=tuple(auto_approve), deny=tuple(deny))
 
 
 def load_config(workdir: Path) -> HarnessConfig:
@@ -588,4 +650,10 @@ _SKELETON = """# harness.toml — per-project loom agent config
 # args = ["-y", "@modelcontextprotocol/server-github"]
 # env = {GITHUB_TOKEN = "ghp_..."}  # 注意:不继承 loom 进程环境,只传显式声明的
 # subagent_access = false   # PM-4:子智能体是否可用此 server 的工具
+#
+# [mcp.permissions]              # PM-2: M5 permission gate (deny / auto_approve / prompt)
+# auto_approve = ["filesystem__read_file", "filesystem__list_files"]
+# deny = ["*__delete", "*__drop_table", "*__rm"]
+# # Pattern grammar: "server__tool" with optional "*" wildcard per segment.
+# # Unmatched tools → y/N prompt via Hooks._ask_user (never silently allow).
 """

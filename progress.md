@@ -5820,3 +5820,66 @@ LSP wire-up roadmap 完成。可以考虑下一个 roadmap:
 
 ### 下次 session
 新 session 加载 `.sisyphus/plans/loop-mcp-p2.md` 开始 PM-2。**关键提醒**:PM-2 包含 M5 permission CRITICAL — 绝不静默放行任何 MCP 调用,用 config-driven 3-state(deny 硬阻断 / auto_approve 静默放行 / neither → y/N prompt),绝不构造 fake_block(LSP R3 lesson)。
+
+---
+
+## Session: f-mcp-permission-gate — PM-2 MCP 3-state permission gate (M5 CRITICAL) (2026-06-22 evening, session 6)
+
+### 背景
+- PM-1 把 MCP 工具注册到 TOOL_REGISTRY,但任何 mcp__* 调用都直接放行 — 这是 M5 CRITICAL(绝不静默放行任何 MCP 调用)。
+- 本 phase 实现 config-driven 3-state permission gate:deny 硬阻断 / auto_approve 静默放行 / neither → y/N prompt。
+
+### 范围
+- `loom/agent/config.py` (+92): `MCPPermissions(auto_approve, deny)` frozen dataclass + `MCPConfig.permissions` 字段 + `_parse_mcp_permissions()` 含 list-of-strings 验证 + `_SKELETON` 注释示例。
+- `loom/agent/permissions.py` (+29): `_mcp_pattern_matches(pattern, tool_name) -> bool` helper。按 `__` 分割,strip leading `mcp`,逐段比较带 `*` 通配符。支持 `"github__search_code"`(exact)/ `"*__read_file"`(any server's read_file)/ `"github__*"`(all github)/ `"*__*"`(all)。
+- `loom/agent/hooks.py` (+57): `check_permission_hook` 加 mcp__* 分支(在 `_check_rules` 之前)— `isinstance(block.name, str) and block.name.startswith("mcp__")` → 调 `_check_mcp_permissions`。新 `_check_mcp_permissions(tool_name, args)` 方法:1) deny 匹配 → 返回 `"Permission denied: ..."`(硬阻断,无 user override);2) auto_approve 匹配 → 返回 `None`(静默放行);3) 都不在 → `_ask_user` y/N prompt,user deny → `"Permission denied by user."`,user allow → `None`。
+- `tests/test_mcp_permission.py` (新增, 18 测试): 12 spec'd(pattern matching 5 + permissions 3-state 4 + hook routing 2 + R3 grep 1)+ 3 config-parse + 1 deny-overrides-auto_approve + 1 MagicMock regression + 1 R3 grep。
+- `loom/eval/cases/mcp_permission.py` (新增, 4 EvalCase): mcp-permission-deny-hard-blocks / mcp-permission-auto-approve-allows / mcp-permission-prompt-when-neither / **mcp-permission-no-fake-block-constructed**(R3 回归守护,grep hooks.py 源码找 fake_block)。
+- `loom/eval/cases/__init__.py` (+1): 按字母序加 `mcp_permission`。
+
+### 子智能体主动发现 + 修复的 bug(超出 brief 的工程判断)
+- `block.name.startswith("mcp__")` 在 MagicMock 测试 block 上返回 truthy `MagicMock` 而非 `bool`(因为 MagicMock 自动生成 attribute)。
+- 这导致 MCP gate 误把 MagicMock block 路由到 `_ask_user` → `input()` → `EOFError`(测试环境 stdin 关闭)。
+- 子智能体主动加 `isinstance(block.name, str)` guard 防 truthy-MagicMock 误触发,还加了专门的 regression test `test_check_permission_hook_skips_mcp_path_for_non_string_name`。
+- 这是 PM-2 的第二个 lesson(第一个是 PL-3 的"跑 full harness eval"):**MagicMock block 的 attribute 不是 bool,需要 isinstance guard**。两个 lesson 现在都编码成 regression test。
+
+### 验证(真实输出,WR #3 真证据)
+- `uv run pytest tests/test_mcp_permission.py -v` → **18 passed in 0.07s**
+- `uv run pytest tests/test_mcp_permission.py tests/test_mcp_wire.py tests/test_mcp_manager.py tests/test_mcp_client.py` → **55 passed in 0.20s**(18 permission + 19 wire + 8 manager + 10 client)
+- `uv run python -m loom.cli eval --filter mcp --fail-under 100` → **14/14 passed**(10 pre-existing PM-1 + 4 new mcp-permission)
+- `uv run python -m loom.cli eval --kind harness --fail-under 100` → **352/352 passed**(PM-1 是 348,+4 new)— **无回归**
+- `uv run ruff check loom/` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in **137 source files**(PM-1 是 136,+1 新 `mcp_permission.py` eval)
+- `uv run pytest -m 'not snapshot' -q` → **979 passed, 8 deselected**(PM-1 是 961,+18 new)
+- `grep -rn fake_block loom/agent/` → **EXIT=1(无匹配)— R3 CRITICAL 修复(LSP PL-3)仍 intact**
+
+### Oracle 16 风险进展
+| # | 风险 | 状态 |
+|---|---|---|
+| M1 | Phase split 错 | ✅ PM-1 |
+| M2 | 工具前缀单下划线冲突 | ✅ PM-1 |
+| M3 | Duplicate server name | ✅ PM-1 |
+| M4 | Malformed inputSchema | ✅ PM-1 |
+| **M5** | **Permission 绕过** | ✅ **PM-2 3-state gate** |
+| M6 | Crash 无 visible 提示 | ⏳ PM-3 |
+| M7 | Output 撑爆上下文 | ⏳ PM-3 |
+| M8 | Startup blocking | ✅ PM-1 |
+| M9 | Subagent 调危险 MCP | ⏳ PM-4 |
+| M10 | request_id race | ✅ PM-1 |
+| M11 | env 泄漏 API key | ✅ PM-1 |
+| M12 | content list 不展平 | ⏳ PM-3 |
+| M13 | 缺 cwd 字段 | ✅ PM-1 |
+| M14 | TOOLS snapshot 不更新 | ✅ PM-1 |
+| M15 | register 无锁 | ✅ PM-1 |
+| M16 | stderr 不读 | ⏳ PM-3 |
+
+**11/16 已修**(含 5 个 CRITICAL/安全级 M1/M5/M11/M14 + 设计级),5 个待 PM-3/4。
+
+### Roadmap 进展
+- PM-1 ✅ DONE: config + manager + discovery + 注册 + 10/16 风险修
+- **PM-2 ✅ DONE: 3-state permission gate(M5 CRITICAL)**
+- PM-3: handler safety(M6/M7/M12/M16)
+- PM-4: subagent opt-in(M9)+ docs + README
+
+### 下次 session
+新 session 加载 `.sisyphus/plans/loop-mcp-p3.md` 开始 PM-3。范围:handler output 展平(M12)+ 50KB 截断(M7)+ crash visible warning(M6)+ stderr 收集(M16)。

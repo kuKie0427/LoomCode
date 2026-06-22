@@ -4,7 +4,11 @@ from pathlib import Path
 
 from loguru import logger
 
-from loom.agent.permissions import DEFAULT_POLICY, PermissionPolicy
+from loom.agent.permissions import (
+    DEFAULT_POLICY,
+    PermissionPolicy,
+    _mcp_pattern_matches,
+)
 
 WORKDIR = Path.cwd()
 
@@ -55,6 +59,21 @@ class Hooks:
             if reason:
                 logger.warning("⛔ {}", reason)
                 return "Permission denied."
+        # PM-2: MCP 3-state permission gate (M5). Runs BEFORE the generic
+        # rule check so mcp__* tools are NOT subject to the unrelated
+        # write_file / bash / lsp_rename rules below. A return value of
+        # None means "allow"; a non-empty string means "deny".
+        #
+        # The isinstance guard handles the case where callers (typically
+        # in tests) pass a MagicMock for the tool block; ``block.name``
+        # then auto-attributes to a truthy MagicMock, which would
+        # otherwise wrongly enter the MCP gate and fall through to
+        # ``_ask_user`` (causing an EOFError on captured stdin). Real
+        # blocks from ``_run_tool_block`` always carry a ``str`` name.
+        if isinstance(block.name, str) and block.name.startswith("mcp__"):
+            reason = self._check_mcp_permissions(block.name, block.input)
+            if reason is not None:
+                return reason
         reason = self._check_rules(block.name, block.input)
         if reason:
             decision = self._ask_user(block.name, block.input, reason)
@@ -92,6 +111,42 @@ class Hooks:
     def _check_rules(self, tool_name: str, args: dict) -> str | None:
         rule = self.policy.find_rule(tool_name, args)
         return rule.message if rule is not None else None
+
+    def _check_mcp_permissions(self, tool_name: str, args: dict) -> str | None:
+        """3-state MCP permission gate (M5). Returns None to allow, string to block.
+
+        Order matters: deny patterns hard-block first (no user override),
+        auto_approve patterns silent-allow second, and ONLY when both
+        lists miss does the call fall through to a y/N prompt via
+        ``self._ask_user``. There is no "allow by default" path — the
+        M5 invariant is that every ``mcp__*`` call ends up in exactly
+        one of deny / auto_approve / prompt.
+
+        The active config is read from ``loop._active_config`` (lazy
+        import) so a stale module-level snapshot at agent startup does
+        not freeze the rule set.
+        """
+        from loom.agent.loop import _active_config
+
+        perms = _active_config.mcp.permissions
+        for pattern in perms.deny:
+            if _mcp_pattern_matches(pattern, tool_name):
+                reason = (
+                    f"Permission denied: MCP tool '{tool_name}' matches "
+                    f"deny pattern '{pattern}'"
+                )
+                logger.warning("⛔ {}", reason)
+                return reason
+        for pattern in perms.auto_approve:
+            if _mcp_pattern_matches(pattern, tool_name):
+                return None
+        decision = self._ask_user(
+            tool_name, args,
+            f"MCP tool '{tool_name}' is calling an external server. Allow?",
+        )
+        if decision == "deny":
+            return "Permission denied by user."
+        return None
 
     def _default_asker(self, tool_name: str, args: dict, reason: str) -> str:
         logger.warning("⚠  {}", reason)
