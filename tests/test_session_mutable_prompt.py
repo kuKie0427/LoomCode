@@ -104,7 +104,7 @@ def test_build_fresh_runs_in_isolated_tempdir(tmp_path):
     any layer, asserting the produced string contains the expected
     role + workdir sections."""
     prompt = build_fresh(tmp_path)
-    assert "MiniCode" in prompt
+    assert "LoomCode" in prompt
     assert str(tmp_path) in prompt
 
 

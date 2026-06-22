@@ -47,6 +47,7 @@ from loom.eval.cases import (
     phase5_coverage,  # noqa: F401
     pre_compact_hook,  # noqa: F401
     prompt_caching,  # noqa: F401
+    prompt_rewrite_p0,  # noqa: F401
     real_token_counter,  # noqa: F401
     repomap,  # noqa: F401
     resume_benchmark,  # noqa: F401

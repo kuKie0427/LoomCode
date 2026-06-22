@@ -1,5 +1,3 @@
-import html
-import http.client
 import re
 import shutil
 import subprocess
@@ -185,7 +183,7 @@ def _fuzzy_match_single(text: str, snippet: str, min_ratio: float = 0.85) -> int
         ratio = difflib.SequenceMatcher(None, snippet, window).ratio()
         if ratio > best_ratio:
             best_ratio = ratio
-            best_offset = sum(len(l) for l in text_lines[:i])
+            best_offset = sum(len(line) for line in text_lines[:i])
             if best_ratio >= 0.999:
                 break
     if best_ratio >= min_ratio:
@@ -253,7 +251,7 @@ def run_multi_edit(path: str, edits: list[dict]) -> str:
     except Exception as exc:
         return f"Error: {exc}"
     if not isinstance(edits, list) or not edits:
-        return f"Error: edits must be a non-empty list"
+        return "Error: edits must be a non-empty list"
     for i, e in enumerate(edits):
         if not isinstance(e, dict) or "old_text" not in e or "new_text" not in e:
             return f"Error: edits[{i}] missing old_text or new_text"
@@ -342,7 +340,7 @@ def _grep_python(pattern: str, root: Path, glob_pat: str | None,
     flags = re.IGNORECASE if case_insensitive else 0
     try:
         compiled = re.compile(pattern, flags)
-    except re.error as exc:
+    except re.error:
         return [], 0
     hits: list[tuple[Path, int, str]] = []
     truncated = 0
@@ -582,6 +580,7 @@ def run_cold_archive(turns_json: str, dest: str | None = None, chunk_size: int =
     """
     import json as _json
     from pathlib import Path as _P
+
     from loom.agent.cold_archive import archive as _archive
     try:
         turns = _json.loads(turns_json)
@@ -604,6 +603,7 @@ def run_cold_load(start_turn: int, end_turn: int, dest: str | None = None) -> st
     Returns an error string on bad range / missing manifest.
     """
     from pathlib import Path as _P
+
     from loom.agent.cold_archive import rehydrate as _rehydrate
     target = _P(dest) if dest else (WORKDIR / ".minicode" / "cold-storage")
     try:
@@ -682,14 +682,16 @@ def run_lsp_goto_definition(path: str, line: int, character: int) -> str:
     → "Error: ...".
     """
     from loom.agent import lsp_client
+    from loom.agent.loop import _active_config
     from loom.agent.lsp_manager import (
         _ACTIVE_SERVERS,
-        _LOCK as _LSP_LOCK,
         _PER_SERVER_LOCKS,
         get_or_start,
         get_server_lock,
     )
-    from loom.agent.loop import _active_config
+    from loom.agent.lsp_manager import (
+        _LOCK as _LSP_LOCK,
+    )
 
     try:
         target_path = safe_path(path)
@@ -733,14 +735,16 @@ def run_lsp_find_references(
     "no references found", or a fail-closed error string. Read-only.
     """
     from loom.agent import lsp_client
+    from loom.agent.loop import _active_config
     from loom.agent.lsp_manager import (
         _ACTIVE_SERVERS,
-        _LOCK as _LSP_LOCK,
         _PER_SERVER_LOCKS,
         get_or_start,
         get_server_lock,
     )
-    from loom.agent.loop import _active_config
+    from loom.agent.lsp_manager import (
+        _LOCK as _LSP_LOCK,
+    )
 
     try:
         target_path = safe_path(path)
@@ -793,15 +797,17 @@ def run_lsp_rename_symbol(path: str, line: int, character: int, new_name: str) -
     other two LSP tools.
     """
     from loom.agent import lsp_client
+    from loom.agent.loop import _active_config
     from loom.agent.lsp_apply import apply_workspace_edit, parse_workspace_edit
     from loom.agent.lsp_manager import (
         _ACTIVE_SERVERS,
-        _LOCK as _LSP_LOCK,
         _PER_SERVER_LOCKS,
         get_or_start,
         get_server_lock,
     )
-    from loom.agent.loop import _active_config
+    from loom.agent.lsp_manager import (
+        _LOCK as _LSP_LOCK,
+    )
     from loom.agent.permissions import DEFAULT_POLICY
 
     try:
@@ -864,7 +870,30 @@ def run_lsp_rename_symbol(path: str, line: int, character: int, new_name: str) -
 TOOL_REGISTRY = ToolRegistry()
 TOOL_REGISTRY.register(Tool(
     name="bash",
-    description="Run a shell command.",
+    description=(
+        "Run a shell command in the workspace. 120s timeout; long commands fail with "
+        "a clear error. Dangerous patterns (rm -rf /, sudo, shutdown, dd if=, > /dev/sda, "
+        "mkfs, fork bombs, curl/wget/nc/ssh exfil, python -c / perl -e code execution) "
+        "are hard-blocked by the deny list — do not attempt them.\n"
+        "\n"
+        "When to use bash vs dedicated tools:\n"
+        "- File read → use `read_file` (numbered, paginated), NOT `cat`/`head`/`tail`\n"
+        "- File search by name → use `glob`, NOT `find`/`ls`\n"
+        "- Content search → use `grep` (structured output), NOT `grep`/`rg` via bash\n"
+        "- File edit → use `edit_file`/`multi_edit`/`edit_lines`, NOT `sed`/`awk`\n"
+        "- File write → use `write_file`, NOT `echo >` / `cat <<EOF`\n"
+        "Reserve bash for actual system commands and terminal operations.\n"
+        "\n"
+        "Rules:\n"
+        "- Use absolute paths; avoid `cd` chains (working dir persists but shell state does not).\n"
+        "- Quote file paths with spaces using double quotes.\n"
+        "- For long-running commands (servers, watchers), append `&` to background them.\n"
+        "- Independent commands can run in parallel (multiple bash calls in one turn).\n"
+        "- Git: NEVER force-push, NEVER commit unless the user explicitly asked. Do not use "
+        "`--no-verify` to bypass hooks. Investigate unexpected state (unfamiliar files, lock "
+        "files) before deleting — it may be the user's in-progress work.\n"
+        "- Output is truncated if large; check the tail for the final status."
+    ),
     input_schema={"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]},
     handler=run_bash,
 ))
@@ -1251,13 +1280,33 @@ SUB_HANDLERS = {
 
 SUB_SYSTEM = (
     "你是一个编程子智能体（subagent），由主 agent 通过 `task` 工具委派任务。\n"
-    "你的工作目录和主 agent 相同，但上下文独立（不继承主 agent 的对话历史）。\n"
+    "你的工作目录和主 agent 相同，但上下文独立 — 你看不到主 agent 的对话历史，"
+    "也不知道主 agent 之前试过什么、为什么把这个任务派给你。你也不能再委派（不要调用 task 工具）。\n"
+    "\n"
+    "理解你的处境：主 agent 给你的 description 是你唯一的上下文。如果它不够，你要么用 grep/read_file "
+    "自己补全，要么在结果里标注 [UNCLEAR: ...] 让主 agent 补充。不要假装理解了没说清楚的任务。\n"
+    "\n"
     "规则：\n"
-    "- 专注完成委派给你的任务，不要做超出范围的工作\n"
+    "- 专注完成委派给你的任务，不要做超出范围的工作 — 不要顺手改无关代码、不要重构、不要加注释\n"
     "- 不要进一步委派（不要调用 task 工具）\n"
-    "- 完成后用简洁的摘要返回结果\n"
-    "- 如果任务需要多步，列出你做了什么、找到/改了什么\n"
-    "- 遇到错误就直接报告，不要重试同一操作超过一次"
+    "- 优先用 grep（而不是 read_file）定位符号、字符串、引用 — grep 更便宜\n"
+    "- 改文件前先 read_file 看上下文，理解既有代码再动手\n"
+    "- 报告结构化：文件路径 + 行号 + 简短摘录（不要大段粘贴）；多步任务列出你做了什么、找到/改了什么\n"
+    "- 完成后用简洁的摘要返回结果 — 主 agent 只看到你的最终输出，看不到你的中间过程\n"
+    "- 遇到错误就直接报告，不要重试同一操作超过一次；诊断 root cause 而不是 symptom-swap\n"
+    "- 测试没过就说没过，没跑验证就说没跑，不谎报结果\n"
+    "\n"
+    "何时 Escalate（在结果里标注让主 agent 接手）：\n"
+    "- [UNCLEAR: <细节>] — 任务描述不够清楚，无法继续\n"
+    "- [BLOCKED: <细节>] — 遇到权限拒绝、缺依赖、文件不存在等环境问题\n"
+    "- [CANNOT_FIX: <错误摘要 + 你的分析 + 已尝试的方案>] — 修不动\n"
+    "- [OUT_OF_SCOPE: <细节>] — 发现任务范围比描述的大，需要主 agent 决定是否扩展\n"
+    "\n"
+    "反模式：\n"
+    "- 不要 fabricate 结果 — 没找到就说没找到，不要编造文件路径或行号\n"
+    "- 不要 silently skip 步骤 — 跳过的步骤要在结果里说明原因\n"
+    "- 不要为了通过测试而 skip/xfail test 或修改 test 文件本身\n"
+    "- 不要做 destructive 操作（rm -rf、force-push、删无关文件）— 即使任务看起来允许"
 )
 
 
@@ -1334,8 +1383,54 @@ def run_task(description: str) -> str:
 TOOL_REGISTRY.register(Tool(
     name="task",
     description=(
-        "Launch a subagent to handle a complex subtask. Returns only the "
-        "final conclusion."
+        "Launch a subagent to handle a complex subtask. The subagent runs an independent "
+        "LLM loop (up to 30 turns) with a subset of tools — it does NOT inherit your "
+        "conversation history, does NOT see this turn's context, and cannot re-delegate "
+        "(call `task` again). Returns only the final summary text.\n"
+        "\n"
+        "When to use:\n"
+        "- Multi-step investigation that would fill your context with intermediate tool "
+        "output you don't need long-term\n"
+        "- Independent implementation work that can be scoped tightly\n"
+        "- Research that can run in parallel with your own work\n"
+        "\n"
+        "When NOT to use (use dedicated tools instead):\n"
+        "- Reading a specific known file path → use `read_file`\n"
+        "- Finding files by name pattern → use `glob`\n"
+        "- Searching for a specific symbol/string → use `grep`\n"
+        "- Editing a file you've already read → use `edit_file` / `multi_edit`\n"
+        "- Searching 2-3 specific files → use `read_file` in parallel\n"
+        "Only delegate when the work is genuinely complex or context-heavy.\n"
+        "\n"
+        "Writing the delegation prompt — brief the subagent like a smart colleague who "
+        "just walked into the room:\n"
+        "- Explain what you're trying to accomplish and WHY (not just what)\n"
+        "- Describe what you've already learned or ruled out (saves redundant work)\n"
+        "- Give enough surrounding context that the subagent can make judgment calls, "
+        "not just follow a narrow instruction\n"
+        "- Specify the return format if it matters (\"report file:line\", \"under 200 words\", "
+        "\"list the 3 root causes ranked\")\n"
+        "- For investigation: hand over the question, not prescribed steps (prescribed "
+        "steps become dead weight when the premise is wrong)\n"
+        "\n"
+        "Never delegate understanding. Don't write \"based on your findings, fix the bug\" "
+        "or \"based on the research, implement it\" — those phrases push synthesis onto "
+        "the subagent. Write prompts that prove you understood: include file paths, line "
+        "numbers, what specifically to change.\n"
+        "\n"
+        "Anti-patterns:\n"
+        "- Do NOT re-delegate from a subagent (no `task` inside `task`)\n"
+        "- Do NOT duplicate the delegated work yourself while the subagent runs\n"
+        "- Do NOT fabricate or predict the subagent's result before it returns\n"
+        "- If the subagent reports [CANNOT_FIX] or [FAILED], respect that — don't "
+        "re-delegate the same task hoping for a different outcome\n"
+        "\n"
+        "Available specialized templates (prefer these over generic `task` when the "
+        "shape matches):\n"
+        "- `task_investigate_code`: read-only codebase search, returns structured findings\n"
+        "- `task_refactor_across_files`: cross-file rename/replace with multi_edit + verify\n"
+        "- `task_fix_failing_test`: TDD bug fix (reads failing test, locates source, "
+        "minimal fix, re-runs — refuses to edit the test file)"
     ),
     input_schema={
         "type": "object",
