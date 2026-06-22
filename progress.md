@@ -6359,3 +6359,77 @@ Phase P0 of the multi-model roadmap. Built the foundation abstraction layer (pro
 - Modified: `loom/eval/cases/max_output_tokens_config.py` (removed unused type: ignore)
 - Modified: `feature_list.json` (P0 status + evidence)
 
+## Session: f-multi-model-providers-p1-concrete-providers (2026-06-23)
+
+### What was done
+
+Phase P1 of the multi-model roadmap. Built two concrete provider implementations on top of the P0 abstraction: OpenAI Chat Completions (api.openai.com) and a generic OpenAI-compatible profile factory covering DeepSeek / Ollama / OpenRouter. Five providers now register cleanly through the same `LLMProvider` ABC.
+
+### Architecture additions
+
+- **New: `loom/agent/providers/_openai_shared.py`** (~527 LOC) — single source of truth for OpenAI wire logic:
+  - `MODEL_PROFILES` dict (DeepSeek / Ollama / OpenRouter profiles)
+  - `openai_chat_stream()` — SSE streaming generator with tool-call delta accumulator, error mapping, usage merging
+  - `_ToolCallAccumulator` — keyed-by-index tool-call merger (handles N-chunk OpenAI tool calls)
+  - `_map_status_error()` — 401/429/400+context_length_exceeded/4xx/5xx → `ProviderError` mapping
+  - `build_request_body()` — `ProviderRequest` → OpenAI Chat Completions JSON body
+  - `make_compatible_provider_class()` — factory binding `MODEL_PROFILES` entry → `OpenAICompatibleProvider` subclass with pinned ClassVars
+
+- **New: `loom/agent/providers/openai.py`** (122 LOC) — `OpenAIProvider`:
+  - 7 models (gpt-4o/mini/turbo/3.5-turbo/o1/o1-mini/o3-mini)
+  - Context windows per plan (gpt-4o=128k, o1=200k, gpt-3.5-turbo=16k, etc.)
+  - Pricing table (input/output $/1M; cache fields None since OpenAI doesn't expose per-message cache breakdown)
+  - `count_tokens()` heuristic: chars/4 + 50% safety margin (no API call)
+  - Delegates `stream()` to `openai_chat_stream` with `base_url=https://api.openai.com/v1`
+
+- **New: `loom/agent/providers/openai_compatible.py`** (131 LOC) — generic OpenAI-compatible base + registration helper:
+  - `OpenAICompatibleProvider` ABC subclass with empty default ClassVars; subclasses dynamically bound per-profile via `make_compatible_provider_class()`
+  - `register_compatible_profiles()` — idempotent walker over `MODEL_PROFILES`; registers DeepSeek / Ollama / OpenRouter in `PROVIDERS` dict
+  - `profile_summary()` helper for diagnostics
+
+- **Modified: `loom/agent/providers/__init__.py`** — wires all 3 providers + calls `register_compatible_profiles()` at import time. Exports `MODEL_PROFILES` + `OpenAICompatibleProvider` in public API.
+
+- **Modified: `loom/agent/providers/registry.py`** — added `*extra: str` to `get_provider()` signature so the plan's smoke test syntax `get_provider(*parse_model_id(...), api_key=...)` works directly. Fully backward-compatible; all existing call sites unchanged.
+
+- **Modified: `loom/eval/cases/__init__.py`** — registers `multi_model_p1` eval module.
+
+### Tests + eval
+
+- **New: `tests/test_provider_openai.py`** (32 tests) — ClassVar metadata, context windows, pricing, request body shape (tools → OpenAI function format, system message prepend, no-tools omission), token counting heuristic with 50% margin, SSE streaming (text events, tool-call delta assembly, usage at end), error mapping (401/429/400+context_length_exceeded/400+other/500/502)
+- **New: `tests/test_provider_openai_compatible.py`** (24 tests) — DeepSeek / Ollama / OpenRouter profile resolution, registration idempotency, context windows per-model, pricing lookups, per-profile ClassVar metadata, shared streaming logic verification via spy, count_tokens heuristic for compat providers
+- **New: `tests/test_provider_registry.py`** (25 tests) — All 5 providers registered, get_provider returns instances, `*parse_model_id` unpacking syntax works, resolve_model_id returns env_var correctly (including openrouter's slash-in-model_id), unknown provider raises
+- **New: `loom/eval/cases/multi_model_p1.py`** (11 cases) — OpenAI provider registered, gpt-4o pricing shape (2.5/10), context_window (128k), error mapping (3 cases: auth/rate_limit/context_overflow), OpenAI-compatible profiles (3 cases: deepseek/ollama/openrouter), registry contains 5 providers, parse_model_id end-to-end
+
+### Gate results
+
+| Check | Result |
+|---|---|
+| `uv run ruff check .` | All checks passed |
+| `uv run mypy loom/` | Success: 0 issues in 151 source files |
+| `uv run pytest -q -m 'not snapshot' tests/test_provider_openai.py tests/test_provider_openai_compatible.py tests/test_provider_registry.py` | 81 passed (P1-only) |
+| `uv run pytest -q -m 'not snapshot'` (full suite) | 1118 passed (was 1037, +81 new), 0 regressions |
+| `uv run python -m loom.cli eval --filter multi-model-p1 --fail-under 100` | 11/11 passed |
+| `uv run python -m loom.cli eval --filter multi-model-p0 --fail-under 100` | 11/11 passed (no regression) |
+| Smoke: `get_provider(*parse_model_id('deepseek/deepseek-chat'), api_key='fake')` | `deepseek https://api.deepseek.com/v1 64000` |
+| LLMClient.change_model() across providers | All 5 work: anthropic/openai/deepseek/ollama/openrouter |
+
+### Deviations from plan
+
+1. **Registry has 5 providers, not 6.** Plan mentioned `custom` as a 6th; `custom` is P2 work (credential system + user-supplied base_url). Subagent deferred this and the eval case was renamed to `multi-model-p1-registry-contains-5-providers`. Documented in test class docstring.
+2. **`get_provider` signature extended with `*extra`.** Required for the plan's smoke test syntax. Backward-compatible (existing keyword-only callers still work). Documented in `registry.py` docstring and `.sisyphus/notepads/multi-model-providers-p1/learnings.md`.
+
+### Notepad
+
+9 learnings appended to `.sisyphus/notepads/multi-model-providers-p1/learnings.md`:
+- Python 3.13 `from __future__ import annotations` class-body variable shadowing gotcha (with the `_pid`/`_display`/etc. workaround pattern)
+- OpenAI SSE `usage` + `finish_reason` in same chunk → merge into single event
+- `httpx.Client.stream()` returns context manager (not Response)
+- `httpx.MockTransport` as the cleanest HTTP-mocking seam
+- Tool-call delta accumulation algorithm (key by index, concat arguments)
+- OpenAI-compatible error mapping table
+- `get_provider` `*extra` signature change rationale
+- Out-of-scope registry change justification
+- `LOOM_LIVE_TEST=1` is a no-op for the providers (smoke doesn't actually call the network)
+
+### Next: P2 (Credential storage + model persistence + /model UX + auth CLI)
+

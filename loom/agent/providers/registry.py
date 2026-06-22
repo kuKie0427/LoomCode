@@ -43,13 +43,23 @@ def parse_model_id(model: str) -> tuple[str, str]:
 
 def get_provider(
     provider_id: str,
+    *extra: str,
     api_key: str = "",
     base_url: str | None = None,
 ) -> LLMProvider:
     """Look up and instantiate a provider by id.
 
+    Extra positional args are accepted (and ignored) so the call site
+    can write ``get_provider(*parse_model_id(s), api_key=k)`` directly,
+    where ``parse_model_id`` returns ``(provider_id, model_id)``. The
+    ``model_id`` is consumed as a positional arg and not used here.
+
+    Use the ``api_key`` and ``base_url`` keyword args explicitly when
+    both are needed.
+
     Raises ProviderError(code="unknown_provider") if not registered.
     """
+    del extra
     cls = PROVIDERS.get(provider_id)
     if cls is None:
         raise ProviderError(
