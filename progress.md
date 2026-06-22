@@ -6070,3 +6070,220 @@ LSP + MCP 两个 wire-up roadmap 都完成。可以考虑:
 - **把 3 个 LSP-style lesson 推广成 Working Rules**:跑 full eval / MagicMock guard / handler 可调用性测试。
 
 或者就到此为止,你想休息一下。
+
+## Session: f-prompt-rewrite-p0 — 提示词工程对齐 CC/opencode (2026-06-23)
+
+### 起因
+
+用户问"loom 作为 coding agent 的工作范式"→ 评估提示词工程质量 vs Claude Code / opencode → 对比发现 loom 在 3 段最弱:(1) Agent 角色定义 3 行中文太薄(无安全边界/完成度锚点/URL 禁令),(2) bash 工具描述 1 行 "Run a shell command."(CC 369 行/opencode 307 行),(3) task 工具描述 1 行不教委派技巧(CC 220 行教 fork/Brief like colleague/Never delegate understanding)。
+
+### 改写内容(3 段 + 6 eval case)
+
+**(1) Agent 角色定义**(`loom/agent/system_prompt.py:70-76`,3 行 → 7 行,名字 MiniCode → LoomCode):
+- 加 OWASP lite(命令注入/XSS/SQL 注入)
+- 加完成度锚点("不镀金也不留半成品"+ "不谎报结果")
+- 加"读后再改"
+- 加不可逆操作警示("删文件、force-push、改共享系统前先问用户")
+- 加 URL 猜测禁令
+- 加 file:line 引用约定
+
+**(2) bash 工具描述**(`loom/agent/tools.py:867`,1 行 → 18 行):
+- 120s timeout 明示 + deny list 类别(rm -rf/sudo/dd/curl exfil/python -c 等)
+- 5 条专用工具优先级(read_file NOT cat / glob NOT find / grep NOT rg / edit_file NOT sed / write_file NOT echo)
+- 绝对路径 / 避免 cd 链 / background `&` / 并行调用
+- git 安全(NEVER force-push / NEVER commit without ask / no --no-verify)
+
+**(3) task 工具描述**(`loom/agent/tools.py:1336-1349`,1 行 → 40 行):
+- 子 agent 上下文边界(无历史/无 re-delegation/30 turn cap)
+- 3 条 when to use + 5 条 when NOT to use(专用工具替代路径)
+- "Brief like a smart colleague who just walked into the room" 委派 prompt 5 条写法
+- "Never delegate understanding" 原则 + 反例
+- 4 条 anti-patterns(no re-delegate / no duplicate / no fabricate / respect [CANNOT_FIX])
+- 3 个 specialized template 指针(task_investigate_code / task_refactor_across_files / task_fix_failing_test)
+
+**(4) 6 eval case 锁住新措辞**(`loom/eval/cases/prompt_rewrite_p0.py`,NEW):
+- prompt-rewrite-identity-is-loomcode(名字 + MiniCode 已删)
+- prompt-rewrite-owasp-safety-boundary(命令注入/XSS/SQL 注入三短语)
+- prompt-rewrite-completion-anchor(不镀金/半成品/不谎报)
+- prompt-rewrite-bash-deny-list-teaching(deny list + 5 优先级 + NEVER force-push + --no-verify + 120s)
+- prompt-rewrite-task-never-delegate-understanding(Never delegate + colleague + 30 turns + no re-delegate + Anti-patterns + fabricate + CANNOT_FIX)
+- prompt-rewrite-task-when-not-to-use(When NOT to use + 5 替代 + 3 template 指针)
+
+### Token 成本
+
+~740 token 增量,全部落在 prompt cache 段(static tier + tool schema),首次写入后零边际成本。不是每 turn 多花 740 token,是 cache 写一次之后所有后续 turn 都免费拿到更好的教学。
+
+### Verification
+
+| 检查 | 命令 | 结果 |
+|---|---|---|
+| 6 新 eval case | `loom eval --filter prompt-rewrite --fail-under 100` | 6/6 passed |
+| targeted pytest | `pytest tests/test_tools.py -q -m 'not snapshot'` | 28 passed |
+| mypy | `mypy loom/agent/system_prompt.py loom/agent/tools.py loom/eval/cases/prompt_rewrite_p0.py` | Success: 0 issues in 3 files |
+| regression: session-mutable | `loom eval --filter session-mutable` | 3/3 passed |
+| regression: subagent-templates | `loom eval --filter subagent-template` | 3/3 passed |
+| regression: tool-errors | `loom eval --filter tool-errors` | 4/4 passed |
+| ruff on edited lines | `ruff check` on 4 changed files | 0 errors on my lines (10 pre-existing in untouched tools.py lines 1/2/188/256/345/583/606/684/735/795) |
+
+### 已知 blocker(非本 feature 引入)
+
+`./init.sh` closeout 被 pre-existing ruff debt 阻断:
+- 10 errors in `loom/agent/tools.py`(lines 1/2/188/256/345/583/606/684/735/795 — 全在没改的代码:unused imports `html`/`http.client`、ambiguous `l`、f-string without placeholders、unused `exc`、I001 inline import sorting in LSP/cold_archive handlers)
+- 26 errors in `tests/test_lsp_*.py` + `tests/test_mcp_*.py`(I001/F401/F841/UP035/B017)
+
+确认 pre-existing:`git stash` + `ruff check` 对比,error count 在 HEAD(无我改动)vs with my changes 相同。per AGENTS.md rule #5(stay in scope),这债务是 separate follow-up chore(`f-chore-fix-pre-existing-ruff-debt`),不本 feature 修。
+
+per rule #6 "direct call to a feature's verification command with passing output" clause,`loom eval --filter prompt-rewrite --fail-under 100` passes 6/6,授权 status=done。
+
+### Files Changed
+
+- `loom/agent/system_prompt.py`(+4 -3,lines 70-76:3 行身份 → 7 行,MiniCode → LoomCode)
+- `loom/agent/tools.py`(+17 -1,bash desc;+39 -3,task desc)
+- `loom/eval/cases/prompt_rewrite_p0.py`(NEW,95 lines,6 EvalCases)
+- `loom/eval/cases/__init__.py`(+1,import prompt_rewrite_p0 alphabetically)
+- `feature_list.json`(+1 feature entry)
+
+### 下次 session
+
+- `f-chore-fix-pre-existing-ruff-debt`:修 36 个 pre-existing ruff errors(10 in tools.py + 26 in tests/),解锁 `./init.sh` closeout。大部分 auto-fixable(I001/F401)。
+- 或者继续提示词工程:SUB_SYSTEM 子 agent 5 规则太 minimal(对比 CC DEFAULT_AGENT_PROMPT + 220 行 Agent 教学指引),可以扩到 15-20 行教委派技巧。
+- 或者补齐 loom 单模板 → 多模板(opencode 8 个 per-model 模板是差异化,loom 单模板适配所有模型损失模型特异性)。
+
+## Session: f-prompt-rewrite-p0 增量 — SUB_SYSTEM 子 agent 提示词扩展 (2026-06-23 session 2)
+
+### 起因
+
+上个 session 改了角色定义 + bash + task 三段,留下 SUB_SYSTEM 作为下次候选。用户选了这个。SUB_SYSTEM 原 5 规则 ~150 字符太薄(对比 CC `DEFAULT_AGENT_PROMPT` 教完成度 + 220 行 Agent 工具教学指引),不教子 agent 怎么处理 context 缺失、何时 escalate、怎么报告、什么不能做。
+
+### 改写内容(`loom/agent/tools.py:1275-1298`,5 规则 → 15 行 + 4 escalation marker + 4 反模式)
+
+**保留原 5 规则**(专注任务/不 re-delegate/简洁返回/多步列出/错误不重试),**新增**:
+
+**Context assumption 段**(教子 agent 理解自己的处境):
+- "上下文独立 — 你看不到主 agent 的对话历史,也不知道主 agent 之前试过什么、为什么把这个任务派给你"
+- "主 agent 给你的 description 是你唯一的上下文。如果它不够,你要么用 grep/read_file 自己补全,要么在结果里标注 [UNCLEAR: ...]"
+- "不要假装理解了没说清楚的任务"
+
+**委派技巧段**(从 CC Agent 工具教学压缩):
+- 优先用 grep(而不是 read_file)定位符号 — grep 更便宜
+- 改文件前先 read_file 看上下文
+- 报告结构化:文件路径 + 行号 + 简短摘录(不要大段粘贴)
+- 主 agent 只看到你的最终输出,看不到你的中间过程
+- 诊断 root cause 而不是 symptom-swap
+- 不谎报结果(匹配主 agent 的完成度锚点)
+
+**何时 Escalate 段**(4 个 marker,从 3 个 template 的 [UNCLEAR]/[FAILED]/[CANNOT_FIX] 提炼 + 加 [BLOCKED]/[OUT_OF_SCOPE]):
+- `[UNCLEAR: <细节>]` — 任务描述不够清楚
+- `[BLOCKED: <细节>]` — 权限拒绝、缺依赖、文件不存在
+- `[CANNOT_FIX: <错误摘要 + 分析 + 已尝试方案>]` — 修不动
+- `[OUT_OF_SCOPE: <细节>]` — 范围比描述的大,需主 agent 决定
+
+**反模式段**(4 条):
+- 不要 fabricate 结果(没找到就说没找到,不编造路径/行号)
+- 不要 silently skip 步骤(跳过要说明原因)
+- 不要为通过测试 skip/xfail test 或改 test 文件本身
+- 不要做 destructive 操作(rm -rf / force-push / 删无关文件)— 即使任务看起来允许
+
+### 4 个新 eval case 锁住新措辞(`loom/eval/cases/prompt_rewrite_p0.py`,追加)
+
+- `prompt-rewrite-subsystem-delegation-craft` — context 独立 + grep 优先 + read-before-edit + 结构化报告 + 最终输出
+- `prompt-rewrite-subsystem-escalation-markers` — 4 个 marker([UNCLEAR]/[BLOCKED]/[CANNOT_FIX]/[OUT_OF_SCOPE]) + Escalate 段
+- `prompt-rewrite-subsystem-anti-patterns` — 反模式段 + 4 条(no fabricate / no silent skip / no test edit / no destructive)
+- `prompt-rewrite-subsystem-honesty-anchor` — "不谎报" + "没跑验证就说没跑"(匹配主 agent 完成度锚点)
+
+### Verification
+
+| 检查 | 命令 | 结果 |
+|---|---|---|
+| 10 eval case(6 原 + 4 新) | `loom eval --filter prompt-rewrite --fail-under 100` | **10/10 passed** |
+| targeted pytest | `pytest tests/test_tools.py -q -m 'not snapshot'` | 28 passed |
+| subagent regression | `pytest tests/test_agent_loop.py -q -k 'subagent or spawn or task'` | 5 passed |
+| subagent_templates eval | `loom eval --filter subagent-template` | 3/3 passed |
+| mypy | `mypy loom/agent/tools.py loom/eval/cases/prompt_rewrite_p0.py` | Success: 0 issues in 2 files |
+| ruff on eval file | `ruff check loom/eval/cases/prompt_rewrite_p0.py` | All checks passed |
+
+### Token 成本
+
+SUB_SYSTEM 增量 ~140 token(5 规则 ~30 token → 15 行 + 4 marker + 4 反模式 ~170 token)。SUB_SYSTEM 是子 agent 系统提示,每次 `spawn_subagent` 调用发一次,不在主 prompt cache 段 — 但子 agent 通常一任务一次调用,增量可忽略。总 f-prompt-rewrite-p0 累计 ~880 token 增量(主 agent ~740 + 子 agent ~140)。
+
+### Files Changed(本次增量)
+
+- `loom/agent/tools.py:1275-1298`(+23 -10,SUB_SYSTEM 5 规则 → 15 行 + 4 marker + 4 反模式)
+- `loom/eval/cases/prompt_rewrite_p0.py`(+56 lines,4 新 EvalCases)
+- `feature_list.json`(更新 f-prompt-rewrite-p0 description + evidence,反映 4 段而非 3 段)
+
+### 下次 session
+
+- `f-chore-fix-pre-existing-ruff-debt` 还是优先(36 个 pre-existing ruff errors 解锁 `./init.sh` closeout,~20 分钟大部分 auto-fixable)
+- 或者:补齐 loom 单模板 → 多模板(opencode 8 个 per-model 模板)
+- 或者:commit 当前两段 prompt写(user 没明确要求 commit,working tree 有 6 个 modified + 1 untracked)
+
+## Session: f-chore-fix-pre-existing-ruff-debt — 清 36 个 ruff errors 解锁 closeout (2026-06-23 session 3)
+
+### 起因
+
+f-prompt-rewrite-p0 closeout 时发现 `./init.sh` 被 36 个 pre-existing ruff errors 阻断(10 in `loom/agent/tools.py` + 26 in `tests/test_lsp_*.py` + `tests/test_mcp_*.py`)。`git stash` 对比确认全在 HEAD `f5cc696` 也存在,不是 f-prompt-rewrite-p0 引入。本 chore 修全部。
+
+### Inventory(36 errors)
+
+| 规则 | 数量 | 位置 | 修法 |
+|---|---|---|---|
+| I001 unsorted-imports | 15 | tools.py inline imports (5) + tests/ (10) | `ruff --fix` 自动 |
+| F401 unused-import | 10 | tools.py `html`/`http.client` (2) + tests/ `time`/`Path`/`Tool`/`threading`/`patch` (8) | `ruff --fix` 自动 |
+| F541 f-string-no-placeholders | 1 | tools.py:256 `f"Error: edits must be a non-empty list"` | `ruff --fix` 自动 |
+| UP035 deprecated-import | 2 | tests/test_mcp_permission.py + test_mcp_subagent.py `from typing import Iterator` | `ruff --fix` 自动 |
+| F841 unused-variable | 5 | tests/test_mcp_handler.py `server = _seed_server(...)` 5 处 | 手动改 `_seed_server(...)`(保 side effect) |
+| E741 ambiguous-variable | 1 | tools.py:186 `for l in text_lines` | 手动改 `for line in text_lines` |
+| B017 assert-raises-exception | 1 | tests/test_mcp_wire.py:223 `pytest.raises(Exception)` | 手动改 `pytest.raises((MCPError, EOFError))` + 加 import |
+
+**22 auto-fix + 7 manual = 29 fixes**(差额 7 是 unsafe-fixes 提示但实际不需要 — I001 在 inline import 块里 `ruff check . --fix` 没自动改,要对 tools.py 单独 `--fix`)。
+
+### 顺手修的 1 个 f-prompt-rewrite-p0 漏的回归
+
+`tests/test_session_mutable_prompt.py:107` 断言 `"MiniCode" in prompt` — f-prompt-rewrite-p0 把 MiniCode 改成 LoomCode 时漏了这个测试(它没在 regression grep 里出现是因为它用的是 `build_fresh(tmp_path)` 实跑,不是 `inspect.getsource`)。改成 `assert "LoomCode" in prompt`。**这是 f-prompt-rewrite-p0 的真实回归,本 chore 顺手修掉**。
+
+### 3 个 TUI snapshot rebaseline(pre-existing flake,非本 chore 范围)
+
+`./init.sh` 第一次跑出 4 个失败:
+1. `test_build_fresh_runs_in_isolated_tempdir` — MiniCode 断言(上面修了)
+2. `test_empty_layout` + `test_header_collapsed_populated` + `test_header_collapsed_subagent_hidden` — TUI snapshot
+
+3 个 snapshot:`git stash` 确认在 HEAD `f5cc696` 也失败,是 pre-existing hash-ID flake(per Working Rule #10:random CSS class hash IDs `terminal-X-matrix` per Python run)。`pytest --snapshot-update` rebaseline 让 isolated 跑过。但在 full-suite context 里 **rotating flake**(每次跑不同一个失败 — 先 `test_header_collapsed_populated`,rebaseline 后变 `test_empty_layout`,再跑可能变第三个)。这是 rule #10 描述的 hash-ID 问题,需要写 normalize 脚本提取 `<text>` 段 + normalize `terminal-X` ID 后再比 — 是 separate chore `f-chore-fix-snapshot-hash-flake`,不本 chore 修。
+
+### Verification
+
+| 检查 | 命令 | 结果 |
+|---|---|---|
+| **ruff(本 feature 主目标)** | `ruff check .` | **All checks passed!**(36→0) |
+| mypy | `mypy loom/` | Success: 0 issues in 141 files |
+| non-snapshot pytest | `pytest -q -m 'not snapshot'` | **1014 passed, 8 deselected** in 218s |
+| prompt-rewrite eval | `loom eval --filter prompt-rewrite --fail-under 100` | 10/10 passed |
+| 8 修过的 test files + tools | targeted pytest | 141 passed in 1.12s |
+| `./init.sh` full gate | ruff + mypy + pytest | 1021 passed, **1 rotating snapshot flake**(非本 chore 引入) |
+
+### Scope 边界
+
+- ✅ **In scope**:36 ruff errors 全清(22 auto + 7 manual)+ 1 f-prompt-rewrite-p0 漏的 MiniCode 回归 + 3 snapshot rebaseline
+- ❌ **Out of scope**:snapshot hash-ID flake 的 normalize 脚本(rule #10 的真正修法)— separate chore `f-chore-fix-snapshot-hash-flake`
+
+per AGENTS.md rule #6,本 feature 的 verification command(`ruff check . && mypy loom/ && pytest -q -m 'not snapshot'`)全绿,授权 status=done。`./init.sh` 的 1 个 rotating snapshot flake 是 separate pre-existing 问题,不本 feature 引入也不本 feature 修。
+
+### Files Changed
+
+- `loom/agent/tools.py`(E741 line 186 `l`→`line` + auto-fixed inline imports in LSP/cold_archive handlers)
+- `tests/test_mcp_handler.py`(5× F841 `server = _seed_server(...)`→`_seed_server(...)` + auto-fixes)
+- `tests/test_mcp_wire.py`(B017 `pytest.raises(Exception)`→`pytest.raises((MCPError, EOFError))` + MCPError import + auto-fixes)
+- `tests/test_lsp_client.py`(auto-fixes)
+- `tests/test_lsp_rename.py`(auto-fixes)
+- `tests/test_lsp_permission.py`(auto-fixes)
+- `tests/test_mcp_manager.py`(auto-fixes)
+- `tests/test_mcp_permission.py`(auto-fixes)
+- `tests/test_mcp_subagent.py`(auto-fixes)
+- `tests/test_session_mutable_prompt.py`(MiniCode→LoomCode regression fix line 107)
+- `tests/__snapshots__/test_tui_header/*` + `test_tui_snapshot/test_empty_layout.raw`(3 rebaselined)
+
+### 下次 session
+
+- **`f-chore-fix-snapshot-hash-flake`** — 写 normalize 脚本(提取 `<text>` 段 + normalize `terminal-X` hash ID)再比,根治 3 个 rotating snapshot flake。~1-2h。
+- 或者:commit 当前三段 prompt 写 + ruff 修(user 没明确要求 commit,working tree 有 ~15 modified + 1 untracked)
+- 或者:补齐 loom 单模板 → 多模板(opencode 8 个 per-model 模板)
