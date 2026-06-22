@@ -25,9 +25,8 @@ post-discovery state of ``SUB_TOOLS`` and ``SUB_HANDLERS``.
 
 from __future__ import annotations
 
-import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 from unittest.mock import patch
 
 import pytest
@@ -41,7 +40,6 @@ from loom.agent.tools import (
     SUB_TOOLS,
     TOOL_REGISTRY,
 )
-
 
 # ── Shared fixture: clean state between tests ───────────────────────────────
 

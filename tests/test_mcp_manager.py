@@ -16,8 +16,6 @@ test, not the JSON-RPC framing — that lives in tests/test_mcp_client.py.
 
 from __future__ import annotations
 
-import time
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -25,9 +23,7 @@ import pytest
 from loom.agent import mcp_manager as mm
 from loom.agent.config import HarnessConfig, MCPConfig, MCPServerConfig
 from loom.agent.mcp_client import MCPServer
-from loom.agent.tool_registry import Tool
 from loom.agent.tools import TOOL_REGISTRY
-
 
 # ── Shared fixture: clean manager state between tests ──────────────────────
 

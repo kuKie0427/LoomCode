@@ -15,9 +15,9 @@ permanent invariant.
 from __future__ import annotations
 
 import inspect
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 from unittest.mock import patch
 
 import pytest
@@ -32,7 +32,6 @@ from loom.agent.config import (
 )
 from loom.agent.hooks import Hooks
 from loom.agent.permissions import _mcp_pattern_matches
-
 
 # ── fixtures ───────────────────────────────────────────────────────────────
 
