@@ -27,6 +27,7 @@ class PermissionStoreWorkspaceWriteRefused(EvalCase):
     def run(self) -> EvalResult:
         import tempfile
         from pathlib import Path
+
         import loom.agent.permission_store as p
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -46,6 +47,7 @@ class PermissionStoreRoundTrip(EvalCase):
     def run(self) -> EvalResult:
         import tempfile
         from pathlib import Path
+
         import loom.agent.permission_store as p
 
         with tempfile.TemporaryDirectory() as tmp:

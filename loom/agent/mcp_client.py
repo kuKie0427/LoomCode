@@ -20,7 +20,16 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
+
+
+class _ProcessLike(Protocol):
+    stdin: Any
+    stdout: Any
+    stderr: Any
+    def terminate(self) -> None: ...
+    def wait(self, timeout: float | None = None) -> int: ...
+    def kill(self) -> None: ...
 
 _logger = logging.getLogger(__name__)
 
@@ -31,7 +40,7 @@ class MCPServer:
     command: str
     args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
-    process: subprocess.Popen | None = None
+    process: _ProcessLike | None = None
     tools: list[dict] = field(default_factory=list)
     request_id: int = 0
 
@@ -44,7 +53,7 @@ class MCPError(RuntimeError):
     pass
 
 
-def _read_message(proc: subprocess.Popen, timeout: float = 30.0) -> dict:
+def _read_message(proc: _ProcessLike, timeout: float = 30.0) -> dict:
     """Read one JSON-RPC message from the server's stdout.
 
     Messages are framed as `Content-Length: N\r\n\r\n<json body>`.
@@ -80,7 +89,7 @@ def _read_message(proc: subprocess.Popen, timeout: float = 30.0) -> dict:
     return json.loads(body.decode("utf-8"))
 
 
-def _send_message(proc: subprocess.Popen, message: dict) -> None:
+def _send_message(proc: _ProcessLike, message: dict) -> None:
     body = json.dumps(message).encode("utf-8")
     header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
     if proc.stdin is None:

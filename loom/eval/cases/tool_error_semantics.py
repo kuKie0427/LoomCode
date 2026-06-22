@@ -26,9 +26,9 @@ class ToolErrorsDetectionWorks(EvalCase):
     description = "detect_repeated_failures correctly identifies 3 consecutive same-tool errors"
 
     def run(self) -> EvalResult:
-        from loom.agent.tool_errors import detect_repeated_failures
-        from loom.agent.tool_errors import extract_tool_use_blocks
-        from loom.agent.tool_errors import extract_tool_result_blocks
+        from loom.agent.tool_errors import (
+            detect_repeated_failures,
+        )
 
         messages = []
         for i in range(3):

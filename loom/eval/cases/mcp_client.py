@@ -26,17 +26,17 @@ class MCPClientJsonRpcFramingCorrect(EvalCase):
     description = "_send_message writes Content-Length-framed JSON; _read_message parses it"
 
     def run(self) -> EvalResult:
-        import os
         import time
-        from loom.agent.mcp_client import _send_message, MCPServer
+
+        from loom.agent.mcp_client import MCPServer, _send_message
         from tests.test_mcp_client import FakeProcess
         captured = []
         def responder(req):
             captured.append(req)
             return {"jsonrpc": "2.0", "id": req["id"], "result": {"ok": True}}
         server = MCPServer(name="x", command="ignored")
-        server.process = FakeProcess(responder)
-        _send_message(server.process, {"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}})
+        server.process = FakeProcess(responder)  # type: ignore[assignment]
+        _send_message(server.process, {"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}})  # type: ignore[arg-type]
         time.sleep(0.1)
         if not captured:
             return EvalResult(name=self.name, passed=False, detail="no request received by fake server")
@@ -61,7 +61,7 @@ class MCPClientToolsListParse(EvalCase):
         def responder(_req):
             return next(responses)
         server = MCPServer(name="fs", command="ignored")
-        server.process = FakeProcess(responder)
+        server.process = FakeProcess(responder)  # type: ignore[assignment]
         start(server)
         if len(server.tools) != 1 or server.tools[0]["name"] != "read_file":
             return EvalResult(name=self.name, passed=False, detail=f"got {server.tools}")

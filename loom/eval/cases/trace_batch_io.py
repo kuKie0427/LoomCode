@@ -13,6 +13,7 @@ class TraceKeepsFileHandleOpen(EvalCase):
         import tempfile
         from pathlib import Path
         from unittest.mock import patch
+
         import loom.agent.trace as t
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -38,6 +39,7 @@ class TraceStopClosesHandle(EvalCase):
     def run(self) -> EvalResult:
         import tempfile
         from pathlib import Path
+
         import loom.agent.trace as t
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -55,10 +57,11 @@ class TraceConcurrentSafe(EvalCase):
     description = "5 threads x 10 records each produces 50 valid JSONL lines (no corruption)"
 
     def run(self) -> EvalResult:
+        import json
         import tempfile
         import threading
         from pathlib import Path
-        import json
+
         import loom.agent.trace as t
 
         with tempfile.TemporaryDirectory() as tmp:

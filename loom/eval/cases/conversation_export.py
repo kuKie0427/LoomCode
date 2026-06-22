@@ -41,8 +41,7 @@ class ConversationExportMarkdownRenders(EvalCase):
     description = "to_markdown produces a transcript with role headers, tool calls, and cost summary"
 
     def run(self) -> EvalResult:
-        from loom.agent.cost import TokenUsage, compute_cost
-        from loom.agent.cost import SessionCostAccumulator
+        from loom.agent.cost import SessionCostAccumulator, TokenUsage, compute_cost
         from loom.agent.export import ExportMetadata, to_markdown
 
         msgs = [
