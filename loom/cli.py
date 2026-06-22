@@ -14,6 +14,34 @@ from pathlib import Path
 
 from loguru import logger
 
+
+def _run_evals_with_baseline(workdir: Path, args) -> tuple[int, list]:
+    """Wrap run_evals to support --baseline / --diff-baseline flags."""
+    from loom.eval import run_evals as _run_evals
+    from loom.eval.baseline import diff_against_baseline, save_baseline
+
+    score = _run_evals(
+        workdir=workdir,
+        html_output=args.html,
+        case_filter=args.case_filter,
+        kind=args.kind,
+    )
+    from loom.eval.runner import run_all
+    _, results = run_all(case_filter=args.case_filter, kind=args.kind)
+    if args.diff_baseline:
+        diff = diff_against_baseline(workdir, results)
+        if diff is None:
+            print("(no baseline at .minicode/eval-baseline.json — run with --baseline to create one)")
+        else:
+            print(diff.summary())
+            if diff.regressed:
+                print(f"\nFAIL: {len(diff.regressed)} case(s) regressed vs baseline")
+                score = min(score, 99)
+    if args.baseline:
+        save_baseline(workdir, results)
+        print(f"\nBaseline saved to {workdir / '.minicode' / 'eval-baseline.json'}")
+    return score, results
+
 from loom import __version__
 
 _MAX_LOOP_CALL_DEPTH = 3
@@ -82,6 +110,12 @@ def _build_parser() -> argparse.ArgumentParser:
     eval_p.add_argument("--benchmark", choices=["resume"], default=None, help="Run a named benchmark instead of the regular eval suite")
     eval_p.add_argument("--filter", dest="case_filter", default=None, help="Substring match against case name/description (case-insensitive). Runs only matching cases — for fast dev cycles.")
     eval_p.add_argument("--kind", choices=["harness", "agent-quality"], default=None, help="Run only one kind of eval. 'harness' = infrastructure mechanics (default mix), 'agent-quality' = end-to-end agent behavior (real LLM calls).")
+    eval_p.add_argument("--baseline", action="store_true", help="Save pass/fail status to .minicode/eval-baseline.json as new baseline")
+    eval_p.add_argument("--diff-baseline", action="store_true", help="Show added/removed/fixed/regressed cases vs saved baseline")
+    eval_sub = eval_p.add_subparsers(dest="eval_command")
+    eval_init = eval_sub.add_parser("init", help="Scaffold a starter eval harness in TARGET")
+    eval_init.add_argument("workdir", type=Path, default=Path("."), nargs="?", help="Target directory (default: cwd)")
+    eval_init.add_argument("--force", action="store_true", help="Overwrite existing files")
 
     tdd_p = sub.add_parser("tdd", help="Run a single failing test in TDD mode and print the focused prompt")
     tdd_p.add_argument("test_path", type=Path, help="Path to the failing test (e.g. tests/test_foo.py)")
@@ -180,12 +214,17 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     if args.command == "eval":
+        if getattr(args, "eval_command", None) == "init":
+            from loom.init_cmd import init
+            results = init(args.workdir.resolve(), force=args.force)
+            print(f"\nGenerated {sum(1 for r in results if r.status == 'written')} files "
+                  f"({sum(1 for r in results if r.status == 'skipped')} skipped)")
+            return 0
         if args.benchmark:
             os.environ["LOOM_BENCHMARK"] = args.benchmark
-        from loom.eval import run_evals
         workdir = args.workdir.resolve()
         try:
-            score = run_evals(workdir=workdir, html_output=args.html, case_filter=args.case_filter, kind=args.kind)
+            score, results = _run_evals_with_baseline(workdir, args)
         except SystemExit as exc:
             return int(exc.code) if exc.code is not None else 1
         if score < args.fail_under:
