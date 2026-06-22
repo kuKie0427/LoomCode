@@ -1,13 +1,15 @@
 """Minimal LSP client for f-lsp-integration-p3.
 
-Scope (deliberately small):
+Scope shipped (all 3 tools from the roadmap):
 - JSON-RPC over stdin/stdout (Content-Length framed, like MCP)
 - start(): spawn process, send initialize, wait for response, send initialized
-- goto_definition(file, line, col): returns list of Location dicts
+- goto_definition(file, line, col): textDocument/definition -> Location[]
+- find_references(file, line, col, include_declaration=True): textDocument/references -> Location[]
+- rename_symbol(file, line, col, new_name): textDocument/rename -> WorkspaceEdit
 - shutdown() + exit(): clean process termination
 
-NOT in scope (deferred): find_references / rename_symbol / hover /
-completion / multi-server / workspace edits / did_change tracking.
+NOT in scope (deferred): hover / completion / multi-server /
+workspace edits / did_change tracking.
 
 Why not depend on pylsp? pylsp requires installing the python-lsp-server
 package + its many plugins. We don't need the server — we need the
