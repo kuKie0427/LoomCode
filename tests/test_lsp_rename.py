@@ -16,14 +16,11 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from loom.agent import lsp_apply
-
 
 # ---------------------------------------------------------------------------
 # parse_workspace_edit

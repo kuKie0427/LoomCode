@@ -32,7 +32,6 @@ import pytest
 
 from loom.agent.permissions import DEFAULT_POLICY
 
-
 # ---------------------------------------------------------------------------
 # 1. Pure rule registration
 # ---------------------------------------------------------------------------

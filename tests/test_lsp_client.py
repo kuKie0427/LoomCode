@@ -362,8 +362,8 @@ def test_rename_symbol_without_start_raises():
 def test_read_response_auto_replies_to_server_request() -> None:
     """Server sends a window/showMessageRequest (has id AND method); client
     must auto-reply with {result: None} and still return the real response."""
-    from loom.agent.lsp_client import _read_response
     import loom.agent.lsp_client as lsp_client
+    from loom.agent.lsp_client import _read_response
 
     server_request_id = 99
     real_response_id = 1
@@ -411,8 +411,8 @@ def test_read_response_ignores_notifications() -> None:
     """Server sends a window/logMessage (method, no id) before the real
     response; _read_response must drop the notification and return the
     real response without crashing."""
-    from loom.agent.lsp_client import _read_response
     import loom.agent.lsp_client as lsp_client
+    from loom.agent.lsp_client import _read_response
 
     real_response_id = 1
 
