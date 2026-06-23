@@ -1192,11 +1192,9 @@
       "name": "Multi-model P2: Credential storage + model persistence + /model UX",
       "description": "Third of 4 phases for f-multi-model-providers. User-facing surfaces: (1) CredentialManager with OS keyring > LOOM_AUTH_CONTENT > per-provider env > ~/.loom/auth.json priority chain + chmod 600 + atomic write. (2) LLMClient auto-injects credentials (no manual export needed). (3) ModelState for .minicode/state/model.json (recent + default). (4) ProjectConfig reads .minicode/config.json model field with upward walk to ~/.loom/config.json. (5) loom CLI: auth login/logout/list + models subcommands. (6) TUI /model slash command upgrade with ModelPicker ModalScreen. (7) Unified model_resolver with --model flag > env > config > default precedence. See .sisyphus/plans/multi-model-providers-p2.md.",
       "dependencies": ["f-multi-model-providers-p1-concrete-providers"],
-      "status": "in-progress",
+      "status": "done",
       "verification": "uv run python -m loom.cli eval --filter multi-model-p2 --fail-under 100",
-      "evidence": ""
+      "evidence": "uv run python -m loom.cli eval --filter multi-model-p2 --fail-under 100 → 13/13 passed. uv run python -m loom.cli eval --filter multi-model-p0 --fail-under 100 → 11/11 passed (no regression). uv run python -m loom.cli eval --filter multi-model-p1 --fail-under 100 → 11/11 passed (no regression). uv run ruff check . → All checks passed. uv run mypy loom/ → Success: 0 issues in 156 source files. uv run pytest -q -m 'not snapshot' → 1165 passed (8 snapshot-only failures pre-existing). loom models → lists all 5 providers × 24+ models. loom auth login/logout/list → all work with auth.json chmod 600. New files: loom/agent/credential.py (+524), loom/agent/model_state.py (+400), loom/agent/model_resolver.py (+64), loom/tui/model_picker.py (+103), tests/test_credential.py (+266), tests/test_model_state.py (+104), tests/test_cli_models_auth.py (+165), tests/test_model_picker_tui.py (+78), loom/eval/cases/multi_model_p2.py (+377). Modified: loom/agent/llm.py (credential auto-injection), loom/cli.py (auth + models subcommands), loom/tui/app.py (/model opens ModelPicker modal), pyproject.toml (keyring>=24.0 optional dep). P2 entry marked as done — gate verification complete."
     }
-  ]
-}
   ]
 }

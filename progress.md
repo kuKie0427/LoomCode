@@ -6532,3 +6532,43 @@ All three fail on main without my changes, so they are out-of-scope for this fix
 
 ### Next: P2 (Credential storage + model persistence + /model UX + auth CLI)
 
+
+## Session: f-multi-model-providers-p2 (2026-06-23)
+
+### What was done
+Phase P2 complete: Credential storage + model persistence + /model UX.
+
+**Production code (5 new files, 4 modified):**
+- `loom/agent/credential.py` (+524) — CredentialInfo + CredentialManager with 4-layer priority chain (keyring > LOOM_AUTH_CONTENT > env > file), atomic writes, chmod 0o600/0o700, malformed-file backup
+- `loom/agent/model_state.py` (+400) — ModelRef + ModelState (MRU recent + default, atomic, chmod) + ProjectConfig (upward walk to Path.home(), atomic save)
+- `loom/agent/model_resolver.py` (+64) — `resolve_model()` with precedence: --model flag > env MODEL > ProjectConfig > ModelState default > PROVIDERS fallback
+- `loom/tui/model_picker.py` (+103) — ModelPicker ModalScreen with Recent + All Providers sections in ListView
+- `loom/agent/llm.py` (+30/-5) — LLMClient.__init__ and change_model auto-inject credentials via CredentialManager
+- `loom/cli.py` (+83) — `loom auth login/logout/list` + `loom models [provider]` subcommands
+- `loom/tui/app.py` (+15/-1) — `/model` (no args) opens ModelPicker modal with `_on_model_picked` callback
+- `pyproject.toml` (+1) — `keyring>=24.0` optional dependency
+
+**Tests (5 new files, 42 tests, 0 new failures):**
+- `tests/test_credential.py` (13) — priority chain, atomic write, chmod, malformed backup, normalization
+- `tests/test_model_state.py` (12) — ModelRef, ModelState MRU dedup/cap, ProjectConfig walk/read
+- `tests/test_cli_models_auth.py` (8) — models list/filter/verbose, auth login/list/logout
+- `tests/test_model_picker_tui.py` (9) — import/instantiation, dismiss dispatch, ESC cancel
+
+**Evals (1 new file, 13 cases, 13/13 pass):**
+- `loom/eval/cases/multi_model_p2.py` (13) — credential, model_state, project_config, CLI auth/models, resolver precedence
+
+### Verification
+- `ruff check .` → All checks passed
+- `mypy loom/` → Success (156 files, 0 issues)
+- `pytest -m 'not snapshot'` → 1165 passed (8 TUI snapshot flake failures — pre-existing)
+- `eval --filter multi-model-p2 --fail-under 100` → 13/13 passed
+- `eval --filter multi-model-p0 --fail-under 100` → 11/11 passed (no regression)
+- `eval --filter multi-model-p1 --fail-under 100` → 11/11 passed (no regression)
+- `loom models` → lists 5 providers
+- `loom auth login/logout/list` → all work
+
+### Blocker
+None. P2 gate verification complete.
+
+### Next step
+Load Phase P3 (polish + full test migration + docs) in a new session.
