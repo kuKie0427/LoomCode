@@ -119,7 +119,7 @@ class FailureModeAutocompactFailsContextOverflow(EvalCase):
 
         fake_client = MagicMock()
         with patch.object(Context, "_generate_summary", return_value=None):
-            ctx.autocompact(cast(list[MessageParam], messages), fake_client, "fake-model", context_window=1000)
+            ctx.autocompact(cast(list[MessageParam], messages), fake_client, context_window=1000)
 
         if not messages:
             return EvalResult(

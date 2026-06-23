@@ -37,6 +37,15 @@ DEFAULT_WINDOW = 32_000
 per-model context size is unknown (e.g. OpenRouter, Ollama)."""
 
 
+def _strip_provider_prefix(model: str) -> str:
+    """Strip the ``provider/`` prefix from a model string, returning just
+    the model_id. e.g. ``openai/gpt-4o`` → ``gpt-4o``. The inner model_id
+    may itself contain ``/`` (e.g. ``openrouter/anthropic/claude-3.5-sonnet``)
+    so we only split on the first ``/``.
+    """
+    return model.split("/", 1)[1] if "/" in model else model
+
+
 # ---------------------------------------------------------------------------
 # MODEL_PROFILES
 # ---------------------------------------------------------------------------
@@ -173,30 +182,41 @@ def _map_status_error(
       * 400 with ``error.code == "context_length_exceeded"`` → ``context_overflow``
       * other 4xx → ``invalid_request`` (not retryable)
       * 5xx → ``server`` (retryable)
+
+    The exception message uses the parsed ``error.message`` field (capped at
+    200 chars) rather than the raw response body, to avoid leaking prompt
+    content or credentials echoed by misconfigured servers.
     """
     detail_code = ""
+    detail_message = ""
     try:
         payload = json.loads(body) if body else {}
         if isinstance(payload, dict):
             err = payload.get("error", {})
             if isinstance(err, dict):
                 detail_code = str(err.get("code", ""))
+                msg = err.get("message", "")
+                if msg:
+                    detail_message = str(msg)[:200]
             elif err:
-                detail_code = str(err)
+                detail_message = str(err)[:200]
     except (json.JSONDecodeError, ValueError):
         detail_code = ""
+
+    def _msg(prefix: str) -> str:
+        return f"{provider}: {prefix} — {detail_message}" if detail_message else f"{provider}: {prefix}"
 
     if status_code == 401:
         return ProviderError(
             ProviderErrorCode.AUTH,
-            f"{provider}: 401 unauthorized — {body[:200]}",
+            _msg("401 unauthorized"),
             provider=provider,
             status_code=status_code,
         )
     if status_code == 429:
         return ProviderError(
             ProviderErrorCode.RATE_LIMIT,
-            f"{provider}: 429 rate limited — {body[:200]}",
+            _msg("429 rate limited"),
             retryable=True,
             provider=provider,
             status_code=status_code,
@@ -204,20 +224,20 @@ def _map_status_error(
     if status_code == 400 and detail_code == "context_length_exceeded":
         return ProviderError(
             ProviderErrorCode.CONTEXT_OVERFLOW,
-            f"{provider}: context length exceeded — {body[:200]}",
+            _msg("context length exceeded"),
             provider=provider,
             status_code=status_code,
         )
     if 400 <= status_code < 500:
         return ProviderError(
             ProviderErrorCode.INVALID_REQUEST,
-            f"{provider}: {status_code} bad request — {body[:200]}",
+            _msg(f"{status_code} bad request"),
             provider=provider,
             status_code=status_code,
         )
     return ProviderError(
         ProviderErrorCode.SERVER,
-        f"{provider}: {status_code} server error — {body[:200]}",
+        _msg(f"{status_code} server error"),
         retryable=True,
         provider=provider,
         status_code=status_code,

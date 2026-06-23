@@ -17,7 +17,7 @@ def mock_subagent_client(monkeypatch) -> MagicMock:
     ]
     mock_response.stop_reason = "end_turn"
     mock_response.usage.input_tokens = 50
-    mock_client.client.messages.create.return_value = mock_response
+    mock_client.invoke = MagicMock(return_value=mock_response)
     return mock_client
 
 
@@ -50,7 +50,7 @@ class TestStructuredReturn:
             TextBlock(type="text", text="Done."),
         ]
         mock_client = MagicMock()
-        mock_client.client.messages.create.side_effect = [tool_response, end_response]
+        mock_client.invoke = MagicMock(side_effect=[tool_response, end_response])
 
         result = spawn_subagent("x", llm_client=mock_client)
         assert "[done: 2 turns, 1 tool calls]" in result

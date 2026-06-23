@@ -29,14 +29,11 @@ def reset_hooks():
 class TestAgentLoopSingleTurn:
     def test_agent_loop_single_turn_no_tools(self, mocker):
         """Single turn with no tool calls: messages grow by 2, loop exits."""
-        mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.content = [TextBlock(type="text", text="Hi there!")]
         mock_response.stop_reason = "end_turn"
         mock_response.usage.input_tokens = 100
-        mock_client.messages.create.return_value = mock_response
-
-        main.llm_client.client = mock_client
+        main.llm_client.invoke = MagicMock(return_value=mock_response)
 
         messages = [{"role": "user", "content": "Hello"}]
         main.agent_loop(messages)
@@ -50,20 +47,17 @@ class TestAgentLoopSingleTurn:
 class TestAgentLoopStops:
     def test_agent_loop_stops_on_end_turn(self, mocker):
         """Agent stops when stop_reason != 'tool_use', no infinite loop."""
-        mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.content = [TextBlock(type="text", text="Done")]
         mock_response.stop_reason = "end_turn"
         mock_response.usage.input_tokens = 100
-        mock_client.messages.create.return_value = mock_response
-
-        main.llm_client.client = mock_client
+        main.llm_client.invoke = MagicMock(return_value=mock_response)
 
         messages = [{"role": "user", "content": "Do something"}]
         main.agent_loop(messages)
 
         assert len(messages) == 2
-        mock_client.messages.create.assert_called_once()
+        main.llm_client.invoke.assert_called_once()
 
 
 class TestAgentLoopToolUse:
@@ -92,10 +86,7 @@ class TestAgentLoopToolUse:
         end_response.content = [TextBlock(type="text", text="Command executed")]
         end_response.stop_reason = "end_turn"
         end_response.usage.input_tokens = 100
-
-        mock_client = MagicMock()
-        mock_client.messages.create.side_effect = [tool_response, end_response]
-        main.llm_client.client = mock_client
+        main.llm_client.invoke = MagicMock(side_effect=[tool_response, end_response])
 
         messages = [{"role": "user", "content": "Run echo hello"}]
         main.agent_loop(messages)
@@ -148,10 +139,7 @@ class TestAgentLoopToolUse:
         ]
         end_response.stop_reason = "end_turn"
         end_response.usage.input_tokens = 100
-
-        mock_client = MagicMock()
-        mock_client.messages.create.side_effect = [tool_response, end_response]
-        main.llm_client.client = mock_client
+        main.llm_client.invoke = MagicMock(side_effect=[tool_response, end_response])
 
         messages = [{"role": "user", "content": "Delete file.txt"}]
         main.agent_loop(messages)
@@ -180,10 +168,7 @@ class TestAgentLoopToolUse:
         ]
         end_response.stop_reason = "end_turn"
         end_response.usage.input_tokens = 100
-
-        mock_client = MagicMock()
-        mock_client.messages.create.side_effect = [tool_response, end_response]
-        main.llm_client.client = mock_client
+        main.llm_client.invoke = MagicMock(side_effect=[tool_response, end_response])
 
         messages = [{"role": "user", "content": "Use an unknown tool"}]
         main.agent_loop(messages)
@@ -201,10 +186,7 @@ class TestSpawnSubagent:
         ]
         mock_response.stop_reason = "end_turn"
         mock_response.usage.input_tokens = 100
-
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
-        main.llm_client.client = mock_client
+        main.llm_client.invoke = MagicMock(return_value=mock_response)
 
         result = loom.agent.tools.spawn_subagent("Analyze the codebase")
 

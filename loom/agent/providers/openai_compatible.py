@@ -11,7 +11,6 @@ To add a new compatible provider, add an entry to
 
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import Iterator
 from typing import Any, ClassVar
@@ -19,6 +18,7 @@ from typing import Any, ClassVar
 from loom.agent.providers._openai_shared import (
     DEFAULT_WINDOW,
     MODEL_PROFILES,
+    _strip_provider_prefix,
     make_compatible_provider_class,
     openai_chat_stream,
 )
@@ -74,20 +74,14 @@ class OpenAICompatibleProvider(LLMProvider):
         return self._PRICING.get(model)
 
     def count_tokens(self, messages: list[dict], model: str) -> int:
-        try:
-            base = len(json.dumps(messages)) // 4
-        except (TypeError, ValueError):
-            base = sum(
-                len(m.get("content", "")) if isinstance(m.get("content"), str) else 0
-                for m in messages
-            ) // 4
+        # OpenAI-compatible providers have no public count_tokens API.
+        # Use the inherited char/4 heuristic with a 50% safety margin,
+        # matching OpenAIProvider.
+        base = super().count_tokens(messages, model)
         return int(base * 1.5)
 
     def _model_id_from_request(self, request: ProviderRequest) -> str:
-        model_id = request.model
-        if "/" in model_id:
-            model_id = model_id.split("/", 1)[1]
-        return model_id
+        return _strip_provider_prefix(request.model)
 
     def stream(self, request: ProviderRequest) -> Iterator[StreamEvent]:
         model_id = self._model_id_from_request(request)

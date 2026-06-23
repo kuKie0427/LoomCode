@@ -314,7 +314,7 @@ def test_subagent_call_mcp_goes_through_permission_gate() -> None:
 
         mock_client = MagicMock()
         mock_client.model = "claude-test"
-        mock_client.client.messages.create = _mock_create
+        mock_client.invoke = _mock_create
 
         # Track _check_mcp_permissions invocations.
         check_count = {"mcp": 0}

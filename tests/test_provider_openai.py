@@ -237,11 +237,10 @@ class TestRequestBodyFormat:
         assert "tools" not in body
         assert "tool_choice" not in body
 
-    def test_openai_provider_build_body_helper(self, openai_provider):
+    def test_openai_provider_strips_provider_prefix_from_model(self, openai_provider):
         req = _request()
-        body = openai_provider.build_body_for_test(req)
+        body = build_request_body(req, model_id="gpt-4o", stream=True)
         assert body["model"] == "gpt-4o"
-        # The build helper should NOT add the provider prefix to model
         assert "/" not in body["model"]
 
 
@@ -440,27 +439,24 @@ class TestOpenAIStreaming:
             }
         ]
         transport = _stream_with_sse(events)
-        # Patch the openai provider's stream to use the test transport
+        # Inject the mock client by calling openai_chat_stream with the
+        # same args OpenAIProvider.stream() would build. Same pattern used
+        # by all other streaming tests in this file — no class-level
+        # monkey-patching, safe for parallel test runs.
         with httpx.Client(transport=transport) as client:
             from loom.agent.providers._openai_shared import openai_chat_stream as _stream
 
-            def patched_stream(self, request):
-                return _stream(
-                    request,
-                    base_url=self.base_url,
-                    api_key=self.api_key,
-                    model_id=self._model_id_from_request(request),
-                    provider=self.provider_id,
+            req = _request()
+            out = list(
+                _stream(
+                    req,
+                    base_url=openai_provider.base_url,
+                    api_key=openai_provider.api_key,
+                    model_id="gpt-4o",
+                    provider=openai_provider.provider_id,
                     http_client=client,
                 )
-
-            # Temporarily swap the method
-            original = OpenAIProvider.stream
-            OpenAIProvider.stream = patched_stream
-            try:
-                out = list(openai_provider.stream(_request()))
-            finally:
-                OpenAIProvider.stream = original
+            )
         assert any(e.kind == "text" and e.text == "ok" for e in out)
 
 

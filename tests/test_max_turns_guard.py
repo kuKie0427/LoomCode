@@ -103,8 +103,7 @@ class TestAgentLoopExitsAtMaxTurns:
         tool_response.stop_reason = "tool_use"
         tool_response.usage = MagicMock(input_tokens=5, output_tokens=3)
         tool_response.content = [MagicMock(type="tool_use", id="t1", name="bash", input={"command": "echo hi"})]
-        fake_llm.client.messages.create.return_value = tool_response
-
+        fake_llm.invoke = MagicMock(return_value=tool_response)
         from loom.agent.hooks import Hooks
         hooks = Hooks(loop_mod._active_config.policy, frozenset(), asker=lambda *a, **k: True)
         monkeypatch.setattr(loop_mod, "hooks", hooks)
@@ -130,7 +129,7 @@ class TestAgentLoopExitsAtMaxTurns:
         assert len(loop_events) == 1
         assert loop_events[0]["max_turns"] == 3
         assert loop_events[0]["turn"] == 3
-        assert fake_llm.client.messages.create.call_count == 3
+        assert fake_llm.invoke.call_count == 3
 
         # The last user message in the history should be the limit-reached reminder
         last_user = [m for m in msgs if m.get("role") == "user"][-1]
@@ -155,9 +154,9 @@ class TestAgentLoopExitsAtMaxTurns:
         fake_llm = MagicMock()
         fake_llm.get_context_window.return_value = 200000
         fake_llm.model = "test-model"
-        fake_llm.client.messages.create.return_value = _make_stop_reason_response("end_turn", "all done")
+        fake_llm.invoke = MagicMock(return_value=_make_stop_reason_response("end_turn", "all done"))
 
-        recorded_events: list[dict] = []
+        recorded_events: list[dict] = []   
         fake_trace = MagicMock()
         fake_trace.record = lambda ev, **kw: recorded_events.append({"event": ev, **kw})
         monkeypatch.setattr(loop_mod.trace_mod, "current", lambda: fake_trace)
@@ -175,7 +174,7 @@ class TestAgentLoopExitsAtMaxTurns:
         assert limit_events == []
         # session_end should fire on natural exit
         assert any(e["event"] == "session_end" for e in recorded_events)
-        assert fake_llm.client.messages.create.call_count == 1
+        assert fake_llm.invoke.call_count == 1
 
 
 class TestMaxTurnsHarnessEval:

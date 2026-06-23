@@ -374,10 +374,10 @@ def test_generate_summary_returns_summary_text(mocker):
     mock_text_block.text = "[Compressed summary of conversation]"
     mock_response = mocker.Mock()
     mock_response.content = [mock_text_block]
-    mock_client = mocker.Mock()
-    mock_client.messages.create.return_value = mock_response
+    mock_llm_client = mocker.Mock()
+    mock_llm_client.invoke.return_value = mock_response
 
-    result = ctx._generate_summary(messages, mock_client, "claude-3-haiku-20240307")
+    result = ctx._generate_summary(messages, mock_llm_client)
     assert result == "[Compressed summary of conversation]"
 
 
@@ -389,10 +389,10 @@ def test_generate_summary_handles_api_error(mocker):
         {"role": "assistant", "content": [{"type": "text", "text": "Hi there"}]},
     ]
 
-    mock_client = mocker.Mock()
-    mock_client.messages.create.side_effect = Exception("API error")
+    mock_llm_client = mocker.Mock()
+    mock_llm_client.invoke.side_effect = Exception("API error")
 
-    result = ctx._generate_summary(messages, mock_client, "claude-3-haiku-20240307")
+    result = ctx._generate_summary(messages, mock_llm_client)
     assert result is None
 
 
@@ -424,9 +424,9 @@ def test_autocompact_full_flow_compresses_head(mocker):
     mock_response = mocker.Mock()
     mock_response.content = [mock_text_block]
     mock_client = mocker.Mock()
-    mock_client.messages.create.return_value = mock_response
+    mock_client.invoke.return_value = mock_response
 
-    ctx.autocompact(messages, mock_client, "claude-3-haiku-20240307", context_window=200)
+    ctx.autocompact(messages, mock_client, context_window=200)
 
     assert len(messages) == 13
     assert messages[0]["role"] == "user"
@@ -445,8 +445,8 @@ def test_autocompact_not_enough_rounds_applies_raw_truncate_fallback(mocker):
     messages = _build_rounds(1)
 
     mock_client = mocker.Mock()
-    mock_client.messages.create.side_effect = Exception("API Error")
-    ctx.autocompact(messages, mock_client, "claude-3-haiku-20240307", context_window=200)
+    mock_client.invoke.side_effect = Exception("API Error")
+    ctx.autocompact(messages, mock_client, context_window=200)
 
     # After fallback: [placeholder, round1_messages...]
     assert len(messages) == 5
@@ -465,8 +465,8 @@ def test_autocompact_llm_failure_applies_raw_truncate_fallback(mocker):
     messages = _build_rounds(5)
 
     mock_client = mocker.Mock()
-    mock_client.messages.create.side_effect = Exception("API Error")
-    ctx.autocompact(messages, mock_client, "claude-3-haiku-20240307", context_window=200)
+    mock_client.invoke.side_effect = Exception("API Error")
+    ctx.autocompact(messages, mock_client, context_window=200)
 
     # Original was 20 messages. After fallback: placeholder + 3 tail rounds (12 messages) = 13
     assert len(messages) == 13
@@ -487,9 +487,9 @@ def test_autocompact_injects_todo_when_present(mocker):
     mock_response = mocker.Mock()
     mock_response.content = [mock_text_block]
     mock_client = mocker.Mock()
-    mock_client.messages.create.return_value = mock_response
+    mock_client.invoke.return_value = mock_response
 
-    ctx.autocompact(messages, mock_client, "claude-3-haiku-20240307", context_window=200)
+    ctx.autocompact(messages, mock_client, context_window=200)
 
     assert len(messages) == 14
     assert messages[1]["role"] == "user"
@@ -509,9 +509,9 @@ def test_autocompact_no_todo_no_injection(mocker):
     mock_response = mocker.Mock()
     mock_response.content = [mock_text_block]
     mock_client = mocker.Mock()
-    mock_client.messages.create.return_value = mock_response
+    mock_client.invoke.return_value = mock_response
 
-    ctx.autocompact(messages, mock_client, "claude-3-haiku-20240307", context_window=200)
+    ctx.autocompact(messages, mock_client, context_window=200)
 
     assert len(messages) == 13
     all_content = " ".join(str(m["content"]) for m in messages)
@@ -531,9 +531,9 @@ def test_autocompact_resets_token_state(mocker):
     mock_response = mocker.Mock()
     mock_response.content = [mock_text_block]
     mock_client = mocker.Mock()
-    mock_client.messages.create.return_value = mock_response
+    mock_client.invoke.return_value = mock_response
 
-    ctx.autocompact(messages, mock_client, "claude-3-haiku-20240307", context_window=200)
+    ctx.autocompact(messages, mock_client, context_window=200)
 
     assert ctx.last_input_tokens == 0
     assert ctx.checked_at_index == 0

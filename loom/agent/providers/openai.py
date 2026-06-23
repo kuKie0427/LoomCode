@@ -13,15 +13,13 @@ Not implemented in P1 (deferred):
 
 from __future__ import annotations
 
-import json
+import os
 from collections.abc import Iterator
 from typing import ClassVar
 
-import httpx
-
 from loom.agent.providers._openai_shared import (
     DEFAULT_WINDOW,
-    build_request_body,
+    _strip_provider_prefix,
     openai_chat_stream,
 )
 from loom.agent.providers.base import LLMProvider, PricingInfo
@@ -68,12 +66,10 @@ class OpenAIProvider(LLMProvider):
 
     def __init__(self, api_key: str = "", base_url: str | None = None) -> None:
         super().__init__(api_key=api_key, base_url=base_url)
-        self._http: httpx.Client | None = None
-
-    def _http_client(self) -> httpx.Client:
-        if self._http is None:
-            self._http = httpx.Client(timeout=60.0)
-        return self._http
+        # Fall back to OPENAI_API_KEY when caller passed empty kwarg,
+        # matching AnthropicProvider / OpenAICompatibleProvider behavior.
+        if not self.api_key:
+            self.api_key = os.getenv(self.env_var, "")
 
     def context_window(self, model: str) -> int:
         return self._CONTEXT_WINDOWS.get(model, DEFAULT_WINDOW)
@@ -88,10 +84,7 @@ class OpenAIProvider(LLMProvider):
         return int(base * 1.5)
 
     def _model_id_from_request(self, request: ProviderRequest) -> str:
-        model_id = request.model
-        if "/" in model_id:
-            model_id = model_id.split("/", 1)[1]
-        return model_id
+        return _strip_provider_prefix(request.model)
 
     def stream(self, request: ProviderRequest) -> Iterator[StreamEvent]:
         model_id = self._model_id_from_request(request)
@@ -108,15 +101,3 @@ class OpenAIProvider(LLMProvider):
         # and torn down when the iterator is exhausted. This method is
         # present for API parity with AnthropicProvider.
         return
-
-    def build_body_for_test(self, request: ProviderRequest) -> dict:
-        """Public helper used by tests to assert the body shape without
-        making a real HTTP call."""
-        return build_request_body(request, model_id=self._model_id_from_request(request), stream=True)
-
-    def estimate_tokens(self, messages: list[dict]) -> int:
-        """Heuristic token estimate using json.dumps serialization."""
-        try:
-            return len(json.dumps(messages)) // 4
-        except (TypeError, ValueError):
-            return 0

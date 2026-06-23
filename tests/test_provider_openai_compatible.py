@@ -218,11 +218,11 @@ class TestSharedStreamingLogic:
                 model="deepseek/deepseek-chat",
             )
             p = get_provider("deepseek", api_key="x")
-            # The stream() call returns an iterator; consume nothing yet
             iterator = p.stream(req)
-            with pytest.raises(BaseException):  # noqa: B017
-                # Will fail because there's no real server, but the spy
-                # is called before the network call.
+            # No real server → some httpx network error. We assert on the
+            # side-effect (spy called) afterwards; the exception type is
+            # incidental.
+            with pytest.raises(Exception):  # noqa: B017
                 list(iterator)
         finally:
             shared.openai_chat_stream = original

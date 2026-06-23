@@ -1316,6 +1316,27 @@ def extract_text(content) -> str:
     return "\n".join(getattr(b, "text", "") for b in content if getattr(b, "type", None) == "text")
 
 
+def _content_to_message_dict(content) -> list:
+    """Serialize ``ProviderResponse.content`` (list of ContentBlock dataclasses)
+    into the format expected by the next-turn messages list.
+
+    Returns ContentBlock dataclasses (TextBlock/ToolUseBlock/ThinkingBlock)
+    rather than raw dicts so downstream helpers like ``extract_text`` (which
+    reads ``block.type`` / ``block.text`` as attributes) keep working.
+    """
+    from loom.agent.providers.types import TextBlock, ThinkingBlock, ToolUseBlock
+
+    out: list = []
+    for block in content:
+        if block.type == "text":
+            out.append(TextBlock(text=block.text))
+        elif block.type == "thinking":
+            out.append(ThinkingBlock(thinking=block.thinking))
+        elif block.type == "tool_use":
+            out.append(ToolUseBlock(id=block.id, name=block.name, input=block.input))
+    return out
+
+
 def spawn_subagent(description: str, llm_client=None, hooks=None) -> str:
     if llm_client is None or hooks is None:
         from loom.agent.loop import hooks as _hooks
@@ -1333,11 +1354,13 @@ def spawn_subagent(description: str, llm_client=None, hooks=None) -> str:
     tool_call_count = 0
     for _ in range(30):
         turn_count += 1
-        response = llm_client.client.messages.create(
-            model=llm_client.model, system=SUB_SYSTEM,
-            messages=messages, tools=SUB_TOOLS, max_tokens=LLM_CONFIG.max_output_tokens,
+        response = llm_client.invoke(
+            system=SUB_SYSTEM,
+            messages=messages,
+            tools=SUB_TOOLS,
+            max_tokens=LLM_CONFIG.max_output_tokens,
         )
-        messages.append({"role": "assistant", "content": response.content})
+        messages.append({"role": "assistant", "content": _content_to_message_dict(response.content)})
         if response.stop_reason != "tool_use":
             break
         results = []

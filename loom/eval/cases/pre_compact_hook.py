@@ -175,7 +175,7 @@ class PreCompactFiresBeforeAutocompact(EvalCase):
             )
 
         Hooks().trigger_hooks("PreCompact", messages, ctx.last_input_tokens)
-        ctx.autocompact(messages, None, "model", context_window)
+        ctx.autocompact(messages, None, context_window)
 
         ctx.autocompact = original_autocompact  # type: ignore[method-assign]
 

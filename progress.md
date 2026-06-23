@@ -6433,3 +6433,102 @@ Phase P1 of the multi-model roadmap. Built two concrete provider implementations
 
 ### Next: P2 (Credential storage + model persistence + /model UX + auth CLI)
 
+
+---
+
+## Session 4 — f-multi-model-providers-p1-review-fixes (2026-06-23)
+
+Post-implementation review of f-multi-model-providers-p1 surfaced 3 blocking issues + 4 major + 1 important (pre-existing) + several minor/security findings. This session fixed all blocking + major + the important pre-existing gaps.
+
+### What was done
+
+**Blocking functional fixes:**
+
+1. **`OpenAIProvider.__init__` env-var fallback (review B1)** — `loom/agent/providers/openai.py`. Now falls back to `OPENAI_API_KEY` when caller passes empty `api_key=`, matching `AnthropicProvider` and `OpenAICompatibleProvider` behavior. Was silently failing with 401 for OpenAI users relying on the env var.
+
+2. **`LLMClient._default_env_var()` → provider-aware (review B2)** — `loom/agent/llm.py`. Replaced the Anthropic-only hardcoded switch with `_provider_env_var()` that reads each provider's `env_var` ClassVar (OPENAI_API_KEY, DEEPSEEK_API_KEY, OLLAMA_API_KEY, OPENROUTER_API_KEY, ...). Removed the now-dead `_default_env_var()` method. The dead `_provider_env_var()` helper that was already defined in P0 is now actually used.
+
+3. **`LLMClient.change_model()` cross-provider env-var re-resolution (review B2/B3)** — `loom/agent/llm.py`. Was passing the OLD provider's api_key/base_url to the new provider — a security bug (key issued for service A is invalid on service B). Now drops both on cross-provider switch and lets the new provider re-resolve its own env_var inside its constructor. Added 5 new tests in `tests/test_models.py`: `test_change_model_switches_provider_anthropic_to_openai`, `test_change_model_switches_to_deepseek`, `test_change_model_resolves_new_provider_env_var_on_cross_provider_switch`, `test_init_openai_uses_env_var`, `test_init_deepseek_uses_env_var`, `test_init_ollama_no_key_required`.
+
+**Provider-agnostic invoke (review M7, pre-existing P0 gap):**
+
+4. **New `LLMClient.invoke()` method** — `loom/agent/llm.py`. Single-turn provider-agnostic invoke that consumes `stream_iter()` and returns a `ProviderResponse`. Replaces the Anthropic-only `llm_client.client.messages.create(...)` pattern in 4 production call sites:
+   - `loom/agent/tools.py:spawn_subagent` (was: Anthropic client + ToolParam + Anthropic Message)
+   - `loom/agent/context.py:_generate_summary` (was: Anthropic client)
+   - `loom/agent/context.py:autocompact` (signature: `(messages, llm_client, context_window)` — was: `(messages, Anthropic, model, context_window)`)
+   - `loom/agent/loop.py:agent_loop sync path` (was: Anthropic client + `with_cache_control` + `with_tool_cache_control`). The `with_cache_control` helpers remain used inside `AnthropicProvider.stream()`, where they belong — the test `test_loop_uses_cache_control_helpers` was updated to check `loom/agent/providers/anthropic.py` source instead of `loop.py`.
+
+   `spawn_subagent` needed a new `_content_to_message_dict()` helper that serializes `ProviderResponse.content` (list of `ContentBlock` dataclasses) back into ContentBlock dataclasses (not raw dicts) so downstream `extract_text(block.type / block.text)` keeps working.
+
+**Code quality fixes (review M1-M6, S1, MINOR):**
+
+5. **OpenAIProvider dead code removal (M1-M4)** — `loom/agent/providers/openai.py`. Deleted: `self._http` field + `_http_client()` method (never called — `openai_chat_stream` creates fresh clients), `estimate_tokens()` (no callers, duplicated `count_tokens`), `build_body_for_test()` (test helper leaked into production API — test now calls `build_request_body` directly). Net: -22 LOC, ~15% smaller file.
+
+6. **DRY `_model_id_from_request` (MINOR)** — extracted `_strip_provider_prefix(model)` to `_openai_shared.py`; both `openai.py` and `openai_compatible.py` use it.
+
+7. **Unify `count_tokens` heuristic (MINOR)** — `OpenAICompatibleProvider.count_tokens` now uses the same `super().count_tokens() * 1.5` path as `OpenAIProvider` (was: `len(json.dumps(messages)) // 4 * 1.5` — slightly different baseline).
+
+8. **Error message sanitization (S1)** — `loom/agent/providers/_openai_shared.py:_map_status_error`. Now parses `payload["error"]["message"]` (capped at 200 chars) instead of including raw response body. Defense-in-depth against servers that echo prompt content or credentials in error responses. Body is no longer in any error message. Test assertions only checked `code` / `retryable` so the message change is invisible to existing tests.
+
+9. **Test hygiene (M5, M6)** — `tests/test_provider_openai_compatible.py` swapped `pytest.raises(BaseException)` for `pytest.raises(Exception)` (catches network error without swallowing SystemExit/KeyboardInterrupt). `tests/test_provider_openai.py:test_openai_provider_stream_method` refactored from class-level monkey-patching (`OpenAIProvider.stream = patched_stream`) to direct `openai_chat_stream(...)` invocation, eliminating parallel-test pollution risk.
+
+10. **Mock migration for the M7 refactor** — `tests/test_agent_loop.py`, `tests/test_max_turns_guard.py`, `tests/test_spawn_subagent_structured.py`, `tests/test_mcp_subagent.py`, `tests/test_context.py`, `tests/test_autocompact_fallback.py`, `loom/eval/cases/failure_modes.py`, `loom/eval/cases/pre_compact_hook.py` updated from `mock_client.messages.create` (Anthropic SDK) → `mock_client.invoke` / `MagicMock` (provider-agnostic). Removed unused `mock_client` locals after migration (ruff F841 cleanup).
+
+### Gate results
+
+| Check | Result |
+|---|---|
+| `uv run ruff check loom/ tests/` | All checks passed |
+| `uv run mypy loom/` | Success: 0 issues in 151 source files |
+| `uv run pytest [12 affected test files] -q` | 191 passed in 6.08s |
+| `uv run python -m loom.cli eval --filter multi-model-p1` | 11/11 passed |
+| `uv run python -m loom.cli eval --filter multi-model-p0` | 11/11 passed |
+| `uv run python -m loom.cli eval --filter autocompact` | 5/5 passed |
+| `uv run python -m loom.cli eval --filter subagent` | 15/15 passed |
+| `uv run python -m loom.cli eval --filter prompt` | 15/15 passed |
+| `uv run python -m loom.cli eval --filter max-turns` | 3/3 passed |
+| `uv run python -m loom.cli eval --filter mcp` | 10/10 passed |
+| `uv run python -m loom.cli eval --filter cost` | 4/4 passed |
+| `uv run python -m loom.cli eval --filter context` | 3/3 passed |
+| `uv run python -m loom.cli eval --filter permission` | 3/3 passed |
+| `uv run python -m loom.cli eval --filter lsp` | 3/3 passed |
+| End-to-end env-var smoke (5 LLMClient invocations) | openai picks OPENAI_API_KEY; deepseek picks DEEPSEEK_API_KEY; ollama works without key; anthropic picks ANTHROPIC_API_KEY; cross-provider change_model re-resolves OPENAI_API_KEY |
+
+### Pre-existing failures (not introduced by this work)
+
+Verified via `git stash` + re-run on main (ca9880f):
+- `loom/eval/cases/async_streaming.py::LLMClientStreamIterYieldsStreamEvent` — pre-existing 0/1
+- `loom/eval/cases/async_streaming.py::LLMClientStreamIterYieldsIncrementally` — pre-existing 0/1
+- `loom/eval/cases/init_sh_session_end.py::LoomRunQuitDoesNotBlockOnInitSh` — pre-existing 0/1
+
+All three fail on main without my changes, so they are out-of-scope for this fix.
+
+### Files changed (14 source + 8 test/eval = 22 total)
+
+**Source (8):**
+- `loom/agent/llm.py` — env-var fallback + safe change_model + new invoke() method
+- `loom/agent/loop.py` — autocompact + sync path call llm_client.invoke
+- `loom/agent/context.py` — autocompact + _generate_summary take LLMClient
+- `loom/agent/tools.py` — spawn_subagent uses invoke + _content_to_message_dict helper
+- `loom/agent/providers/openai.py` — dead code removed + OPENAI_API_KEY fallback + count_tokens unified
+- `loom/agent/providers/openai_compatible.py` — DRY + count_tokens unified
+- `loom/agent/providers/_openai_shared.py` — _strip_provider_prefix helper + error sanitization
+
+**Tests (8):**
+- `tests/test_models.py` — 6 new cross-provider change_model tests + env-var tests
+- `tests/test_agent_loop.py` — mock migration (6 sites)
+- `tests/test_max_turns_guard.py` — mock migration (2 sites)
+- `tests/test_context.py` — autocompact signature migration (7 sites) + mock client.invoke (7 sites)
+- `tests/test_autocompact_fallback.py` — autocompact signature migration (7 sites)
+- `tests/test_spawn_subagent_structured.py` — mock migration (2 sites)
+- `tests/test_prompt_caching.py` — check anthropic.py source for with_cache_control
+- `tests/test_mcp_subagent.py` — mock_client.client.messages.create → mock_client.invoke
+- `tests/test_provider_openai.py` — BaseException removal + dead-method removal + class monkey-patch refactor
+- `tests/test_provider_openai_compatible.py` — BaseException → Exception
+
+**Eval (2):**
+- `loom/eval/cases/failure_modes.py` — autocompact signature migration (1 site)
+- `loom/eval/cases/pre_compact_hook.py` — autocompact signature migration (1 site)
+
+### Next: P2 (Credential storage + model persistence + /model UX + auth CLI)
+

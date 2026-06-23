@@ -68,9 +68,12 @@ def test_min_cacheable_tokens_constant_defined():
 
 
 def test_loop_uses_cache_control_helpers():
-    """Static check: the sync call in loop.py must reference both
-    with_cache_control and with_tool_cache_control."""
+    """Static check: cache_control helpers must be referenced somewhere in
+    the agent path. After the multi-model-provider refactor, the helpers
+    are applied inside AnthropicProvider.stream() (provider-agnostic via
+    ProviderRequest.system), not at the loop.py sync call site.
+    """
     from pathlib import Path
-    src = Path("loom/agent/loop.py").read_text()
+    src = Path("loom/agent/providers/anthropic.py").read_text()
     assert "with_cache_control(" in src
     assert "with_tool_cache_control(" in src

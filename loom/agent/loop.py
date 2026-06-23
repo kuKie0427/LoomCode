@@ -316,7 +316,7 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                 if context.should_compact(messages, llm_client.get_context_window(), llm_client.model):
                     hooks.trigger_hooks("PreCompact", messages, context.last_input_tokens)
                     msg_count_before = len(messages)
-                    context.autocompact(messages, llm_client.client, llm_client.model, llm_client.get_context_window())
+                    context.autocompact(messages, llm_client, llm_client.get_context_window())
                     if cb["on_compact"] is not None:
                         cb["on_compact"](msg_count_before, len(messages))
                     if tr is not None:
@@ -383,14 +383,12 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                         ),
                     )
                 else:
-                    # ===== SYNC PATH (unchanged) =====
-                    from loom.agent.llm import with_cache_control, with_tool_cache_control
+                    # ===== SYNC PATH — provider-agnostic via LLMClient.invoke() =====
                     current_tools = get_tools()
-                    response = llm_client.client.messages.create(
-                        model=llm_client.model,
-                        system=with_cache_control(_get_system_prompt()),
+                    response = llm_client.invoke(
+                        system=_get_system_prompt(),
                         messages=messages,
-                        tools=with_tool_cache_control(cast(list, current_tools)) if current_tools else cast(list, current_tools),
+                        tools=current_tools,
                         max_tokens=LLM_CONFIG.max_output_tokens,
                     )
                 context.update(len(messages), response)

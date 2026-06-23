@@ -29,7 +29,7 @@ def test_autocompact_falls_back_to_raw_truncate_when_summary_fails():
 
     fake_client = MagicMock()
     with patch.object(ctx, "_generate_summary", return_value=None):
-        ctx.autocompact(msgs, fake_client, "test-model", context_window=10000)
+        ctx.autocompact(msgs, fake_client, context_window=10000)
 
     # Raw truncate should have applied: messages replaced with placeholder + tail
     assert len(msgs) >= 1
@@ -56,7 +56,7 @@ def test_autocompact_with_successful_summary_unchanged_behavior():
 
     fake_client = MagicMock()
     with patch.object(ctx, "_generate_summary", return_value="FAKE SUMMARY"):
-        ctx.autocompact(msgs, fake_client, "test-model", context_window=10000)
+        ctx.autocompact(msgs, fake_client, context_window=10000)
 
     assert len(msgs) >= 1
     first = msgs[0]
@@ -72,7 +72,7 @@ def test_autocompact_no_tail_messages_creates_only_placeholder():
     msgs: list = []
     fake_client = MagicMock()
     with patch.object(ctx, "_generate_summary", return_value=None):
-        ctx.autocompact(msgs, fake_client, "test-model", context_window=10000)
+        ctx.autocompact(msgs, fake_client, context_window=10000)
     # Empty messages -> autocompact early-returns without modifying
     assert msgs == []
 
@@ -89,7 +89,7 @@ def test_autocompact_single_message_keeps_as_tail():
     ]
     fake_client = MagicMock()
     with patch.object(ctx, "_generate_summary", return_value=None):
-        ctx.autocompact(msgs, fake_client, "test-model", context_window=10000)
+        ctx.autocompact(msgs, fake_client, context_window=10000)
     assert len(msgs) == 2
     assert "强制截断" in str(msgs[0]["content"])
     assert msgs[1]["content"] == "only one round"
@@ -109,7 +109,7 @@ def test_autocompact_resets_token_counter_after_raw_truncate():
     ]
     fake_client = MagicMock()
     with patch.object(ctx, "_generate_summary", return_value=None):
-        ctx.autocompact(msgs, fake_client, "test-model", context_window=10000)
+        ctx.autocompact(msgs, fake_client, context_window=10000)
     assert ctx.last_input_tokens == 0
     assert ctx.checked_at_index == 0
 
@@ -133,7 +133,7 @@ def test_should_compact_does_not_re_fire_after_raw_truncate():
     ]
     fake_client = MagicMock()
     with patch.object(ctx, "_generate_summary", return_value=None):
-        ctx.autocompact(msgs, fake_client, "test-model", context_window=1000)
+        ctx.autocompact(msgs, fake_client, context_window=1000)
     # After fallback, the head (huge) is replaced by placeholder + tail
     # (the 2 tail messages — "tail q" + "tail a" — plus placeholder).
     # should_compact should return False for context_window=1000.
@@ -159,7 +159,7 @@ def test_raw_truncate_reinjects_todo_attachment():
     ]
     fake_client = MagicMock()
     with patch.object(ctx, "_generate_summary", return_value=None):
-        ctx.autocompact(msgs, fake_client, "test-model", context_window=10000)
+        ctx.autocompact(msgs, fake_client, context_window=10000)
     serialized = "\n".join(str(m["content"]) for m in msgs)
     assert "first todo" in serialized
 

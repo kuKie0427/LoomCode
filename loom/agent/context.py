@@ -129,7 +129,7 @@ class Context:
             tokens_saved = bytes_cleared // 4
             self.last_input_tokens = max(0, self.last_input_tokens - tokens_saved)
             _token_cache.pop(id(messages), None)
-    def autocompact(self, messages: list[MessageParam], client: Anthropic, model: str, context_window: int) -> None:
+    def autocompact(self, messages: list[MessageParam], llm_client, context_window: int) -> None:
         try:
             rounds = self._find_rounds(messages)
             if len(rounds) <= 1:
@@ -147,7 +147,7 @@ class Context:
                 tail_messages = messages[tail_start:]
                 last_todo = self._extract_last_todo(head_messages)
 
-            summary = self._generate_summary(head_messages, client, model) if head_messages else ""
+            summary = self._generate_summary(head_messages, llm_client) if head_messages else ""
             if summary:
                 messages.clear()
                 messages.append({
@@ -255,23 +255,22 @@ class Context:
 
         return None
 
-    def _generate_summary(self, messages: list[MessageParam], client: Anthropic,model: str) -> str | None:
+    def _generate_summary(self, messages: list[MessageParam], llm_client) -> str | None:
         try:
             conversation = "\n".join(
                 f"[{msg['role']}]: {self._extract_text(msg['content'])[:2000]}"
                 for msg in messages
             )
 
-            summary_request : list[MessageParam]= [
+            summary_request: list[MessageParam] = [
                 {"role": "user", "content": f"{COMPACT_PROMPT}\n\n<conversation>\n{conversation[:50000]}\n</conversation>"}
             ]
 
-            response = client.messages.create(
-                model=model,
+            response = llm_client.invoke(
                 system="你是一个对话压缩助手。只输出结构化摘要，不要做任何其他事。",
                 messages=summary_request,
-                max_tokens=COMPACT_MAX_OUTPUT_TOKENS,
                 tools=[],
+                max_tokens=COMPACT_MAX_OUTPUT_TOKENS,
             )
 
             return self._extract_text(response.content)
