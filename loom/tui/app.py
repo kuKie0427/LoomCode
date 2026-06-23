@@ -630,7 +630,10 @@ class AgentTUIApp(App):
                 self._sync_status_bar()
                 chat_log.append_system_note(f"Model changed to **{self.llm.model}**")
             else:
-                chat_log.append_system_note(f"Current model: **{self.llm.model}**")
+                from loom.agent.model_state import ModelState
+                from loom.tui.model_picker import ModelPicker
+                ms = ModelState(WORKDIR)
+                self.push_screen(ModelPicker(recent=ms.recent(max=10)), self._on_model_picked)
         elif cmd == "resume":
             import loom.agent.checkpoint as checkpoint
 
@@ -794,3 +797,14 @@ class AgentTUIApp(App):
                     if stdout_tail:
                         tail = f" {stdout_tail}"
             chat_log.append_system_note(f"[init.sh: FAIL exit={rc}]{tail}")
+
+    def _on_model_picked(self, result: tuple[str, str] | None) -> None:
+        if result is None:
+            return
+        provider_id, model_id = result
+        self.llm.change_model(f"{provider_id}/{model_id}")
+        self._sync_status_bar()
+        chat_log = self.query_one(ChatLog)
+        chat_log.append_system_note(f"Model changed to **{self.llm.model}**")
+        from loom.agent.model_state import ModelState
+        ModelState(WORKDIR).add_recent(provider_id, model_id)
