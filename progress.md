@@ -6644,3 +6644,35 @@ Pre-existing test flake: `test_credential_manager_get_from_keyring` fails when `
 
 ### Next step
 Multi-model feature chain is **complete**. Next features should start from clean context via `/handoff`.
+
+## Session: f-multi-model-providers-p4a-connect-modal (2026-06-23)
+
+**Status**: done
+
+Changes:
+- `feature_list.json` — added p4a entry, status=done
+- `loom/tui/connect_provider.py` (NEW) — `ConnectProviderModal(ModalScreen[tuple[str, str | None] | None])`
+  - Lists all providers from PROVIDERS registry, sorted
+  - Connected providers show ✓ with $success color
+  - Unconnected providers show "(not connected)"
+  - Connected selection → dismiss((pid, "")) 
+  - Unconnected selection → dismiss((pid, None))
+- `loom/tui/auth_input.py` (NEW) — `AuthInputModal(ModalScreen[str | None])`
+  - Title "Login to {display_name}"
+  - Masked API key input (password=True)
+  - Collapsible base URL section with toggle button
+  - Save validates key not empty, calls credentials.set(), dismiss(provider_id)
+  - Toast notification "Logged in to {display_name}" on success
+- `loom/tui/app.py` (MODIFIED) — /connect slash command
+  - `/connect` → `ConnectProviderModal()` with `_on_connect_done` callback
+  - `/connect <provider_id>` → `AuthInputModal(provider_id)` directly
+  - `_on_connect_done`: dispatches connected→ModelPicker, unconnected→AuthInputModal
+  - `_on_connect_auth_done`: on auth success, changes model, syncs status bar, pushes ModelPicker
+  - `/help` updated to include `/connect`
+- `loom/tui/chat_log.py` (MODIFIED) — command hint shows `/connect`
+- `loom/tui/model_picker.py` (MODIFIED) — "c" binding + footer "Press c to connect a new provider"
+  - `action_connect_provider` pushes ConnectProviderModal
+  - `_on_connect_from_picker` / `_on_auth_from_picker` callbacks
+- `tests/test_connect_provider_modal.py` (NEW) — 15 tests, all passing
+
+Verification: 15/15 new tests pass, ruff+mypy clean, pre-existing failures unchanged.

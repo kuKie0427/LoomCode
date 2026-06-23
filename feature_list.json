@@ -1213,6 +1213,15 @@
       "status": "done",
       "verification": "uv run python -m loom.cli eval --filter multi-model-p3 --fail-under 100 && ./init.sh",
       "evidence": "uv run python -m loom.cli eval --filter multi-model --fail-under 100 → 37/37 passed (P0: 11, P1: 11, P2: 15, P3: 11). cost.py refactored to provider-agnostic pricing. LOOM_AUTH_CONTENT subagent inheritance implemented. docs/providers.md (262 lines, 8 sections) published. README.md updated with 6 providers + auth/models. 11 new multi_model_p3.py eval cases. 13 test/eval files migrated from MagicMock to MockProvider. 24/24 pytest tests pass (test_models, test_cost_telemetry). ruff clean. mypy clean."
+    },
+    {
+      "id": "f-multi-model-providers-p4a-connect-modal",
+      "name": "TUI Connect/Provider modal + /connect slash command",
+      "description": "ConnectProviderModal 列出所有已注册 provider，AuthInputModal 输入 API key 并存入 CredentialManager。验证后自动弹 ModelPicker。/connect slash command 路由到 ConnectProviderModal。",
+      "dependencies": ["f-multi-model-providers-p3-polish", "f-multi-model-providers-p2-ux"],
+      "status": "done",
+      "verification": "uv run pytest tests/test_connect_provider_modal.py -v",
+      "evidence": "15/15 connect_provider tests pass (ConnectProviderModal + AuthInputModal + slash command). Manual verification: TUI /connect opens ConnectProviderModal, connected provider shows ✓, unconnected shows (not connected). /connect anthropic jumps directly to AuthInputModal. AuthInputModal saves credential to CredentialManager, shows toast 'Logged in to Anthropic', then pushes ModelPicker. ModelPicker 'c' binding jumps to ConnectProvider. ruff+mypy clean across all new/modified files. 4 new files (connect_provider.py, auth_input.py, test_connect_provider_modal.py, model_picker.py updated with 'c' binding). 2 modified files (app.py +43 /chat command + handlers, chat_log.py +1 /connect in hint)."
     }
   ]
 }

@@ -359,7 +359,7 @@ class WelcomeBanner(Static):
             f"{self._colorize_body(self._LOOM_WORDMARK_ROW3)}\n"
             f"{self._colorize_bottom(self._LOOM_WORDMARK_BOTTOM)}\n\n"
             f"[$text-muted]weaving intent into action[/]\n\n"
-            f"[$text-faint]/help · /model · /clear · /resume[/]"
+            f"[$text-faint]/help · /model · /connect · /clear · /resume[/]"
         )
         super().__init__(body, **kwargs)
 

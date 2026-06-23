@@ -631,7 +631,7 @@ class AgentTUIApp(App):
             await chat_log.clear_content()
         elif cmd == "help":
             chat_log.append_system_note(
-                "**Commands:** /help, /clear, /model <name>, /quit, /resume, /status"
+                "**Commands:** /help, /clear, /model <name>, /connect, /quit, /resume, /status"
             )
         elif cmd == "model":
             if args.strip():
@@ -677,6 +677,14 @@ class AgentTUIApp(App):
                 f"- Tool calls: {self.tool_call_count}\n"
             )
             chat_log.append_system_note(status)
+        elif cmd == "connect":
+            from loom.tui.connect_provider import ConnectProviderModal
+            if args.strip():
+                provider_id = args.strip()
+                from loom.tui.auth_input import AuthInputModal
+                self.push_screen(AuthInputModal(provider_id), self._on_connect_auth_done)
+            else:
+                self.push_screen(ConnectProviderModal(), self._on_connect_done)
         else:
             chat_log.append_system_note(f"Unknown command: **/{cmd}**. Try /help.")
 
@@ -824,3 +832,37 @@ class AgentTUIApp(App):
         ms = ModelState(WORKDIR)
         ms.add_recent(provider_id, model_id)
         ms.set_default(provider_id, model_id)
+
+    def _on_connect_done(self, result: tuple[str, str | None] | None) -> None:
+        if result is None:
+            return  # cancelled
+        provider_id, model_id_info = result
+        if model_id_info == "":
+            # Connected provider → push ModelPicker
+            from loom.tui.model_picker import ModelPicker
+            self.push_screen(ModelPicker(), self._on_model_picked)
+        elif model_id_info is None:
+            # Unconnected provider → push AuthInputModal
+            from loom.tui.auth_input import AuthInputModal
+            self.push_screen(AuthInputModal(provider_id), self._on_connect_auth_done)
+
+    def _on_connect_auth_done(self, result: str | None) -> None:
+        if result is None:
+            return  # cancelled
+        provider_id = result
+        # After successful auth, switch to this provider and push ModelPicker
+        from loom.agent.providers.registry import PROVIDERS
+        try:
+            inst = PROVIDERS[provider_id](api_key="", base_url=None)
+            if inst.supported_models:
+                default_model = inst.supported_models[0]
+                self.llm.change_model(f"{provider_id}/{default_model}")
+                self._sync_status_bar()
+                chat_log = self.query_one(ChatLog)
+                display = inst.display_name or provider_id
+                chat_log.append_system_note(f"Logged in to **{display}**. Model changed to **{self.llm.model}**")
+        except Exception:
+            pass
+        # Push ModelPicker so user can pick a model
+        from loom.tui.model_picker import ModelPicker
+        self.push_screen(ModelPicker(), self._on_model_picked)

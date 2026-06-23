@@ -19,6 +19,7 @@ class ModelPicker(ModalScreen[tuple[str, str]]):
 
     BINDINGS = [
         ("escape", "cancel", "Cancel"),
+        ("c", "connect_provider", "Connect a new provider"),
     ]
 
     DEFAULT_CSS = """
@@ -46,6 +47,10 @@ class ModelPicker(ModalScreen[tuple[str, str]]):
         text-style: bold underline;
         padding: 1 0 0 0;
         color: $accent;
+    }
+    #connect-footer {
+        padding: 1 1 0 1;
+        text-style: dim;
     }
     """
 
@@ -88,6 +93,7 @@ class ModelPicker(ModalScreen[tuple[str, str]]):
                     except Exception:
                         items.append(ListItem(Label(f"  {pid}/?")))
                 yield ListView(*items)
+                yield Static("[dim]Press [b]c[/b] to connect a new provider[/]", id="connect-footer")
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if not event.item.id:
@@ -103,3 +109,29 @@ class ModelPicker(ModalScreen[tuple[str, str]]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+    def action_connect_provider(self) -> None:
+        from loom.tui.connect_provider import ConnectProviderModal
+
+        self.app.push_screen(ConnectProviderModal(), self._on_connect_from_picker)
+
+    def _on_connect_from_picker(
+        self, result: tuple[str, str | None] | None
+    ) -> None:
+        if result is None:
+            return
+        provider_id, model_id_info = result
+        if model_id_info is None:
+            from loom.tui.auth_input import AuthInputModal
+
+            self.app.push_screen(
+                AuthInputModal(provider_id), self._on_auth_from_picker
+            )
+        elif model_id_info == "":
+            self.dismiss((provider_id, ""))
+
+    def _on_auth_from_picker(self, result: str | None) -> None:
+        if result is None:
+            return
+        provider_id = result
+        self.dismiss((provider_id, ""))
