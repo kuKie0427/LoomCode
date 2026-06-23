@@ -133,6 +133,24 @@ def _build_parser() -> argparse.ArgumentParser:
     export_p.add_argument("--format", choices=["markdown", "json"], default="markdown", help="Output format (default: markdown)")
     export_p.add_argument("--redact", action="store_true", help="Replace API keys and emails with [REDACTED]")
 
+    # --- auth subcommand ---
+    auth_p = sub.add_parser("auth", help="Manage API key credentials")
+    auth_sub = auth_p.add_subparsers(dest="auth_command", required=True)
+
+    auth_login = auth_sub.add_parser("login", help="Save an API key for a provider")
+    auth_login.add_argument("provider_id", help="Provider id (e.g. anthropic, openai, deepseek)")
+    auth_login.add_argument("--base-url", help="Custom base URL (for Azure / proxy endpoints)")
+
+    auth_logout = auth_sub.add_parser("logout", help="Remove a saved API key")
+    auth_logout.add_argument("provider_id", help="Provider id to remove")
+
+    auth_sub.add_parser("list", help="List all known credentials with their source")
+
+    # --- models subcommand ---
+    models_p = sub.add_parser("models", help="List all supported models across all providers")
+    models_p.add_argument("provider_id", nargs="?", default=None, help="Show only this provider's models")
+    models_p.add_argument("--verbose", action="store_true", help="Include pricing and capabilities details")
+
     return parser
 
 
@@ -292,6 +310,71 @@ def main(argv: list[str] | None = None) -> int:
             content = to_markdown(messages, meta)
         path = write_export(content, args.output, redact=args.redact)
         print(f"Exported {len(messages)} messages to {path}")
+        return 0
+
+    if args.command == "auth":
+        from loom.agent.credential import CredentialInfo, CredentialManager
+
+        manager = CredentialManager()
+
+        if args.auth_command == "login":
+            provider_id = args.provider_id.strip().lower()
+            import getpass
+
+            api_key = getpass.getpass(f"Enter API key for {provider_id}: ")
+            info = CredentialInfo(
+                provider_id=provider_id,
+                kind="api",
+                api_key=api_key,
+                base_url=args.base_url,
+            )
+            manager.set(provider_id, info)
+            print(f"✓ Saved API key for {provider_id} to {manager.auth_path} (chmod 600)")
+
+        elif args.auth_command == "logout":
+            provider_id = args.provider_id.strip().lower()
+            manager.remove(provider_id)
+            print(f"✓ Removed credential for {provider_id}")
+
+        elif args.auth_command == "list":
+            all_creds = manager.all()
+            if not all_creds:
+                print("No credentials found.")
+                print("Use `loom auth login <provider>` to add one.")
+                return 0
+            print(f"{'PROVIDER':<15} {'SOURCE':<20} {'KEY (last 4)':<15} {'BASE URL':<30}")
+            print("-" * 80)
+            for pid in sorted(all_creds):
+                cred = all_creds[pid]
+                key_preview = f"...{cred.api_key[-4:]}" if len(cred.api_key) > 4 else cred.api_key
+                base = cred.base_url or "-"
+                print(f"{pid:<15} {cred.source or 'file':<20} {key_preview:<15} {base:<30}")
+        return 0
+
+    if args.command == "models":
+        from loom.agent.providers import PROVIDERS
+
+        provider_list = sorted(PROVIDERS.items())
+        if args.provider_id:
+            provider_list = [(k, v) for k, v in provider_list if k == args.provider_id]
+        if not provider_list:
+            print(
+                f"No provider '{args.provider_id}' found. Registered: {', '.join(sorted(PROVIDERS))}"
+            )
+            return 0
+        for pid, pcls in provider_list:
+            inst = pcls(api_key="", base_url=None)
+            for model in inst.supported_models:
+                cw = inst.context_window(model)
+                price = inst.pricing(model)
+                if price:
+                    price_str = f"{price.input_usd_per_1m}/{price.output_usd_per_1m}"
+                else:
+                    price_str = "free/local"
+                if args.verbose:
+                    print(f"{pid:<15} {model:<30} {cw:>6}k    ${price_str}")
+                else:
+                    print(f"  {pid:<12} {model:<25} {cw:>6,} context")
         return 0
 
     parser.print_help()
