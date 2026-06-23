@@ -15,7 +15,7 @@ import os
 import queue
 import threading
 from collections.abc import Iterator
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import anthropic
 from loguru import logger
@@ -30,6 +30,43 @@ from loom.agent.providers.types import (
 
 MIN_CACHEABLE_TOKENS = 1024
 DEFAULT_WINDOW = 200_000
+
+# Models that support Anthropic's extended thinking feature. Claude 3.5 and
+# earlier do NOT support it. Add new Claude 4+ family members here.
+_THINKING_CAPABLE_MODELS: frozenset[str] = frozenset({
+    "claude-sonnet-4-5",
+    "claude-opus-4-1",
+})
+
+# Default token budget for extended thinking. Anthropic requires
+# budget_tokens >= 1024 and budget_tokens < max_tokens.
+_DEFAULT_THINKING_BUDGET_TOKENS = 8000
+_MIN_THINKING_BUDGET_TOKENS = 1024
+
+
+def _build_thinking_param(model_id: str) -> dict[str, Any] | None:
+    """Build the ``thinking`` kwarg for ``messages.stream``, or ``None``.
+
+    Opt-out: set ``LOOM_THINKING_BUDGET=0`` (or any value < 1024).
+    Opt-in with custom budget: set ``LOOM_THINKING_BUDGET=<N>`` where N >= 1024.
+    Non-Claude-4 models always return ``None`` regardless of env.
+
+    Invalid (non-numeric) values are treated as "disable" rather than crash,
+    so a malformed env var never breaks the agent loop.
+    """
+    if model_id not in _THINKING_CAPABLE_MODELS:
+        return None
+    raw = os.getenv("LOOM_THINKING_BUDGET")
+    if raw is None:
+        budget = _DEFAULT_THINKING_BUDGET_TOKENS
+    else:
+        try:
+            budget = int(raw)
+        except ValueError:
+            return None
+    if budget < _MIN_THINKING_BUDGET_TOKENS:
+        return None
+    return {"type": "enabled", "budget_tokens": budget}
 
 
 def with_cache_control(system: str | list) -> str | list:
@@ -149,6 +186,13 @@ class AnthropicProvider(LLMProvider):
         if "/" in model_id:
             model_id = model_id.split("/", 1)[1]
 
+        thinking_param = _build_thinking_param(model_id)
+        # When thinking is enabled, max_tokens must exceed budget_tokens.
+        # Reserve 2048 tokens for the response after the thinking block completes.
+        max_tokens = request.max_tokens or 8192
+        if thinking_param is not None:
+            max_tokens = max(max_tokens, thinking_param["budget_tokens"] + 2048)
+
         tool_dicts = [
             {
                 "name": t.name,
@@ -165,13 +209,16 @@ class AnthropicProvider(LLMProvider):
             current_tool: dict[str, str] = {}
             emitted: list[StreamEvent] = []
             try:
-                async with self._async_client.messages.stream(
-                    model=model_id,
-                    system=with_cache_control(request.system),
-                    messages=request.messages,  # type: ignore[arg-type]
-                    tools=with_tool_cache_control(tool_dicts) if tool_dicts else tool_dicts,  # type: ignore[arg-type]
-                    max_tokens=request.max_tokens or 8192,
-                ) as stream:
+                stream_kwargs: dict[str, Any] = {
+                    "model": model_id,
+                    "system": with_cache_control(request.system),
+                    "messages": request.messages,
+                    "tools": with_tool_cache_control(tool_dicts) if tool_dicts else tool_dicts,
+                    "max_tokens": max_tokens,
+                }
+                if thinking_param is not None:
+                    stream_kwargs["thinking"] = thinking_param
+                async with self._async_client.messages.stream(**stream_kwargs) as stream:
                     async for event in stream:
                         if self._cancel_event.is_set():
                             break

@@ -106,6 +106,62 @@ class TestAnthropicProvider:
         assert p.display_name == "Anthropic"
 
 
+class TestAnthropicThinkingParam:
+    """Extended thinking wiring: LOOM_THINKING_BUDGET env var opt-out + budget control."""
+
+    def test_default_for_capable_model(self, monkeypatch) -> None:
+        monkeypatch.delenv("LOOM_THINKING_BUDGET", raising=False)
+        from loom.agent.providers.anthropic import _build_thinking_param
+        assert _build_thinking_param("claude-sonnet-4-5") == {
+            "type": "enabled",
+            "budget_tokens": 8000,
+        }
+
+    def test_default_for_opus_4_1(self, monkeypatch) -> None:
+        monkeypatch.delenv("LOOM_THINKING_BUDGET", raising=False)
+        from loom.agent.providers.anthropic import _build_thinking_param
+        assert _build_thinking_param("claude-opus-4-1") == {
+            "type": "enabled",
+            "budget_tokens": 8000,
+        }
+
+    def test_disabled_for_non_capable_model(self, monkeypatch) -> None:
+        monkeypatch.delenv("LOOM_THINKING_BUDGET", raising=False)
+        from loom.agent.providers.anthropic import _build_thinking_param
+        # Claude 3.5 family does not support extended thinking.
+        assert _build_thinking_param("claude-haiku-3-5") is None
+
+    def test_opt_out_via_zero(self, monkeypatch) -> None:
+        monkeypatch.setenv("LOOM_THINKING_BUDGET", "0")
+        from loom.agent.providers.anthropic import _build_thinking_param
+        assert _build_thinking_param("claude-sonnet-4-5") is None
+
+    def test_disabled_when_budget_below_minimum(self, monkeypatch) -> None:
+        # Anthropic requires budget_tokens >= 1024.
+        monkeypatch.setenv("LOOM_THINKING_BUDGET", "500")
+        from loom.agent.providers.anthropic import _build_thinking_param
+        assert _build_thinking_param("claude-sonnet-4-5") is None
+
+    def test_custom_budget(self, monkeypatch) -> None:
+        monkeypatch.setenv("LOOM_THINKING_BUDGET", "15000")
+        from loom.agent.providers.anthropic import _build_thinking_param
+        assert _build_thinking_param("claude-sonnet-4-5") == {
+            "type": "enabled",
+            "budget_tokens": 15000,
+        }
+
+    def test_invalid_budget_returns_none(self, monkeypatch) -> None:
+        # Malformed env var → disable rather than crash the agent loop.
+        monkeypatch.setenv("LOOM_THINKING_BUDGET", "not_a_number")
+        from loom.agent.providers.anthropic import _build_thinking_param
+        assert _build_thinking_param("claude-sonnet-4-5") is None
+
+    def test_negative_budget_disables(self, monkeypatch) -> None:
+        monkeypatch.setenv("LOOM_THINKING_BUDGET", "-100")
+        from loom.agent.providers.anthropic import _build_thinking_param
+        assert _build_thinking_param("claude-sonnet-4-5") is None
+
+
 class TestProvidersDict:
     def test_contains_anthropic(self):
         assert "anthropic" in PROVIDERS
