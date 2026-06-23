@@ -42,6 +42,7 @@ from loom.eval.cases import (
     microcompact_counter,  # noqa: F401
     multi_model_p0,  # noqa: F401
     multi_model_p1,  # noqa: F401
+    multi_model_p2,  # noqa: F401
     permission_canonicalize,  # noqa: F401
     permission_deny_expanded,  # noqa: F401
     permission_persistence,  # noqa: F401
