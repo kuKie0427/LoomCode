@@ -38,7 +38,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -59,6 +59,13 @@ else:
         KeyringError = Exception  # type: ignore[assignment,misc]
 
 
+def _backup_path(path: Path, ts: int | None = None) -> Path:
+    """Generate a timestamped backup filename, e.g. ``auth.bak.1712345678.json``."""
+    if ts is None:
+        ts = int(time.time())
+    return path.with_name(f"{path.stem}.bak.{ts}{path.suffix}")
+
+
 @dataclass(frozen=True)
 class CredentialInfo:
     """A single provider credential.
@@ -69,13 +76,16 @@ class CredentialInfo:
     credentials returned from ``get()`` / ``all()``. The ``loom auth list``
     UX (Task 4) displays this field as the SOURCE column.
 
+    ``kind`` is a general string (default ``"api"``). At runtime only
+    ``"api"`` is supported; other values produce a warning.
+
     Note: ``source`` is metadata only and is NOT persisted to
     ``auth.json``; it is re-derived on every read.
     """
 
     provider_id: str
-    kind: Literal["api"]
     api_key: str
+    kind: str = "api"
     base_url: str | None = None
     metadata: dict[str, str] = field(default_factory=dict)
     source: str | None = None
@@ -289,7 +299,7 @@ class CredentialManager:
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            backup = path.with_suffix(f".bak.{int(time.time())}.json")
+            backup = _backup_path(path)
             try:
                 path.rename(backup)
                 logger.warning(

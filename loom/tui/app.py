@@ -25,6 +25,8 @@ from textual.theme import Theme
 
 from loom.agent.llm import LLMClient
 from loom.agent.loop import WORKDIR, _active_config, agent_loop
+from loom.agent.model_resolver import resolve_model
+from loom.agent.model_state import ModelState, ProjectConfig
 from loom.agent.tools import TOOL_REGISTRY
 from loom.tui import kitty_patch  # noqa: F401  # side-effect: patches XTermParser
 from loom.tui.chat_log import ChatLog
@@ -176,7 +178,14 @@ class AgentTUIApp(App):
     def __init__(self, resume: bool = False, model: str | None = None):
         super().__init__()
         self.resume = resume
-        self.llm = LLMClient(model=model or os.getenv("MODEL") or "deepseek-v4-flash")
+        resolved = resolve_model(
+            workdir=WORKDIR,
+            cli_model=model,                                       # --model flag
+            env_model=os.getenv("MODEL"),                          # $MODEL
+            config_model=ProjectConfig(WORKDIR).model,             # .minicode/config.json (向上 walk)
+            state_model=ModelState(WORKDIR).default_model(),       # .minicode/state/model.json
+        )
+        self.llm = LLMClient(model=resolved)
         self.history: list = []
         self._cancelled = False
         self._main_loop = None
@@ -629,11 +638,17 @@ class AgentTUIApp(App):
                 self.llm.change_model(args.strip())
                 self._sync_status_bar()
                 chat_log.append_system_note(f"Model changed to **{self.llm.model}**")
+                from loom.agent.model_state import ModelState
+                provider, _, model_id = args.strip().partition("/")
+                if provider and model_id:
+                    ms = ModelState(WORKDIR)
+                    ms.add_recent(provider, model_id)
+                    ms.set_default(provider, model_id)
             else:
                 from loom.agent.model_state import ModelState
                 from loom.tui.model_picker import ModelPicker
                 ms = ModelState(WORKDIR)
-                self.push_screen(ModelPicker(recent=ms.recent(max=10)), self._on_model_picked)
+                self.push_screen(ModelPicker(recent=ms.recent(limit=10)), self._on_model_picked)
         elif cmd == "resume":
             import loom.agent.checkpoint as checkpoint
 
@@ -806,5 +821,6 @@ class AgentTUIApp(App):
         self._sync_status_bar()
         chat_log = self.query_one(ChatLog)
         chat_log.append_system_note(f"Model changed to **{self.llm.model}**")
-        from loom.agent.model_state import ModelState
-        ModelState(WORKDIR).add_recent(provider_id, model_id)
+        ms = ModelState(WORKDIR)
+        ms.add_recent(provider_id, model_id)
+        ms.set_default(provider_id, model_id)

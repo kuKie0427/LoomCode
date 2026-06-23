@@ -6572,3 +6572,38 @@ None. P2 gate verification complete.
 
 ### Next step
 Load Phase P3 (polish + full test migration + docs) in a new session.
+
+---
+
+## Session: f-multi-model-providers-p2-review-fixes — wire resolver + ProjectConfig + cleanup (2026-06-23)
+
+Post-review fixes for P2 UX. 8 changes across 9 files.
+
+### Changes
+
+| # | Type | File | What |
+|---|---|---|---|
+| 1 | P0 | `loom/tui/app.py` | Wire `resolve_model()` into `AgentTUIApp.__init__` with full priority chain (--model > env > ProjectConfig > ModelState > provider default) |
+| 2 | P0 | `loom/tui/app.py` | `_on_model_picked` calls `set_default` after `add_recent` — model preference persists |
+| 3 | P0 | `loom/tui/app.py` | `/model <name>` text command also persists via `add_recent` + `set_default` |
+| 4 | P1 | `loom/agent/model_resolver.py` | 3 hardcoded `claude-sonnet-4-5` fallbacks → `_first_model_of()` + `_first_provider_id()` dynamic lookup |
+| 5 | P1 | `loom/agent/credential.py` | `Literal["api"]` → `kind: str = "api"`; added `_backup_path()` helper |
+| 6 | P1 | `loom/agent/model_state.py` | Uses `_backup_path` from credential; removed duplicate `import time` |
+| 7 | P2 | `loom/agent/llm.py` | Extracted `_resolve_credential` to dedupe `__init__` and `change_model` |
+| 8 | P2 | `loom/tui/model_picker.py` | Fixed trailing whitespace, added `list[ModelRef]` type annotation |
+| 9 | P2 | `loom/agent/model_state.py` | Renamed `max`→`limit` parameter to avoid builtin shadowing |
+| 10 | P2 | `tests/test_cli_models_auth.py` | Unified `test_list_outputs_table` + `test_logout_removes_entry` to in-process pattern |
+| 11 | — | `loom/eval/cases/multi_model_p2.py` | +2 eval cases: `multi-model-p2-resolver-wired-into-tui`, `multi-model-p2-model-change-persists-default` |
+
+### Verification
+- `eval --filter multi-model-p2 --fail-under 100` → **15/15 passed** (was 13/13, +2)
+- `eval --filter multi-model-p0 --fail-under 100` → 11/11 passed (no regression)
+- `eval --filter multi-model-p1 --fail-under 100` → 11/11 passed (no regression)
+- `ruff check .` → All checks passed
+- `mypy loom/` → Success, 0 issues in 156 source files
+
+### Blocker
+None.
+
+### Next step
+Load Phase P3 (subagent auth inheritance) in a new session. Run `/handoff` first.

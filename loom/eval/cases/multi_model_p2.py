@@ -406,3 +406,31 @@ class MultiModelResolverFallsThroughToDefault(EvalCase):
         result = resolve_model(Path("."))
         ok = result is not None and "/" in result
         return _check(self.name, ok, f"result={result!r}")
+
+
+class MultiModelResolverWiredIntoAgentTUIApp(EvalCase):
+    """Locks: AgentTUIApp.__init__ calls resolve_model() instead of hardcoding."""
+    name = "multi-model-p2-resolver-wired-into-tui"
+    def run(self) -> EvalResult:
+        from pathlib import Path
+        app_py = (Path(__file__).parent.parent.parent / "tui" / "app.py").resolve()
+        src = app_py.read_text()
+        # Must import resolve_model
+        ok = "from loom.agent.model_resolver import resolve_model" in src
+        # Must consume ProjectConfig
+        ok = ok and "ProjectConfig(WORKDIR).model" in src
+        # Must NOT have hardcoded "deepseek-v4-flash" fallback
+        ok = ok and '"deepseek-v4-flash"' not in src
+        return _check(self.name, ok, "resolve_model + ProjectConfig + no hardcoded fallback")
+
+
+class MultiModelModelChangePersistsDefault(EvalCase):
+    """Locks: _on_model_picked calls ModelState.set_default."""
+    name = "multi-model-p2-model-change-persists-default"
+    def run(self) -> EvalResult:
+        from pathlib import Path
+        app_py = (Path(__file__).parent.parent.parent / "tui" / "app.py").resolve()
+        src = app_py.read_text()
+        # _on_model_picked must call set_default
+        ok = "ms.set_default(provider_id, model_id)" in src
+        return _check(self.name, ok, "set_default called in _on_model_picked")

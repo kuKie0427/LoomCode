@@ -26,11 +26,11 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from loom.agent.credential import _backup_path
 from loguru import logger
 
 # Maximum number of recent models to keep in the MRU list.
@@ -117,10 +117,10 @@ class ModelState:
         """The path to the model.json state file."""
         return self._state_path
 
-    def recent(self, max: int = 10) -> list[ModelRef]:
-        """Return up to ``max`` most-recently-used models, MRU-ordered (head is newest).
+    def recent(self, limit: int = 10) -> list[ModelRef]:
+        """Return up to ``limit`` most-recently-used models, MRU-ordered (head is newest).
 
-        The cap is the smaller of the caller-supplied ``max`` and the
+        The cap is the smaller of the caller-supplied ``limit`` and the
         stored recent-list size. The returned list is a fresh copy;
         mutating it does not affect on-disk state.
         """
@@ -129,7 +129,7 @@ class ModelState:
         if not isinstance(recent_raw, list):
             recent_raw = []
         result: list[ModelRef] = []
-        for entry in recent_raw[:max]:
+        for entry in recent_raw[:limit]:
             if not isinstance(entry, dict):
                 logger.warning(f"model state: skipping non-dict recent entry: {entry!r}")
                 continue
@@ -205,7 +205,7 @@ class ModelState:
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            backup = path.with_name(f"{path.name}.bak.{int(time.time())}.json")
+            backup = _backup_path(path)
             try:
                 path.rename(backup)
                 logger.warning(

@@ -7,6 +7,34 @@ from __future__ import annotations
 from pathlib import Path
 
 
+def _first_model_of(provider_id: str) -> str:
+    """Return the first supported model for *provider_id* (e.g. ``"anthropic/claude-sonnet-4-5"``)."""
+    from loom.agent.providers import get_provider  # noqa: PLC0415
+
+    try:
+        inst = get_provider(provider_id, api_key="", base_url=None)
+        if inst.supported_models:
+            return f"{provider_id}/{inst.supported_models[0]}"
+    except Exception:
+        pass
+    raise ValueError(
+        f"provider {provider_id!r} has no supported_models; "
+        f"check loom/agent/providers/{provider_id} registration"
+    )
+
+
+def _first_provider_id() -> str:
+    """Return the first registered provider ID (deterministic sort)."""
+    from loom.agent.providers import PROVIDERS  # noqa: PLC0415
+
+    if not PROVIDERS:
+        raise ValueError(
+            "no providers registered; check loom/agent/providers/__init__.py "
+            "register_compatible_profiles() call"
+        )
+    return sorted(PROVIDERS.keys())[0]
+
+
 def resolve_model(
     workdir: Path,
     cli_model: str | None = None,
@@ -46,19 +74,5 @@ def resolve_model(
         return state_model
     # Final fallback: first provider's first model
     if provider_ids:
-        return f"{provider_ids[0]}/claude-sonnet-4-5"
-    # Lazy import to avoid circular imports
-    from loom.agent.providers import PROVIDERS  # noqa: PLC0415
-
-    if PROVIDERS:
-        first_id = sorted(PROVIDERS.keys())[0]
-        first_cls = PROVIDERS[first_id]
-        try:
-            inst = first_cls(api_key="", base_url=None)
-            models = inst.supported_models
-            if models:
-                return f"{first_id}/{models[0]}"
-        except Exception:
-            pass
-        return f"{first_id}/claude-sonnet-4-5"
-    return "anthropic/claude-sonnet-4-5"
+        return _first_model_of(provider_ids[0])
+    return _first_model_of(_first_provider_id())

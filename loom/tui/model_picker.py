@@ -7,10 +7,12 @@ from textual.containers import Container, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Label, ListItem, ListView, Static
 
+from loom.agent.model_state import ModelRef
+
 
 class ModelPicker(ModalScreen[tuple[str, str]]):
     """Modal screen showing a list of providers and their models.
-    
+
     Returns (provider_id, model_id) via dismiss() on Enter.
     ESC dismisses (returns None) — user cancelled.
     """
@@ -47,7 +49,7 @@ class ModelPicker(ModalScreen[tuple[str, str]]):
     }
     """
 
-    def __init__(self, recent: list | None = None) -> None:
+    def __init__(self, recent: list[ModelRef] | None = None) -> None:
         super().__init__()
         self._recent = recent or []
 

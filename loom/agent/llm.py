@@ -43,21 +43,7 @@ __all__ = ["LLMClient", "StreamEvent", "with_cache_control", "with_tool_cache_co
 class LLMClient:
     def __init__(self, model: str, api_key: str | None = None, base_url: str | None = None):
         self._provider_id, self._model_id = parse_model_id(model)
-        # Lazy import to avoid circular import (credential module imports providers).
-        from loom.agent.credential import credentials
-
-        # Priority chain: explicit kwarg > CredentialManager (keyring/env/file)
-        # > per-provider env var.
-        if not api_key or not base_url:
-            cred = credentials.get(self._provider_id)
-            if cred is not None:
-                if not api_key:
-                    api_key = cred.api_key
-                if not base_url and cred.base_url:
-                    base_url = cred.base_url
-        # base_url first: ANTHROPIC_BASE_URL must be read before provider instantiation.
-        if not base_url:
-            base_url = os.getenv(self._default_base_url_env(), "") or None
+        api_key, base_url = self._resolve_credential(self._provider_id, api_key)
         self._provider: LLMProvider = get_provider(
             self._provider_id, api_key=api_key or "", base_url=base_url
         )
@@ -74,13 +60,33 @@ class LLMClient:
         self._cancelled = False
         self._cancel_event = threading.Event()
 
-    def _default_base_url_env(self) -> str:
-        if self._provider_id == "anthropic":
+    def _default_base_url_env(self, provider_id: str | None = None) -> str:
+        pid = provider_id or self._provider_id
+        if pid == "anthropic":
             return "ANTHROPIC_BASE_URL"
         return ""
 
     def _provider_env_var(self) -> str:
         return getattr(self._provider, "env_var", "")
+
+    def _resolve_credential(
+        self, provider_id: str, explicit_api_key: str | None
+    ) -> tuple[str, str | None]:
+        """Priority: explicit kwarg > CredentialManager > per-provider env var.
+        Returns (api_key, base_url). base_url from cred only if not in env.
+        """
+        from loom.agent.credential import credentials
+
+        api_key = explicit_api_key or ""
+        base_url: str | None = None
+        if not explicit_api_key:
+            cred = credentials.get(provider_id)
+            if cred is not None:
+                api_key = cred.api_key
+                base_url = cred.base_url
+        if not base_url:
+            base_url = os.getenv(self._default_base_url_env(provider_id=provider_id), "") or None
+        return api_key, base_url
 
     @property
     def provider_id(self) -> str:
@@ -99,24 +105,10 @@ class LLMClient:
             return
         # Cross-provider switch: do NOT carry over api_key/base_url from the
         # old provider — that key was issued for the old provider's service.
-        # Lazy import to avoid circular import (credential module imports providers).
-        from loom.agent.credential import credentials
-
-        # Look up the NEW provider's credential via CredentialManager
-        # (priority chain: keyring > LOOM_AUTH_CONTENT > per-provider env > auth.json).
-        cred = credentials.get(provider_id)
-        if cred is not None and cred.api_key:
-            self._provider_id = provider_id
-            self._model_id = model_id
-            self._provider = get_provider(
-                provider_id, api_key=cred.api_key, base_url=cred.base_url
-            )
-        else:
-            # No credential found — let the new provider re-resolve its own
-            # env_var (e.g. OPENAI_API_KEY, DEEPSEEK_API_KEY) inside its constructor.
-            self._provider_id = provider_id
-            self._model_id = model_id
-            self._provider = get_provider(provider_id)
+        api_key, base_url = self._resolve_credential(provider_id, None)
+        self._provider_id = provider_id
+        self._model_id = model_id
+        self._provider = get_provider(provider_id, api_key=api_key, base_url=base_url)
         self.client = getattr(self._provider, "_client", None)
         self.async_client = getattr(self._provider, "_async_client", None)
         self.model = f"{self._provider_id}/{self._model_id}"
