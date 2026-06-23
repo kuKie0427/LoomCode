@@ -778,7 +778,18 @@ class ChatLog(VerticalScroll):
                 self._thinking_widget._display = display
             asyncio.create_task(self._mount_thinking_display(display))
         else:
-            self._thinking_display.update(_normalize_for_stream(self._thinking_reasoning))
+            # Markdown.update() returns AwaitComplete; schedule via async wrapper
+            # so the AwaitComplete is actually awaited (rule #16). Sync call leaves
+            # the Markdown half-rendered and the click toggle cannot show content.
+            asyncio.create_task(
+                self._update_thinking_display(
+                    _normalize_for_stream(self._thinking_reasoning)
+                )
+            )
+
+    async def _update_thinking_display(self, text: str) -> None:
+        if self._thinking_display is not None:
+            await self._thinking_display.update(text)
 
     async def _mount_thinking_display(self, display: ThinkingDisplay) -> None:
         body = self._current_body
@@ -786,7 +797,7 @@ class ChatLog(VerticalScroll):
             await self.mount(display, before=body)
         else:
             await self.mount(display)
-        display.update(_normalize_for_stream(self._thinking_reasoning))
+        await display.update(_normalize_for_stream(self._thinking_reasoning))
         if self._sticky:
             self.scroll_end()
 
