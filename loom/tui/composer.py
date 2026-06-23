@@ -20,6 +20,26 @@ class Composer(TextArea):
             super().__init__()
             self.value = value
 
+    class CompletionTab(Message):
+        """Tab key pressed while in `/` command mode."""
+
+    class CompletionMove(Message):
+        """Up/Down arrow pressed while in `/` command mode."""
+
+        def __init__(self, direction: int) -> None:
+            super().__init__()
+            self.direction = direction
+
+    class CompletionHide(Message):
+        """Conditions changed — hide the completion popup."""
+
+    class CompletionQuery(Message):
+        """Text changed while in `/` command mode."""
+
+        def __init__(self, text: str) -> None:
+            super().__init__()
+            self.text = text
+
     def __init__(self, *args, **kwargs) -> None:
         kwargs.setdefault("tab_behavior", "focus")
         kwargs.setdefault("soft_wrap", True)
@@ -35,7 +55,32 @@ class Composer(TextArea):
             self.text = ""
             self.post_message(self.Submitted(text))
             return
+        if self.text.startswith("/") and " " not in self.text:
+            if event.key == "tab":
+                event.prevent_default()
+                event.stop()
+                self.post_message(self.CompletionTab())
+                return
+            if event.key == "up":
+                event.prevent_default()
+                event.stop()
+                self.post_message(self.CompletionMove(-1))
+                return
+            if event.key == "down":
+                event.prevent_default()
+                event.stop()
+                self.post_message(self.CompletionMove(1))
+                return
+            if event.key == "escape":
+                event.prevent_default()
+                event.stop()
+                self.post_message(self.CompletionHide())
+                return
         await super()._on_key(event)
+        if self.text.startswith("/") and " " not in self.text:
+            self.post_message(self.CompletionQuery(self.text))
+        else:
+            self.post_message(self.CompletionHide())
 
     def _on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
         event.prevent_default()

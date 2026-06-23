@@ -60,6 +60,7 @@ from loom.eval.cases import (
     session_hooks,  # noqa: F401
     session_mutable_prompt,  # noqa: F401
     slash_command_registry,  # noqa: F401
+    slash_completion_popup,  # noqa: F401
     stop_event_helper,  # noqa: F401
     subagent_templates,  # noqa: F401
     tdd,  # noqa: F401

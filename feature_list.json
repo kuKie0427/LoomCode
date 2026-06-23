@@ -1249,6 +1249,15 @@
       "status": "done",
       "verification": "uv run pytest tests/test_slash_commands.py && uv run python -m loom.cli eval --filter slash_command_registry",
       "evidence": "uv run pytest tests/test_slash_commands.py -v → 7/7 passed (0.16s); uv run python -m loom.cli eval --filter slash_command_registry → 1/1 PASS; grep -c 'elif cmd ==' loom/tui/app.py → 0 (all branches moved to table lookup); ./init.sh → 1224 passed, 8 snapshots, 'Verification Complete (all green)'; manual TUI smoke: /help shows command list, /q exits. loom/tui/slash_commands.py created (198 lines, SlashCommand dataclass + 7 handlers + find_command/all_commands); tests/test_slash_commands.py (7 unit tests); loom/eval/cases/slash_command_registry.py (1 eval case)."
+    },
+    {
+      "id": "f-tui-cmd-completion-p1",
+      "name": "TUI 命令补全 P1: Tab 触发 / 补全弹窗",
+      "description": "借鉴 opencode autocomplete.tsx 的 /-mode —— Composer 输入 / 后 Tab 弹出补全、↑↓ 导航、Enter/Tab 选择、Esc 关闭。difflib 模糊匹配。",
+      "dependencies": ["f-tui-cmd-completion-p0"],
+      "status": "done",
+      "verification": "uv run pytest tests/test_command_completer.py && uv run python -m loom.cli eval --filter slash_completion_popup",
+      "evidence": "uv run pytest tests/test_command_completer.py -v → 8/8 passed (0.25s); uv run python -m loom.cli eval --filter slash_completion_popup → 1/1 PASS; ./init.sh → 1232 passed, 8 snapshots, 'Verification Complete (all green)'; manual TUI smoke: /mo shows model in popup, ↑↓ navigates, Tab selects with trailing space, Esc hides, /xyz shows 'No match', /help+Enter hides completer. Files: loom/tui/completer.py (130 lines, CommandCompleter + filter_commands), loom/tui/composer.py (+45 lines, 4 Message classes + _on_key completion branches), loom/tui/app.py (+26 lines, CommandCompleter in compose + 4 handlers + on_composer_submitted fix), tests/test_command_completer.py (8 tests), loom/eval/cases/slash_completion_popup.py (65 lines, 3 assertions)."
     }
   ]
 }

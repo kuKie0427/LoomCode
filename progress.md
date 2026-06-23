@@ -6806,3 +6806,46 @@ Provider status indicators across 3 TUI surfaces + tests.
 - handler 签名统一为 `async def handler(app: AgentTUIApp, args: str) -> None`
 - 使用 TYPE_CHECKING 避免循环导入
 - 所有内部导入 (checkpoint/ModelState/credentials/PROVIDERS) 保留在 handler 函数体内 (懒导入)
+
+## Session: tui-cmd-completion-p1 — Tab 触发 / 命令补全弹窗
+
+**Date**: 2026-06-23
+**Plan**: tui-cmd-completion-p1
+**Status**: ✅ Done — 所有 Gate 全绿
+
+### 完成内容
+
+- **Task 0**: `feature_list.json` 添加 `f-tui-cmd-completion-p1` 条目
+- **Task 1**: 新建 `loom/tui/completer.py` (130 行) — `CommandCompleter(Static)` widget + `filter_commands` 纯函数 (前缀匹配 + difflib fuzzy 兜底, cutoff=0.3)
+- **Task 2a**: 扩展 `loom/tui/composer.py` — 4 个 Message 类 (CompletionTab/CompletionMove/CompletionHide/CompletionQuery) + `_on_key` 增加 tab/up/down/escape 分支
+- **Task 2b**: 接入 `loom/tui/app.py` — compose() 末尾 yield CommandCompleter + 4 个 `on_completion_*` handler + `on_composer_submitted` 新增 completer hide
+- **Task 3**: 新建 `tests/test_command_completer.py` (8 个测试: 5 纯函数 + 3 widget 行为)
+- **Task 4**: 新建 `loom/eval/cases/slash_completion_popup.py` — eval case 锁定 3 个断言
+
+### 验证结果
+
+| Gate | Status |
+|------|--------|
+| `pytest tests/test_command_completer.py -v` 8/8 | ✅ |
+| `loom eval --filter slash_completion_popup` 1/1 PASS | ✅ |
+| `loom/tui/completer.py` 存在, CommandCompleter importable, filter_commands 纯函数 | ✅ |
+| `loom/tui/composer.py` 4 个 Message + _on_key 分支 | ✅ |
+| `loom/tui/app.py` compose yield CommandCompleter + 4 handlers | ✅ |
+| 手测 TUI: /mo / ↑↓ / Tab / Esc / /xyz / /help+Enter | ✅ |
+| `./init.sh` 1232 passed, 8 snapshots, all green (was 1224, +8) | ✅ |
+| `feature_list.json` 更新为 done | ✅ |
+
+### 文件变更
+
+- **新建**: `loom/tui/completer.py`, `tests/test_command_completer.py`, `loom/eval/cases/slash_completion_popup.py`
+- **修改**: `loom/tui/composer.py` (+45 行, Message 类 + _on_key), `loom/tui/app.py` (+26 行, Completer 接入 + handlers), `loom/eval/cases/__init__.py` (注册 eval case), `feature_list.json` (条目 + evidence)
+- **未修改**: 无 scope creep
+
+### 注意点
+
+- `filter_commands` 是纯函数 (无 self, 可单测), 前缀匹配项永远排在 fuzzy 之前
+- Composer 的 `_on_key` 只在 `text.startswith("/")` 且无空格时拦截 tab/up/down/escape
+- 4 个 Message 都继承 `textual.message.Message`, 通过 Messages 解耦 Composer ↔ App
+- `on_completion_tab` 选择后要加末尾空格 (`/model `)、focus Composer、移动 cursor 到末尾 (`cursor_location`)
+- `on_composer_submitted` 在 `/` 路由前补 completer.hide() — 解决 Enter 提交后弹窗残留问题
+- CSS 用 `display: none` 默认隐藏, `.visible` 类切换 `display: block` (与 Header 的 `visibility: hidden` 语义不同)

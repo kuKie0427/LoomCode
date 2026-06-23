@@ -30,6 +30,7 @@ from loom.agent.model_state import ModelState, ProjectConfig
 from loom.agent.tools import TOOL_REGISTRY
 from loom.tui import kitty_patch  # noqa: F401  # side-effect: patches XTermParser
 from loom.tui.chat_log import ChatLog
+from loom.tui.completer import CommandCompleter
 from loom.tui.composer import Composer
 from loom.tui.header import Header, HeaderOverlay, HeaderState, MCPServer, Subagent, TodoItem
 from loom.tui.messages import (
@@ -489,6 +490,7 @@ class AgentTUIApp(App):
         with Vertical(id="chrome"):
             yield StatusBar(id="status-bar")
             yield Composer(id="composer")
+        yield CommandCompleter(id="cmd-completer")
 
     def on_header_section_toggle(self, message: Header.SectionToggle) -> None:
         """Per-section toggle: expand / switch / collapse the overlay.
@@ -647,10 +649,34 @@ class AgentTUIApp(App):
         except Exception:
             logger.warning("Failed to scroll to subagent marker {}", message.tool_use_id)
 
+    def on_completion_query(self, event: Composer.CompletionQuery) -> None:
+        self.query_one(CommandCompleter).show_for(event.text)
+
+    def on_completion_move(self, event: Composer.CompletionMove) -> None:
+        self.query_one(CommandCompleter).move(event.direction)
+
+    def on_completion_hide(self, event: Composer.CompletionHide) -> None:
+        self.query_one(CommandCompleter).hide()
+
+    def on_completion_tab(self, event: Composer.CompletionTab) -> None:
+        completer = self.query_one(CommandCompleter)
+        cmd = completer.current()
+        if cmd:
+            composer = self.query_one(Composer)
+            composer.text = f"/{cmd.name} "
+            completer.hide()
+            composer.focus()
+            composer.cursor_location = (0, len(composer.text))
+
     async def on_composer_submitted(self, event: Composer.Submitted) -> None:
         user_msg = event.value.strip()
         if not user_msg:
             return
+        # Enter 提交时隐藏 completer（_on_key 的 enter 分支早返回，不会触发 CompletionHide）
+        try:
+            self.query_one(CommandCompleter).hide()
+        except Exception:
+            pass
         if user_msg.startswith("/"):
             await self.run_slash_command(user_msg[1:])
             return
