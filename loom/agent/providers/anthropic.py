@@ -138,17 +138,31 @@ class AnthropicProvider(LLMProvider):
         effective_url = self.base_url or os.getenv(
             "ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic"
         )
+        # Built-in reasoning models (e.g. deepseek-v4-* via the Anthropic-
+        # compatible endpoint) can think silently for 60-90s before emitting
+        # the first stream event. The previous 60s default timed out mid-
+        # think and the resulting APITimeoutError was NOT in the except list,
+        # which crashed _consume() and yielded zero events — TUI showed a
+        # frozen "thinking" spinner with no content forever. 600s is generous
+        # enough for any reasoning model; tunable via LOOM_LLM_TIMEOUT.
+        raw_timeout = os.getenv("LOOM_LLM_TIMEOUT", "600")
+        try:
+            timeout = float(raw_timeout)
+            if timeout <= 0:
+                timeout = 600.0
+        except ValueError:
+            timeout = 600.0
         self._client = anthropic.Anthropic(
             api_key=effective_key,
             base_url=effective_url,
             max_retries=3,
-            timeout=60.0,
+            timeout=timeout,
         )
         self._async_client = anthropic.AsyncAnthropic(
             api_key=effective_key,
             base_url=effective_url,
             max_retries=3,
-            timeout=60.0,
+            timeout=timeout,
         )
         self._cancel_event = threading.Event()
 
@@ -295,11 +309,28 @@ class AnthropicProvider(LLMProvider):
                 )
                 event_queue.put(err_ev)
                 emitted.append(err_ev)
+            except anthropic.APITimeoutError as exc:
+                err_ev = StreamEvent(
+                    kind="error",
+                    error_code=ProviderErrorCode.TIMEOUT,
+                    error_message=f"Anthropic stream timed out: {exc}",
+                )
+                event_queue.put(err_ev)
+                emitted.append(err_ev)
             except anthropic.APIConnectionError as exc:
                 err_ev = StreamEvent(
                     kind="error",
                     error_code=ProviderErrorCode.NETWORK,
                     error_message=str(exc),
+                )
+                event_queue.put(err_ev)
+                emitted.append(err_ev)
+            except Exception as exc:
+                logger.exception("anthropic stream: unexpected error in _consume")
+                err_ev = StreamEvent(
+                    kind="error",
+                    error_code=ProviderErrorCode.UNKNOWN,
+                    error_message=f"{type(exc).__name__}: {exc}",
                 )
                 event_queue.put(err_ev)
                 emitted.append(err_ev)

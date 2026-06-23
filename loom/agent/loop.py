@@ -370,6 +370,22 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                                 reasoning_tokens = ev.reasoning_tokens
                             if ev.stop_reason:
                                 stop_reason = ev.stop_reason
+                        elif ev.kind == "error":
+                            err_text = (
+                                f"[LLM error: {ev.error_code or 'unknown'}] "
+                                f"{ev.error_message or 'provider returned an error event'}"
+                            )
+                            logger.error("agent_loop stream error: {}", err_text)
+                            content_blocks.append(TextBlock(text=err_text))
+                            if cb["on_text_delta"] is not None:
+                                cb["on_text_delta"](err_text)
+                            if tr is not None:
+                                tr.record(
+                                    "llm_error",
+                                    code=str(ev.error_code or "unknown"),
+                                    message=str(ev.error_message or "")[:500],
+                                )
+                            stop_reason = "end_turn"
                     response = ProviderResponse(
                         model=llm_client.model,
                         content=content_blocks,

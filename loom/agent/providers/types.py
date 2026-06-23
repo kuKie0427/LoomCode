@@ -142,8 +142,10 @@ class ProviderErrorCode:
     INVALID_REQUEST = "invalid_request"
     SERVER = "server"
     NETWORK = "network"
+    TIMEOUT = "timeout"
     UNKNOWN_PROVIDER = "unknown_provider"
     MISSING_CREDENTIAL = "missing_credential"
+    UNKNOWN = "unknown"
 
 
 class ProviderError(Exception):

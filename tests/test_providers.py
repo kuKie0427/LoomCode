@@ -162,6 +162,104 @@ class TestAnthropicThinkingParam:
         assert _build_thinking_param("claude-sonnet-4-5") is None
 
 
+class TestAnthropicStreamErrorPaths:
+    """Stream error handling: APITimeoutError + unexpected exceptions must
+    surface as `error` StreamEvents instead of crashing _consume silently.
+
+    Regression: a thinking model that took >60s caused APITimeoutError, which
+    was NOT in the except list. The async coroutine crashed, the producer
+    thread logged + put None, and the consumer saw zero events — TUI froze
+    on `thinking · Ns` with no content forever.
+    """
+
+    def _make_provider(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        monkeypatch.delenv("LOOM_THINKING_BUDGET", raising=False)
+        from loom.agent.providers.anthropic import AnthropicProvider
+        return AnthropicProvider(api_key="k")
+
+    def _patch_stream(self, monkeypatch, provider, exc_to_raise):
+        """Replace messages.stream with an async ctx mgr that raises on __aenter__."""
+
+        class _RaisingStream:
+            async def __aenter__(self_inner):
+                raise exc_to_raise
+
+            async def __aexit__(self_inner, *_a):
+                return False
+
+        def _stream(**kwargs):
+            return _RaisingStream()
+
+        monkeypatch.setattr(provider._async_client.messages, "stream", _stream)
+
+    def _make_request(self):
+        from loom.agent.providers.types import ProviderRequest
+        return ProviderRequest(
+            system="sys",
+            messages=[{"role": "user", "content": "hi"}],
+            tools=[],
+            max_tokens=1024,
+            model="anthropic/claude-haiku-3-5",
+        )
+
+    def test_timeout_surfaces_as_error_event(self, monkeypatch):
+        import anthropic
+
+        provider = self._make_provider(monkeypatch)
+        timeout_exc = anthropic.APITimeoutError(request=None)  # type: ignore[arg-type]
+        self._patch_stream(monkeypatch, provider, timeout_exc)
+
+        events = list(provider.stream(self._make_request()))
+        assert len(events) == 1
+        assert events[0].kind == "error"
+        assert events[0].error_code == ProviderErrorCode.TIMEOUT
+        assert "timed out" in (events[0].error_message or "").lower()
+
+    def test_unexpected_exception_surfaces_as_error_event(self, monkeypatch):
+        provider = self._make_provider(monkeypatch)
+        self._patch_stream(monkeypatch, provider, RuntimeError("boom"))
+
+        events = list(provider.stream(self._make_request()))
+        assert len(events) == 1
+        assert events[0].kind == "error"
+        assert events[0].error_code == ProviderErrorCode.UNKNOWN
+        assert "RuntimeError" in (events[0].error_message or "")
+        assert "boom" in (events[0].error_message or "")
+
+    def test_connection_error_still_works(self, monkeypatch):
+        import anthropic
+
+        provider = self._make_provider(monkeypatch)
+        conn_exc = anthropic.APIConnectionError(request=None)  # type: ignore[arg-type]
+        self._patch_stream(monkeypatch, provider, conn_exc)
+
+        events = list(provider.stream(self._make_request()))
+        assert len(events) == 1
+        assert events[0].kind == "error"
+        assert events[0].error_code == ProviderErrorCode.NETWORK
+
+    def test_timeout_env_var_default_is_600s(self, monkeypatch):
+        monkeypatch.delenv("LOOM_LLM_TIMEOUT", raising=False)
+        provider = self._make_provider(monkeypatch)
+        assert provider._async_client.timeout == 600.0
+
+    def test_timeout_env_var_custom(self, monkeypatch):
+        monkeypatch.setenv("LOOM_LLM_TIMEOUT", "120")
+        provider = self._make_provider(monkeypatch)
+        assert provider._async_client.timeout == 120.0
+
+    def test_timeout_env_var_invalid_falls_back(self, monkeypatch):
+        monkeypatch.setenv("LOOM_LLM_TIMEOUT", "not_a_number")
+        provider = self._make_provider(monkeypatch)
+        assert provider._async_client.timeout == 600.0
+
+    def test_timeout_env_var_zero_falls_back(self, monkeypatch):
+        monkeypatch.setenv("LOOM_LLM_TIMEOUT", "0")
+        provider = self._make_provider(monkeypatch)
+        assert provider._async_client.timeout == 600.0
+
+
 class TestProvidersDict:
     def test_contains_anthropic(self):
         assert "anthropic" in PROVIDERS
