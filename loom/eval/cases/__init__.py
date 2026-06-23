@@ -10,6 +10,7 @@ from loom.eval.cases import (
     cli_run_tui,  # noqa: F401
     cold_archive,  # noqa: F401
     cold_start_continuity,  # noqa: F401
+    command_palette_modal,  # noqa: F401
     conversation_export,  # noqa: F401
     cost_telemetry,  # noqa: F401
     cross_session_resume,  # noqa: F401

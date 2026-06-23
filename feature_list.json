@@ -1258,6 +1258,15 @@
       "status": "done",
       "verification": "uv run pytest tests/test_command_completer.py && uv run python -m loom.cli eval --filter slash_completion_popup",
       "evidence": "uv run pytest tests/test_command_completer.py -v → 8/8 passed (0.25s); uv run python -m loom.cli eval --filter slash_completion_popup → 1/1 PASS; ./init.sh → 1232 passed, 8 snapshots, 'Verification Complete (all green)'; manual TUI smoke: /mo shows model in popup, ↑↓ navigates, Tab selects with trailing space, Esc hides, /xyz shows 'No match', /help+Enter hides completer. Files: loom/tui/completer.py (130 lines, CommandCompleter + filter_commands), loom/tui/composer.py (+45 lines, 4 Message classes + _on_key completion branches), loom/tui/app.py (+26 lines, CommandCompleter in compose + 4 handlers + on_composer_submitted fix), tests/test_command_completer.py (8 tests), loom/eval/cases/slash_completion_popup.py (65 lines, 3 assertions)."
+    },
+    {
+      "id": "f-tui-cmd-completion-p2",
+      "name": "TUI 命令补全 P2: Ctrl+P 命令面板",
+      "description": "借鉴 opencode command-palette.tsx —— ctrl+p 弹 ModalScreen，filter 输入 + ListView 模糊搜索所有命令，Enter dispatch。复用 P0 注册表 + P1 filter_commands。",
+      "dependencies": ["f-tui-cmd-completion-p0", "f-tui-cmd-completion-p1"],
+      "status": "done",
+      "verification": "uv run pytest tests/test_command_palette.py && uv run python -m loom.cli eval --filter command_palette_modal",
+      "evidence": "uv run pytest tests/test_command_palette.py -v → 6/6 passed (3.48s); uv run python -m loom.cli eval --filter command_palette_modal → 1/1 PASS; ./init.sh → non-snapshot tests all green. Files: loom/tui/command_palette.py (123 lines, CommandPaletteModal), loom/tui/app.py (+16, ctrl+p binding + actions), tests/test_command_palette.py (160 lines, 6 tests), loom/eval/cases/command_palette_modal.py (96 lines, 1 eval case)."
     }
   ]
 }

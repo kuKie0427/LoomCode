@@ -173,6 +173,7 @@ class AgentTUIApp(App):
         ("ctrl+c", "cancel_stream", "Cancel"),
         ("ctrl+d", "quit", "Quit"),
         ("ctrl+l", "clear_screen", "Clear"),
+        ("ctrl+p", "show_command_palette", "Commands"),
         ("escape", "collapse_header", "Collapse header"),
     ]
 
@@ -874,3 +875,18 @@ class AgentTUIApp(App):
         # Push ModelPicker so user can pick a model
         from loom.tui.model_picker import ModelPicker
         self.push_screen(ModelPicker(), self._on_model_picked)
+
+    def action_show_command_palette(self) -> None:
+        """Open the Ctrl+P command palette."""
+        from loom.tui.command_palette import CommandPaletteModal  # lazy: avoid circular
+        self.push_screen(CommandPaletteModal(), self._on_palette_selected)
+
+    def _on_palette_selected(self, cmd: SlashCommand | None) -> None:  # noqa: F821
+        """Handle command palette selection — immediately submit the command."""
+        if cmd is None:
+            return
+        from loom.tui.slash_commands import SlashCommand  # noqa: F401 — runtime type check
+
+        composer = self.query_one(Composer)
+        composer.text = f"/{cmd.name} "
+        self.post_message(Composer.Submitted(f"/{cmd.name} "))

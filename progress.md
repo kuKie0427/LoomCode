@@ -6849,3 +6849,33 @@ Provider status indicators across 3 TUI surfaces + tests.
 - `on_completion_tab` 选择后要加末尾空格 (`/model `)、focus Composer、移动 cursor 到末尾 (`cursor_location`)
 - `on_composer_submitted` 在 `/` 路由前补 completer.hide() — 解决 Enter 提交后弹窗残留问题
 - CSS 用 `display: none` 默认隐藏, `.visible` 类切换 `display: block` (与 Header 的 `visibility: hidden` 语义不同)
+
+## Session: f-tui-cmd-completion-p2 — Ctrl+P 命令面板 Modal
+
+**Date**: 2026-06-23
+**Duration**: ~45min
+**Status**: done
+
+### What was done
+
+- **Task 0**: Added `f-tui-cmd-completion-p2` entry to `feature_list.json`
+- **Task 1**: Created `loom/tui/command_palette.py` — `CommandPaletteModal(ModalScreen[SlashCommand | None])` with filter Input + ListView + keyboard navigation (escape/up/down/enter). Reuses P1's `filter_commands(query, limit=20)`.
+- **Task 2**: Modified `loom/tui/app.py` — Added `("ctrl+p", "show_command_palette", "Commands")` BINDING + `action_show_command_palette` (lazy-imports CommandPaletteModal) + `_on_palette_selected` (sets composer text and posts `Composer.Submitted`).
+- **Task 3**: Created `tests/test_command_palette.py` — 6 tests covering initial population, filter narrowing, alias matching, escape dismiss, action push screen, and selected dispatch.
+- **Task 4**: Created `loom/eval/cases/command_palette_modal.py` — 4 assertions on `filter_commands` and `all_commands` logic.
+
+### Verification
+
+- `uv run pytest tests/test_command_palette.py -v` → 6/6 passed
+- `uv run python -m loom.cli eval --filter command_palette_modal` → 1/1 PASS
+- `ruff check .` → All checks passed
+- `mypy loom/` → Success: no issues found
+- `scripts/verify-quick.sh` → all green
+
+### TUI 命令补全三阶段完结总结
+
+三个 phase 全部完成。TUI 现在拥有完整的命令补全体验：
+- **P0** (`f-tui-cmd-completion-p0`): `SlashCommand` 注册表 + 7 个斜杠命令 (`/help`, `/clear`, `/model`, `/connect`, `/resume`, `/status`, `/quit`)
+- **P1** (`f-tui-cmd-completion-p1`): `CommandCompleter` — Tab 触发 `/` 补全弹窗，difflib 模糊匹配，↑↓ 导航
+- **P2** (`f-tui-cmd-completion-p2`): `CommandPaletteModal` — Ctrl+P 全局命令面板，Input 过滤 + ListView 模糊搜索
+- 双入口：Tab（Composer 内） + Ctrl+P（全局快捷键）
