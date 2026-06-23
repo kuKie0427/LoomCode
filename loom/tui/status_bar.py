@@ -5,6 +5,9 @@ from typing import Literal
 from textual.reactive import reactive
 from textual.widgets import Static
 
+from loom.agent.credential import credentials
+from loom.agent.providers.registry import parse_model_id
+
 EngineState = Literal["idle", "thinking", "streaming", "executing", "compacting", "error"]
 
 # §9.3 StatusBar (post-revamp) — gear-rack ctx rail primitives.
@@ -137,7 +140,10 @@ def _build_ctx_line_components(
     branch_name_tier = _active_tier("branch_name", is_active)
     stats_tier = _active_tier("stats", is_active)
 
-    prefix_parts: list[str] = [f"{model_tier}{model}[/]"]
+    pid, _ = parse_model_id(model)
+    has_creds = credentials.get(pid) is not None
+    status_suffix = " [$accent]✓[/]" if has_creds else " [$text-muted]✗[/]"
+    prefix_parts: list[str] = [f"{model_tier}{model}[/]{status_suffix}"]
     if git_branch:
         prefix_parts.append(
             f"{branch_glyph_tier}⎇[/] {branch_name_tier}{git_branch}[/]"

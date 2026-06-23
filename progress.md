@@ -6716,3 +6716,53 @@ Implementation of 3 auto-prompt behaviors:
 - `uv run ruff check loom/tui/app.py loom/tui/model_picker.py tests/test_auto_connect_prompt.py` → All checks passed
 - `uv run mypy loom/tui/app.py loom/tui/model_picker.py tests/test_auto_connect_prompt.py` → Success
 - Pre-existing credential/tui_header/tui_snapshot test failures unchanged (documented in prior phases)
+
+## Session: f-multi-model-providers-p4c-status-indicators (2026-06-23)
+
+Provider status indicators across 3 TUI surfaces + tests.
+
+### Feature scope
+- ModelPicker shows ✓ (green/accent) next to models when their provider has credentials
+- StatusBar shows ✓/✗ after current model name based on provider credential state
+- `/status` slash command lists all registered providers with ✓ or "no key"
+
+### Critical bug fix found during implementation
+- ModelPicker IDs like `model:anthropic/claude-sonnet-4-5` contained `/` characters → Textual raises `BadIdentifier`, caught by generic `except Exception` → **all providers rendered as `{pid}/?`** (entire list broken)
+- Fixed: counter-based safe IDs (`model-0`, `model-1`, ...) + `_model_items: dict[str, tuple[str, str]]` lookup
+- This meant the compile-time error from `id=` was silently swallowed; the credential check code from the plan was unreachable
+
+### Task 1 — ModelPicker connection status
+- `loom/tui/model_picker.py`: Added `from loom.agent.credential import credentials` at module level
+- Provider loop checks `credentials.get(pid) is not None`, appends `[$accent]✓[/]` when connected
+- Uses safe Textual DOM IDs via `_model_items` dict (counter-based, no special chars)
+
+### Task 2 — StatusBar provider indicator
+- `loom/tui/status_bar.py`: Added `credentials` + `parse_model_id` imports
+- In `_build_ctx_line_components()`, parses `model` → `pid`, checks `credentials.get(pid)`
+- Appends `[$accent]✓[/]` (connected) or `[$text-muted]✗[/]` (disconnected) after model name
+
+### Task 3 — /status slash command
+- `loom/tui/app.py`: Enhanced `/status` handler to import `credentials` + `PROVIDERS`
+- Calls `credentials.all()` once, iterates `sorted(PROVIDERS)`, shows `✓ {display} ({pid}) — key saved` or `{display} ({pid}) — no key`
+
+### Task 4 — Tests
+- `tests/test_provider_status_indicator.py` (NEW, 130 lines, 4 tests)
+  - `test_model_picker_shows_connected_check` ✅
+  - `test_model_picker_shows_disconnected_state` ✅
+  - `test_status_command_lists_providers` ✅
+  - `test_status_bar_shows_model_with_provider` ✅
+
+### Files changed
+- `loom/tui/model_picker.py` — status icons + safe IDs bug fix
+- `loom/tui/status_bar.py` — provider status in prefix
+- `loom/tui/app.py` — enhanced /status command
+- `tests/test_provider_status_indicator.py` — 4 new tests
+- `feature_list.json` — new entry (status: done)
+
+### Verification
+- `uv run pytest tests/test_provider_status_indicator.py -v` → **4/4 passed**
+- `uv run pytest tests/test_model_picker_tui.py tests/test_connect_provider_modal.py tests/test_auto_connect_prompt.py tests/test_status_bar.py -v` → **54/54 passed**
+- `uv run ruff check loom/tui/model_picker.py loom/tui/status_bar.py loom/tui/app.py` → All checks passed
+- `uv run mypy loom/tui/model_picker.py loom/tui/status_bar.py loom/tui/app.py` → Success
+- `./init.sh` → 1216/1217 passed (1 pre-existing flake: mouse_wheel_bubbles_from_child_markdown)
+- Snapshot flakes rebaselined (CSS hash ID flake, documented rule #10)

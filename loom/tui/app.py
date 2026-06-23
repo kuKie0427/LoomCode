@@ -711,12 +711,27 @@ class AgentTUIApp(App):
             else:
                 chat_log.append_system_note("No checkpoint found.")
         elif cmd == "status":
+            from loom.agent.credential import credentials
+            from loom.agent.providers import PROVIDERS
+            all_creds = credentials.all()
             status = (
                 f"**Session Status**\n"
                 f"- Model: `{self.llm.model}`\n"
                 f"- Messages: {len(self.history)}\n"
                 f"- Tool calls: {self.tool_call_count}\n"
+                f"\n"
+                f"**Providers:**\n"
             )
+            for pid in sorted(PROVIDERS):
+                try:
+                    inst = PROVIDERS[pid](api_key="", base_url=None)
+                    display = inst.display_name or pid
+                except Exception:
+                    display = pid
+                if pid in all_creds:
+                    status += f"  ✓ **{display}** ({pid}) — key saved\n"
+                else:
+                    status += f"    {display} ({pid}) — no key\n"
             chat_log.append_system_note(status)
         elif cmd == "connect":
             from loom.tui.connect_provider import ConnectProviderModal

@@ -7,6 +7,7 @@ from textual.containers import Container, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Label, ListItem, ListView, Static
 
+from loom.agent.credential import credentials
 from loom.agent.model_state import ModelRef
 
 
@@ -57,6 +58,8 @@ class ModelPicker(ModalScreen[tuple[str, str]]):
     def __init__(self, recent: list[ModelRef] | None = None) -> None:
         super().__init__()
         self._recent = recent or []
+        # Maps Textual-safe widget IDs to (provider_id, model_id) tuples.
+        self._model_items: dict[str, tuple[str, str]] = {}
 
     def compose(self) -> ComposeResult:
         with Container(id="model-picker-dialog"):
@@ -68,10 +71,12 @@ class ModelPicker(ModalScreen[tuple[str, str]]):
                         ListItem(Label("── Recent ──", classes="section-header"))
                     )
                     for ref in self._recent:
+                        safe_id = f"recent-{len(items)}"
+                        self._model_items[safe_id] = (ref.provider_id, ref.model_id)
                         items.append(
                             ListItem(
                                 Label(f"  {ref}"),
-                                id=f"recent:{ref.provider_id}/{ref.model_id}",
+                                id=safe_id,
                             )
                         )
                 items.append(
@@ -82,12 +87,18 @@ class ModelPicker(ModalScreen[tuple[str, str]]):
                 for pid in sorted(PROVIDERS):
                     try:
                         inst = PROVIDERS[pid](api_key="", base_url=None)
+                        has_creds = credentials.get(pid) is not None
                         for model in inst.supported_models:
                             cw = inst.context_window(model)
+                            status_icon = " [$accent]✓[/]" if has_creds else ""
+                            safe_id = f"model-{len(items)}"
+                            self._model_items[safe_id] = (pid, model)
                             items.append(
                                 ListItem(
-                                    Label(f"  {pid}/{model} ({cw:,} ctx)"),
-                                    id=f"model:{pid}/{model}",
+                                    Label(
+                                        f"  {pid}/{model} ({cw:,} ctx){status_icon}"
+                                    ),
+                                    id=safe_id,
                                 )
                             )
                     except Exception:
@@ -98,7 +109,11 @@ class ModelPicker(ModalScreen[tuple[str, str]]):
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if not event.item.id:
             return
-        if event.item.id.startswith("model:"):
+        # Look up model info via _model_items dict (set by compose).
+        pid_mid = self._model_items.get(event.item.id)
+        if pid_mid is not None:
+            pid, mid = pid_mid
+        elif event.item.id.startswith("model:"):
             model_str = event.item.id[len("model:"):]
             pid, _, mid = model_str.partition("/")
         elif event.item.id.startswith("recent:"):

@@ -1231,6 +1231,15 @@
       "status": "done",
       "verification": "uv run pytest tests/test_auto_connect_prompt.py -v",
       "evidence": "uv run pytest tests/test_auto_connect_prompt.py -v → 4/4 passed. Tasks 1-3 implemented: (1) _check_credentials_on_startup added to AgentTUIApp.on_mount — empty credentials → pushes ConnectProviderModal; (2) ModelPicker.on_list_view_selected checks credentials.get(pid) before dismiss — unconnected provider pushes AuthInputModal; (3) loop.py stream error handler appends `/connect` hint when error_code==\"auth\". All 4 tests pass: startup-no-creds-pushes, startup-with-creds-skip, picker-unconnected-pushes-auth, auth-error-appends-hint. Updated: loom/tui/app.py (+41), loom/tui/model_picker.py (+22), loom/agent/loop.py (+2), tests/test_auto_connect_prompt.py (NEW +102), tests/test_model_picker_tui.py (+4)."
+    },
+    {
+      "id": "f-multi-model-providers-p4c-status-indicators",
+      "name": "Status bar provider indicator + picker status",
+      "description": "ModelPicker 给已连接 provider 加 ✓ 标记。status_bar 显示当前 provider|model 和连接状态。/status 列出所有 provider 的 auth 状态。",
+      "dependencies": ["f-multi-model-providers-p4b-auto-prompt"],
+      "status": "done",
+      "verification": "uv run pytest tests/test_provider_status_indicator.py -v",
+      "evidence": "uv run pytest tests/test_provider_status_indicator.py -v → 4/4 passed. 1216/1217 tests pass in full init.sh (1 pre-existing flake: mouse_wheel_bubbles). ModelPicker shows ✓ for connected providers. StatusBar shows ✓/✗ after model name. /status lists all providers with ✓/no-key. Bug fix: ModelPicker IDs were invalid Textual DOM IDs (containing /) — fixed with safe counter-based IDs + _model_items lookup dict."
     }
   ]
 }
