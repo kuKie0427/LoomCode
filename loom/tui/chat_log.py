@@ -434,12 +434,21 @@ class ThinkingMarker(Static):
             self.update(f"{frame} thinking · {self._elapsed_str()}")
 
     def on_click(self, event: Click) -> None:
-        if self._display is not None:
-            self._on_toggle(self._display)
+        self._handle_toggle()
 
     def on_press(self) -> None:
+        self._handle_toggle()
+
+    def _handle_toggle(self) -> None:
+        """Toggle the thinking display, or notify the user when no thinking
+        content has been streamed yet (e.g. non-thinking model, or extended
+        thinking disabled). Without this feedback, the click is a silent
+        no-op and the user is left wondering why the spinner won't expand.
+        """
         if self._display is not None:
             self._on_toggle(self._display)
+        else:
+            self.notify("No thinking content for this response", timeout=2)
 
     def set_complete(self) -> None:
         if not self._complete:
