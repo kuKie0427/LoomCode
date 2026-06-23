@@ -6676,3 +6676,43 @@ Changes:
 - `tests/test_connect_provider_modal.py` (NEW) — 15 tests, all passing
 
 Verification: 15/15 new tests pass, ruff+mypy clean, pre-existing failures unchanged.
+
+## P4b Auto-prompt on Missing Credentials (2026-06-23)
+
+**WIP=1** | **feature**: `f-multi-model-providers-p4b-auto-prompt`
+
+Implementation of 3 auto-prompt behaviors:
+
+### Task 1 — Startup credential check
+- `loom/tui/app.py`: Added `_check_credentials_on_startup()` method
+- Called at end of `on_mount()` after `_detect_git_branch()`
+- Uses `credentials.all()` — empty dict → pushes `ConnectProviderModal`
+- Guard against double-push via screen_stack isinstance check
+- ESC cancel returns None → TUI continues normally
+- Uses lazy imports to avoid circular dependencies
+
+### Task 2 — ModelPicker auto jump to AuthInput
+- `loom/tui/model_picker.py`: `on_list_view_selected` checks `credentials.get(pid)`
+- If None → pushes `AuthInputModal(pid)` with `_on_login_then_switch` callback
+- On login success → `dismiss((pid, mid))` switches model
+- On login cancel → return (keep picker open)
+- Works for both `model:` and `recent:` prefixes
+
+### Task 3 — Auth error hint in chat log
+- `loom/agent/loop.py`: 2-line addition after err_text construction
+- When `ev.error_code == "auth"`, appends `"\n→ Run /connect to register your API key."`
+- Non-auth and None error codes unchanged
+
+### Task 4 — Tests
+- `tests/test_auto_connect_prompt.py` (NEW, 102 lines, 4 tests)
+  - `test_startup_with_no_credentials_pushes_modal` ✅
+  - `test_startup_with_credentials_does_not_push_modal` ✅
+  - `test_model_picker_unconnected_provider_pushes_auth` ✅
+  - `test_auth_error_appends_connect_hint` ✅
+- `tests/test_model_picker_tui.py` (MODIFIED, +4 lines) — mock credentials.get for existing test
+
+### Verification
+- `uv run pytest tests/test_auto_connect_prompt.py -v` → **4/4 passed**
+- `uv run ruff check loom/tui/app.py loom/tui/model_picker.py tests/test_auto_connect_prompt.py` → All checks passed
+- `uv run mypy loom/tui/app.py loom/tui/model_picker.py tests/test_auto_connect_prompt.py` → Success
+- Pre-existing credential/tui_header/tui_snapshot test failures unchanged (documented in prior phases)

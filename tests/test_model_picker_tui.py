@@ -40,7 +40,10 @@ def test_on_list_view_selected_parses_model_id() -> None:
     mock_event = MagicMock()
     mock_event.item.id = "model:openai/gpt-4o"
 
-    with patch.object(mp, "dismiss") as mock_dismiss:
+    fake_cred = MagicMock()
+    with patch.object(mp, "dismiss") as mock_dismiss, patch(
+        "loom.agent.credential.credentials.get", return_value=fake_cred
+    ):
         mp.on_list_view_selected(mock_event)
     mock_dismiss.assert_called_once_with(("openai", "gpt-4o"))
 

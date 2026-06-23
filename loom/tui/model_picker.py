@@ -101,11 +101,31 @@ class ModelPicker(ModalScreen[tuple[str, str]]):
         if event.item.id.startswith("model:"):
             model_str = event.item.id[len("model:"):]
             pid, _, mid = model_str.partition("/")
-            self.dismiss((pid, mid))
         elif event.item.id.startswith("recent:"):
             model_str = event.item.id[len("recent:"):]
             pid, _, mid = model_str.partition("/")
-            self.dismiss((pid, mid))
+        else:
+            return
+
+        from loom.agent.credential import credentials  # lazy import
+
+        if credentials.get(pid) is None:
+            from loom.tui.auth_input import AuthInputModal  # lazy import
+
+            self.app.push_screen(
+                AuthInputModal(pid),
+                lambda result: self._on_login_then_switch(pid, mid, result),
+            )
+            return
+
+        self.dismiss((pid, mid))
+
+    def _on_login_then_switch(
+        self, provider_id: str, model_id: str, login_result: str | None
+    ) -> None:
+        if login_result is None:
+            return
+        self.dismiss((provider_id, model_id))
 
     def action_cancel(self) -> None:
         self.dismiss(None)

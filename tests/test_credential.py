@@ -20,6 +20,28 @@ import pytest
 
 from loom.agent.credential import CredentialInfo, CredentialManager
 
+
+@pytest.fixture(autouse=True)
+def _clear_provider_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear all provider env vars before each credential test.
+
+    loom.agent.loop imports dotenv.load_dotenv() at module level, which
+    loads ANTHROPIC_API_KEY (and other provider env vars) from .env into
+    os.environ. This fixture ensures a clean slate for every credential
+    test so env-var and file tests don't accidentally pick up the real
+    key from the user's .env or shell.
+    """
+    for var in (
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "OPENAI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "OLLAMA_API_KEY",
+        "OPENROUTER_API_KEY",
+        "LOOM_AUTH_CONTENT",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
 # ---------------------------------------------------------------------------
 # File permission tests
 # ---------------------------------------------------------------------------
@@ -146,11 +168,15 @@ def test_credential_manager_loom_auth_content_override(
 # ---------------------------------------------------------------------------
 
 
-def test_credential_manager_get_from_keyring(tmp_path: Path) -> None:
+def test_credential_manager_get_from_keyring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Keyring must be checked before LOOM_AUTH_CONTENT."""
-    m = CredentialManager(auth_path=tmp_path / "auth.json")
-    with patch.object(m, "_try_keyring_get", return_value="sk-keyring-key"):
-        cred = m.get("anthropic")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with patch("loom.agent.credential._HAS_KEYRING", True):
+        m = CredentialManager(auth_path=tmp_path / "auth.json")
+        with patch.object(m, "_try_keyring_get", return_value="sk-keyring-key"):
+            cred = m.get("anthropic")
     assert cred is not None
     assert cred.api_key == "sk-keyring-key"
     assert cred.source == "keyring"

@@ -264,6 +264,7 @@ class AgentTUIApp(App):
         self.set_interval(60.0, self._tick_session_elapsed, name="elapsed-tick")
         self.set_interval(1.0, self._tick_shuttle, name="shuttle-tick")
         self._detect_git_branch()
+        self._check_credentials_on_startup()
 
     def on_key(self, event) -> None:
         pass
@@ -384,6 +385,46 @@ class AgentTUIApp(App):
             self.query_one(StatusBar).git_branch = branch
         except Exception:
             pass
+
+    def _check_credentials_on_startup(self) -> None:
+        """If no provider credentials are configured, auto-prompt the user.
+
+        Runs once at TUI mount. Reads ``CredentialManager.all()`` — if the
+        resulting dict is empty, no provider has an API key configured across
+        any of the four priority layers (keyring, ``LOOM_AUTH_CONTENT``, env
+        var, ``auth.json``). In that case we push ``ConnectProviderModal`` so
+        the user can pick a provider and log in. ESC-cancel returns ``None``
+        and the TUI continues normally (the user can re-trigger via
+        ``/connect`` later).
+
+        Guard: don't double-push — if a ``ConnectProviderModal`` is already
+        on the screen stack (e.g. from a prior ``/connect`` slash command),
+        skip. This makes the startup hook idempotent against any future
+        re-entry path.
+        """
+        from loom.agent.credential import credentials  # lazy: avoid circular
+        from loom.tui.connect_provider import ConnectProviderModal  # lazy
+
+        try:
+            configured = credentials.all()
+        except Exception:
+            # Credential lookup is best-effort — never block startup on a
+            # credential backend failure (keyring, malformed file, etc.).
+            return
+
+        if configured:
+            return
+
+        # Idempotency guard: skip if ConnectProviderModal is already pushed.
+        try:
+            stack = self.screen_stack
+        except Exception:
+            stack = []
+        for screen in stack:
+            if isinstance(screen, ConnectProviderModal):
+                return
+
+        self.push_screen(ConnectProviderModal(), self._on_connect_done)
 
     def watch_user_turn_count(self, _old: int, _new: int) -> None:
         self._sync_status_bar()

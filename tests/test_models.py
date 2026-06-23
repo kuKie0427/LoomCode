@@ -1,5 +1,17 @@
+import pytest
+
 from loom.agent.llm import LLMClient
 from tests._mock_provider import MockProvider
+
+
+@pytest.fixture(autouse=True)
+def _clear_provider_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear provider env vars that may have been loaded from .env by
+    loom.agent.loop's module-level dotenv.load_dotenv()."""
+    for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY",
+                "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "LOOM_AUTH_CONTENT"):
+        monkeypatch.delenv(var, raising=False)
+    # Restore the default env so LLMClient init can act as if .env doesn't exist
 
 
 def test_init_creates_anthropic_client(mocker, monkeypatch):

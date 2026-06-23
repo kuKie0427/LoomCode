@@ -375,6 +375,8 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                                 f"[LLM error: {ev.error_code or 'unknown'}] "
                                 f"{ev.error_message or 'provider returned an error event'}"
                             )
+                            if ev.error_code == "auth":
+                                err_text += "\n→ Run /connect to register your API key."
                             logger.error("agent_loop stream error: {}", err_text)
                             content_blocks.append(TextBlock(text=err_text))
                             if cb["on_text_delta"] is not None:
