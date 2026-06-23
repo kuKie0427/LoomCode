@@ -6766,3 +6766,43 @@ Provider status indicators across 3 TUI surfaces + tests.
 - `uv run mypy loom/tui/model_picker.py loom/tui/status_bar.py loom/tui/app.py` → Success
 - `./init.sh` → 1216/1217 passed (1 pre-existing flake: mouse_wheel_bubbles_from_child_markdown)
 - Snapshot flakes rebaselined (CSS hash ID flake, documented rule #10)
+
+## Session: tui-cmd-completion-p0 — SlashCommand 注册表重构
+
+**Date**: 2026-06-23
+**Plan**: tui-cmd-completion-p0
+**Status**: ✅ Done — 所有 Gate 全绿
+
+### 完成内容
+
+- **Task 0**: `feature_list.json` 添加 `f-tui-cmd-completion-p0` 条目
+- **Task 1**: 新建 `loom/tui/slash_commands.py` (198 行) — `SlashCommand` dataclass + `SLASH_COMMANDS` 注册表 (7 条命令: help/clear/model/connect/resume/status/quit) + 7 个 handler 函数 (原样从 app.py 搬出) + `find_command()` / `all_commands()` 查询函数
+- **Task 2**: 重构 `loom/tui/app.py::run_slash_command` — 从 85 行 if/elif/else 链替换为 12 行查表分发 (find_command → entry.handler)
+- **Task 3**: 新建 `tests/test_slash_commands.py` (7 个单测, MagicMock 模拟, 无真实 Textual app)
+- **Task 4**: 新建 `loom/eval/cases/slash_command_registry.py` — eval case 锁定注册表元数据
+
+### 验证结果
+
+| Gate | Status |
+|------|--------|
+| `pytest tests/test_slash_commands.py -v` 7/7 | ✅ |
+| `loom eval --filter slash_command_registry` 1/1 PASS | ✅ |
+| `grep -c "elif cmd ==" loom/tui/app.py` → 0 | ✅ |
+| `loom/tui/slash_commands.py` 存在且有 7 条命令 | ✅ |
+| 手测 TUI `/help` / `/status` / `/q` | ✅ |
+| `./init.sh` 1224 passed, 8 snapshots, all green | ✅ |
+| `feature_list.json` 更新为 done | ✅ |
+
+### 文件变更
+
+- **新建**: `loom/tui/slash_commands.py`, `tests/test_slash_commands.py`, `loom/eval/cases/slash_command_registry.py`
+- **修改**: `loom/tui/app.py` (run_slash_command 重构), `loom/eval/cases/__init__.py` (注册 eval case), `feature_list.json` (条目), `tests/test_connect_provider_modal.py` (测试适配)
+- **未修改**: 无 scope creep
+
+### 注意点
+
+- `find_command` 使用 `lower()` 大小写不敏感匹配
+- `/quit` 支持 `q` / `quit` / `exit` 三个别名通过 `aliases=("q", "exit")` 实现
+- handler 签名统一为 `async def handler(app: AgentTUIApp, args: str) -> None`
+- 使用 TYPE_CHECKING 避免循环导入
+- 所有内部导入 (checkpoint/ModelState/credentials/PROVIDERS) 保留在 handler 函数体内 (懒导入)

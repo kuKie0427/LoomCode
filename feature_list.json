@@ -1240,6 +1240,15 @@
       "status": "done",
       "verification": "uv run pytest tests/test_provider_status_indicator.py -v",
       "evidence": "uv run pytest tests/test_provider_status_indicator.py -v → 4/4 passed. 1216/1217 tests pass in full init.sh (1 pre-existing flake: mouse_wheel_bubbles). ModelPicker shows ✓ for connected providers. StatusBar shows ✓/✗ after model name. /status lists all providers with ✓/no-key. Bug fix: ModelPicker IDs were invalid Textual DOM IDs (containing /) — fixed with safe counter-based IDs + _model_items lookup dict."
+    },
+    {
+      "id": "f-tui-cmd-completion-p0",
+      "name": "TUI 命令补全 P0: SlashCommand 注册表",
+      "description": "抽出 SlashCommand dataclass + SLASH_COMMANDS 注册表，run_slash_command 改查表分发。零行为变更。",
+      "dependencies": [],
+      "status": "done",
+      "verification": "uv run pytest tests/test_slash_commands.py && uv run python -m loom.cli eval --filter slash_command_registry",
+      "evidence": "uv run pytest tests/test_slash_commands.py -v → 7/7 passed (0.16s); uv run python -m loom.cli eval --filter slash_command_registry → 1/1 PASS; grep -c 'elif cmd ==' loom/tui/app.py → 0 (all branches moved to table lookup); ./init.sh → 1224 passed, 8 snapshots, 'Verification Complete (all green)'; manual TUI smoke: /help shows command list, /q exits. loom/tui/slash_commands.py created (198 lines, SlashCommand dataclass + 7 handlers + find_command/all_commands); tests/test_slash_commands.py (7 unit tests); loom/eval/cases/slash_command_registry.py (1 eval case)."
     }
   ]
 }

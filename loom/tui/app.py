@@ -662,87 +662,13 @@ class AgentTUIApp(App):
         args = parts[1] if len(parts) > 1 else ""
         chat_log = self.query_one(ChatLog)
 
-        if cmd in ("q", "quit", "exit"):
-            await self.action_quit()
-        elif cmd == "clear":
-            self.history.clear()
-            self.user_turn_count = 0
-            self.tool_call_count = 0
-            self.ctx_tokens = 0
-            await chat_log.clear_content()
-        elif cmd == "help":
-            chat_log.append_system_note(
-                "**Commands:** /help, /clear, /model <name>, /connect, /quit, /resume, /status"
-            )
-        elif cmd == "model":
-            if args.strip():
-                self.llm.change_model(args.strip())
-                self._sync_status_bar()
-                chat_log.append_system_note(f"Model changed to **{self.llm.model}**")
-                from loom.agent.model_state import ModelState
-                provider, _, model_id = args.strip().partition("/")
-                if provider and model_id:
-                    ms = ModelState(WORKDIR)
-                    ms.add_recent(provider, model_id)
-                    ms.set_default(provider, model_id)
-            else:
-                from loom.agent.model_state import ModelState
-                from loom.tui.model_picker import ModelPicker
-                ms = ModelState(WORKDIR)
-                self.push_screen(ModelPicker(recent=ms.recent(limit=10)), self._on_model_picked)
-        elif cmd == "resume":
-            import loom.agent.checkpoint as checkpoint
+        from loom.tui.slash_commands import find_command
 
-            if checkpoint.exists(WORKDIR):
-                ckpt = checkpoint.load(WORKDIR)
-                if ckpt is not None:
-                    self.history = ckpt.get("messages", [])
-                    self.user_turn_count = sum(
-                        1 for m in self.history if m.get("role") == "user"
-                    )
-                    self.tool_call_count = ckpt.get("tool_call_count", 0)
-                    self._refresh_ctx_tokens()
-                    chat_log.append_system_note(
-                        f"Resumed from checkpoint ({ckpt.get('saved_at', '?')}, "
-                        f"{len(self.history)} messages)"
-                    )
-                else:
-                    chat_log.append_system_note("Checkpoint file corrupted or empty.")
-            else:
-                chat_log.append_system_note("No checkpoint found.")
-        elif cmd == "status":
-            from loom.agent.credential import credentials
-            from loom.agent.providers import PROVIDERS
-            all_creds = credentials.all()
-            status = (
-                f"**Session Status**\n"
-                f"- Model: `{self.llm.model}`\n"
-                f"- Messages: {len(self.history)}\n"
-                f"- Tool calls: {self.tool_call_count}\n"
-                f"\n"
-                f"**Providers:**\n"
-            )
-            for pid in sorted(PROVIDERS):
-                try:
-                    inst = PROVIDERS[pid](api_key="", base_url=None)
-                    display = inst.display_name or pid
-                except Exception:
-                    display = pid
-                if pid in all_creds:
-                    status += f"  ✓ **{display}** ({pid}) — key saved\n"
-                else:
-                    status += f"    {display} ({pid}) — no key\n"
-            chat_log.append_system_note(status)
-        elif cmd == "connect":
-            from loom.tui.connect_provider import ConnectProviderModal
-            if args.strip():
-                provider_id = args.strip()
-                from loom.tui.auth_input import AuthInputModal
-                self.push_screen(AuthInputModal(provider_id), self._on_connect_auth_done)
-            else:
-                self.push_screen(ConnectProviderModal(), self._on_connect_done)
-        else:
+        entry = find_command(cmd)
+        if entry is None:
             chat_log.append_system_note(f"Unknown command: **/{cmd}**. Try /help.")
+            return
+        await entry.handler(self, args)
 
     async def run_agent_turn(self, user_msg: str) -> None:
         self.history.append({"role": "user", "content": user_msg})

@@ -197,11 +197,12 @@ def test_auth_input_modal_looks_up_display_name() -> None:
 
 
 def test_app_has_connect_handler() -> None:
-    """Verify _on_connect_done and _on_connect_auth_done exist on app."""
+    """Verify run_slash_command dispatches to slash_commands table."""
     from loom.tui import app as app_module
 
     source = inspect.getsource(app_module.AgentTUIApp.run_slash_command)
-    assert "connect" in source
+    assert "find_command" in source
+    assert "elif cmd ==" not in source
 
     # Check that handler methods exist
     assert hasattr(app_module.AgentTUIApp, "_on_connect_done")
