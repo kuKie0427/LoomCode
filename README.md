@@ -15,6 +15,8 @@
 ```bash
 uv run python -m loom.cli run      # start the REPL
 uv run python -m loom.cli tui      # launch the Textual TUI
+uv run python -m loom.cli auth login anthropic   # one-time API key setup
+uv run python -m loom.cli models                # list all providers × models
 uv run python -m loom.cli eval     # run the full eval suite
 uv run python -m loom.cli --help   # see all commands
 ```
@@ -22,6 +24,7 @@ uv run python -m loom.cli --help   # see all commands
 <h3 align="center">What loom does well</h3>
 
 - **Native tools** (read, write, edit with fuzzy + multi-edit + line-range, bash with 32-pattern deny list, glob, grep with ripgrep fallback, web_fetch with HTML extraction, multi-tier memory, subagent delegation, structured trace + 3 LSP tools (goto_definition / find_references / rename_symbol with 2-pass permission gate and journal-backed rollback))
+- **6 LLM providers** (Anthropic / OpenAI / DeepSeek / Ollama / OpenRouter + OpenAI-compatible) + `/model` slash command + `loom run --model` CLI flag + secure API key storage in `~/.loom/auth.json` (chmod 600, OS keyring support)
 - **Harness engineering** (PreToolUse permission gates, PreCompact/PostCompact hooks, two-tier compaction with raw-truncate fallback, max-turns guard, lazy-cached system prompt, tool-error retry detection, Aider-style stdlib-ast repomap)
 - **Eval-driven** (300+ harness eval cases + 13 agent-quality cases; 750+ pytest tests; pre-fix bugs promoted to regression tests)
 - **Production-ready** (prompt caching, per-turn + cumulative cost telemetry, /export markdown+json with PII redaction, permission persistence with TTL, stdio MCP client with config-driven 3-state permission gate (deny/auto_approve/prompt) and per-server subagent opt-in, generic LSP client with goto_definition / find_references / rename_symbol, cold_archive + cold_load for long-context stability, `loom eval --baseline` regression detection, `loom tdd` test-driven fix workflow, GitHub Action template)
@@ -49,6 +52,8 @@ See `feature_list_roadmap.json` for the full Phase 1-4 plan.
 
 ```bash
 uv run pytest -m 'not snapshot' -q   # 760+ tests, fast
+uv run python -m loom.cli auth login anthropic   # set up an API key
+uv run python -m loom.cli models                # verify provider list
 uv run python -m loom.cli eval      # full eval suite
 ./init.sh                          # complete gate (longer, ~2min)
 ```

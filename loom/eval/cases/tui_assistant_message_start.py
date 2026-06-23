@@ -12,11 +12,61 @@ first.
 from __future__ import annotations
 
 import inspect
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-from anthropic.types import TextBlock, ToolUseBlock
-
+from loom.agent.providers.types import (
+    ProviderResponse,
+    StopReason,
+    TextBlock,
+    ToolUseBlock,
+    Usage,
+)
 from loom.eval.runner import EvalCase, EvalResult
+
+
+class _CallCounter:
+    """Simple callable that tracks how many times it was called."""
+
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    def __call__(self, *args: object, **kwargs: object) -> None:
+        self.call_count += 1
+
+
+class _CallTrackingMock:
+    """LLMClient test double that tracks invoke() calls and returns scripted responses."""
+
+    def __init__(self, *responses: ProviderResponse, model: str = "test-model") -> None:
+        self._responses = list(responses)
+        self._call_index = 0
+        self.model = model
+
+    def get_context_window(self) -> int:
+        return 128000
+
+    @property
+    def call_count(self) -> int:
+        return self._call_index
+
+    def invoke(
+        self,
+        system: str | list,
+        messages: list,
+        tools: list,
+        max_tokens: int | None = None,
+    ) -> ProviderResponse:
+        if self._call_index >= len(self._responses):
+            resp = ProviderResponse(
+                model=self.model,
+                content=[],
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(),
+            )
+        else:
+            resp = self._responses[self._call_index]
+            self._call_index += 1
+        return resp
 
 # ── Case 1: DEFAULT_CALLBACKS contains on_assistant_message_start ─────────────
 
@@ -73,34 +123,24 @@ class AgentLoopAssistantMessageStartFiresPerLLMCall(EvalCase):
     )
 
     def run(self) -> EvalResult:
-        responses = iter([
-            MagicMock(
-                content=[
-                    ToolUseBlock(
-                        type="tool_use", name="bash",
-                        input={"command": "ls"}, id="tu_99",
-                    ),
-                ],
-                stop_reason="tool_use",
-                usage=MagicMock(input_tokens=100, output_tokens=50),
+
+        mock_llm = _CallTrackingMock(
+            ProviderResponse(
+                model="test-model",
+                content=[ToolUseBlock(id="tu_99", name="bash", input={"command": "ls"})],
+                stop_reason=StopReason.TOOL_USE,
+                usage=Usage(input_tokens=100, output_tokens=50),
             ),
-            MagicMock(
-                content=[TextBlock(type="text", text="Done")],
-                stop_reason="end_turn",
-                usage=MagicMock(input_tokens=100, output_tokens=50),
+            ProviderResponse(
+                model="test-model",
+                content=[TextBlock(text="Done")],
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(input_tokens=100, output_tokens=50),
             ),
-        ])
+        )
 
-        mock_client = MagicMock()
-        mock_client.messages.create.side_effect = lambda **kw: next(responses)
-
-        mock_llm = MagicMock()
-        mock_llm.model = "test-model"
-        mock_llm.client = mock_client
-        mock_llm.get_context_window.return_value = 128000
-
-        on_message_start = MagicMock()
-        on_assistant_message_start = MagicMock()
+        on_message_start = _CallCounter()
+        on_assistant_message_start = _CallCounter()
 
         with patch("loom.agent.loop.configure_logging"), \
              patch("loom.agent.loop.trace_mod"), \
@@ -123,11 +163,11 @@ class AgentLoopAssistantMessageStartFiresPerLLMCall(EvalCase):
                 },
             )
 
-        if mock_client.messages.create.call_count != 2:
+        if mock_llm.call_count != 2:
             return EvalResult(
                 name=self.name, passed=False,
                 detail=(
-                    f"LLM called {mock_client.messages.create.call_count} "
+                    f"LLM called {mock_llm.call_count} "
                     f"times, expected 2"
                 ),
             )
@@ -168,22 +208,18 @@ class AgentLoopMessageStartStillOncePerInvocation(EvalCase):
     )
 
     def run(self) -> EvalResult:
-        mock_resp = MagicMock()
-        mock_resp.content = [MagicMock(type="text", text="Hi")]
-        mock_resp.stop_reason = "end_turn"
-        mock_resp.usage.input_tokens = 100
-        mock_resp.usage.output_tokens = 50
 
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_resp
+        mock_llm = _CallTrackingMock(
+            ProviderResponse(
+                model="test-model",
+                content=[TextBlock(text="Hi")],
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(input_tokens=100, output_tokens=50),
+            ),
+        )
 
-        mock_llm = MagicMock()
-        mock_llm.model = "test-model"
-        mock_llm.client = mock_client
-        mock_llm.get_context_window.return_value = 128000
-
-        on_message_start = MagicMock()
-        on_assistant_message_start = MagicMock()
+        on_message_start = _CallCounter()
+        on_assistant_message_start = _CallCounter()
 
         with patch("loom.agent.loop.configure_logging"), \
              patch("loom.agent.loop.trace_mod"), \

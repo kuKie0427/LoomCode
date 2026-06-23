@@ -1,3 +1,5 @@
+import json
+import os
 import re
 import shutil
 import subprocess
@@ -12,6 +14,7 @@ from loguru import logger
 
 import loom.agent.trace as trace_mod
 from loom.agent.config import LLM_CONFIG
+from loom.agent.credential import credentials
 from loom.agent.permissions import DEFAULT_POLICY
 from loom.agent.tool_registry import Tool, ToolRegistry
 from loom.memory import MemoryStore
@@ -1338,6 +1341,15 @@ def _content_to_message_dict(content) -> list:
 
 
 def spawn_subagent(description: str, llm_client=None, hooks=None) -> str:
+    # Inherit all current credentials into LOOM_AUTH_CONTENT for child subagents
+    _creds = credentials.all()
+    if _creds:
+        import dataclasses
+
+        os.environ["LOOM_AUTH_CONTENT"] = json.dumps({
+            pid: dataclasses.asdict(c) for pid, c in _creds.items()
+        })
+
     if llm_client is None or hooks is None:
         from loom.agent.loop import hooks as _hooks
         from loom.agent.loop import llm_client as _llm_client

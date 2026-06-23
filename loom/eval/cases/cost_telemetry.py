@@ -16,7 +16,7 @@ class CostModuleDefined(EvalCase):
             return EvalResult(name=self.name, passed=False, detail=f"import failed: {exc}")
         for name in ("compute_cost", "record_turn", "reset_session_cost", "get_session_cost",
                      "TokenUsage", "CostBreakdown", "SessionCostAccumulator",
-                     "usage_from_response", "DEFAULT_PRICING"):
+                     "usage_from_response"):
             if not hasattr(c, name):
                 return EvalResult(name=self.name, passed=False, detail=f"missing {name}")
         return EvalResult(name=self.name, passed=True, detail="all public API present")

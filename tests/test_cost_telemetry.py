@@ -7,7 +7,6 @@ session accumulator lifecycle, and the trace event integration.
 from __future__ import annotations
 
 from loom.agent.cost import (
-    DEFAULT_PRICING,
     CostBreakdown,
     SessionCostAccumulator,
     TokenUsage,
@@ -41,10 +40,10 @@ def test_compute_cost_cache_write_uses_125pct_rate():
     assert cost.cache_write_cost == 3.75
 
 
-def test_compute_cost_unknown_model_falls_back_to_sonnet():
+def test_compute_cost_unknown_model_returns_zero():
     usage = TokenUsage(input_tokens=1_000_000)
     cost = compute_cost("totally-unknown-model", usage)
-    assert cost.input_cost == 3.0
+    assert cost.total_usd == 0.0
 
 
 def test_compute_cost_deepseek_is_zero():
@@ -118,14 +117,6 @@ def test_reset_session_cost_clears_state():
     assert get_session_cost() is not None
     reset_session_cost()
     assert get_session_cost() is None
-
-
-def test_default_pricing_has_all_required_models():
-    for model in ("claude-opus-4-1", "claude-sonnet-4-5", "claude-haiku-3-5",
-                  "deepseek-v4-flash", "deepseek-v4-pro"):
-        assert model in DEFAULT_PRICING, f"missing {model}"
-        for k in ("input", "output", "cache_read", "cache_write"):
-            assert k in DEFAULT_PRICING[model], f"{model} missing {k}"
 
 
 def test_cost_breakdown_defaults_to_zero():

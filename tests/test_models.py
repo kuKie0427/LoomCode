@@ -1,6 +1,5 @@
 from loom.agent.llm import LLMClient
-
-ANTHROPIC_PATCH = "loom.agent.providers.anthropic.anthropic.Anthropic"
+from tests._mock_provider import MockProvider
 
 
 def test_init_creates_anthropic_client(mocker, monkeypatch):
@@ -8,11 +7,17 @@ def test_init_creates_anthropic_client(mocker, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.com")
 
-    mock_anthropic_cls = mocker.patch(ANTHROPIC_PATCH)
+    mock_prov = MockProvider(api_key="fake-key", base_url="https://example.com")
+    get_provider_mock = mocker.patch(
+        "loom.agent.llm.get_provider",
+        return_value=mock_prov,
+    )
     client = LLMClient(model="test-model")
 
-    mock_anthropic_cls.assert_called()
-    assert client.client is mock_anthropic_cls.return_value
+    get_provider_mock.assert_any_call(
+        "anthropic", api_key="fake-key", base_url="https://example.com"
+    )
+    assert client.model == "anthropic/test-model"
 
 
 def test_init_uses_env_config(mocker, monkeypatch):
@@ -20,7 +25,11 @@ def test_init_uses_env_config(mocker, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "my-api-key")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://custom.example.com")
 
-    mocker.patch(ANTHROPIC_PATCH)
+    mock_prov = MockProvider(api_key="my-api-key", base_url="https://custom.example.com")
+    mocker.patch(
+        "loom.agent.llm.get_provider",
+        return_value=mock_prov,
+    )
     client = LLMClient(model="test-model")
 
     assert client.api_key == "my-api-key"
@@ -32,7 +41,11 @@ def test_change_model_updates_model_attr(mocker, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.com")
 
-    mocker.patch(ANTHROPIC_PATCH)
+    mock_prov = MockProvider(api_key="fake-key", base_url="https://example.com")
+    mocker.patch(
+        "loom.agent.llm.get_provider",
+        return_value=mock_prov,
+    )
     client = LLMClient(model="original-model")
 
     client.change_model("new-model")
@@ -40,34 +53,31 @@ def test_change_model_updates_model_attr(mocker, monkeypatch):
     assert client.model == "anthropic/new-model"
 
 
-def test_get_context_window_known_model(mocker, monkeypatch):
+def test_get_context_window_known_model(monkeypatch):
     """Returns correct window for a known model."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.com")
 
-    mocker.patch(ANTHROPIC_PATCH)
     client = LLMClient(model="deepseek-v4-flash")
 
     assert client.get_context_window() == 64_000
 
 
-def test_get_context_window_unknown_model(mocker, monkeypatch):
+def test_get_context_window_unknown_model(monkeypatch):
     """Unknown model returns the default window."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.com")
 
-    mocker.patch(ANTHROPIC_PATCH)
     client = LLMClient(model="unknown-model")
 
     assert client.get_context_window() == 200_000
 
 
-def test_get_context_window_after_change(mocker, monkeypatch):
+def test_get_context_window_after_change(monkeypatch):
     """Window updates after model change."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.com")
 
-    mocker.patch(ANTHROPIC_PATCH)
     client = LLMClient(model="unknown-model")
 
     client.change_model("deepseek-v4-flash")

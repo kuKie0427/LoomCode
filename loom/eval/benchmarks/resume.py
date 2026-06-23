@@ -30,13 +30,73 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
-
-from anthropic.types import TextBlock
 
 from loom.agent import checkpoint
 from loom.agent.context import Context
 from loom.agent.loop import agent_loop
+from loom.agent.providers.types import (
+    ProviderResponse,
+    StopReason,
+    TextBlock,
+    ToolUseBlock,
+    Usage,
+)
+
+
+class _ScriptedLLM:
+    """Mock LLMClient that returns scripted ProviderResponses and tracks call info.
+
+    Replaces the MagicMock-based _make_llm for the resume benchmark.
+    """
+
+    def __init__(
+        self, *responses: ProviderResponse, model: str = "fixture-test"
+    ) -> None:
+        self._responses = list(responses)
+        self._call_index = 0
+        self.model = model
+        self._call_kwargs_history: list[dict] = []
+
+    def get_context_window(self, _model: str | None = None) -> int:
+        return 200_000
+
+    @property
+    def call_count(self) -> int:
+        return self._call_index
+
+    @property
+    def call_args(self) -> SimpleNamespace:
+        """Last call's kwargs (compat with MagicMock.call_args.kwargs pattern)."""
+        return SimpleNamespace(
+            kwargs=self._call_kwargs_history[-1] if self._call_kwargs_history else {}
+        )
+
+    def invoke(
+        self,
+        system: str | list,
+        messages: list,
+        tools: list,
+        max_tokens: int | None = None,
+    ) -> ProviderResponse:
+        self._call_kwargs_history.append(
+            {
+                "messages": messages,
+                "tools": tools,
+                "system": system,
+                "max_tokens": max_tokens,
+            }
+        )
+        if self._call_index >= len(self._responses):
+            resp = ProviderResponse(
+                model=self.model,
+                content=[],
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(),
+            )
+        else:
+            resp = self._responses[self._call_index]
+        self._call_index += 1
+        return resp
 
 
 @dataclass
@@ -61,48 +121,40 @@ class BenchmarkReport:
         return self.rate_pct >= threshold_pct
 
 
-def _build_mock_response(stop_reason: str, blocks: list) -> MagicMock:
-    resp = MagicMock()
-    resp.stop_reason = stop_reason
-    resp.content = blocks
-    resp.usage = SimpleNamespace(input_tokens=50, output_tokens=20)
-    return resp
+def _tool_use_block(call_id: str, name: str, input: dict) -> ToolUseBlock:
+    return ToolUseBlock(id=call_id, name=name, input=input)
 
 
-def _tool_use_block(call_id: str, name: str, input: dict) -> MagicMock:
-    block = MagicMock()
-    block.type = "tool_use"
-    block.id = call_id
-    block.name = name
-    block.input = input
-    return block
-
-
-def _text_block(text: str) -> TextBlock:
-    return TextBlock(type="text", text=text)
-
-
-def _make_llm(script: list) -> MagicMock:
-    """Build a mock LLMClient whose `client.messages.create` replays `script`."""
-    client = MagicMock()
-    responses = [_build_mock_response(*step) for step in script]
-    client.messages.create.side_effect = responses
-    llm = MagicMock()
-    llm.client = client
-    llm.model = "fixture-test"
-    llm.get_context_window.return_value = 200_000
-    return llm
+def _make_llm(script: list) -> _ScriptedLLM:
+    """Build a mock LLMClient that replays scripted ProviderResponses."""
+    responses: list[ProviderResponse] = []
+    for stop_reason_val, blocks in script:
+        _stop_reason = (
+            StopReason(stop_reason_val)
+            if stop_reason_val in StopReason._value2member_map_
+            else StopReason.END_TURN
+        )
+        responses.append(
+            ProviderResponse(
+                model="fixture-test",
+                content=blocks,
+                stop_reason=_stop_reason,
+                usage=Usage(input_tokens=50, output_tokens=20),
+            )
+        )
+    return _ScriptedLLM(*responses)
 
 
 def _make_5_step_script() -> list:
     """5 bash tool_use calls (each prints its step), then end_turn."""
-    script = []
+    from loom.agent.providers.types import ContentBlock
+    script: list[tuple[str, list[ContentBlock]]] = []
     for i in range(1, 6):
         script.append((
             "tool_use",
             [_tool_use_block(f"call-{i}", "bash", {"command": f"echo step-{i}"})],
         ))
-    script.append(("end_turn", [_text_block("All 5 steps done.")]))  # type: ignore[list-item]
+    script.append(("end_turn", [TextBlock(text="All 5 steps done.")]))
     return script
 
 
@@ -138,11 +190,11 @@ def run_one_trial(trial_idx: int, workdir: Path) -> TrialResult:
     except Exception as exc:
         return TrialResult(trial_idx, False, "first run raised", f"{type(exc).__name__}: {exc}")
 
-    if llm_first.client.messages.create.call_count != 6:
+    if llm_first.call_count != 6:
         return TrialResult(
             trial_idx, False,
             "first run made wrong LLM call count",
-            f"got {llm_first.client.messages.create.call_count} calls (expected 6 = 5 tool + 1 end_turn)",
+            f"got {llm_first.call_count} calls (expected 6 = 5 tool + 1 end_turn)",
         )
 
     kill_after = 3
@@ -159,14 +211,14 @@ def run_one_trial(trial_idx: int, workdir: Path) -> TrialResult:
     except Exception as exc:
         return TrialResult(trial_idx, False, "resumed run raised", f"{type(exc).__name__}: {exc}")
 
-    if llm_second.client.messages.create.call_count != 1:
+    if llm_second.call_count != 1:
         return TrialResult(
             trial_idx, False,
             "resumed run made wrong LLM call count",
-            f"got {llm_second.client.messages.create.call_count} calls (expected 1 = end_turn)",
+            f"got {llm_second.call_count} calls (expected 1 = end_turn)",
         )
 
-    second_call_kwargs = llm_second.client.messages.create.call_args.kwargs
+    second_call_kwargs = llm_second.call_args.kwargs
     sent_messages = second_call_kwargs.get("messages", [])
     if len(sent_messages) <= pre_kill_count:
         return TrialResult(

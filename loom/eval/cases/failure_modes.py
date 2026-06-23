@@ -23,7 +23,51 @@ from unittest.mock import MagicMock, patch
 
 from anthropic.types import MessageParam
 
+from loom.agent.providers.types import (
+    ProviderError,
+    ProviderErrorCode,
+    ProviderResponse,
+    StopReason,
+    TextBlock,
+    ToolUseBlock,
+    Usage,
+)
 from loom.eval.runner import EvalCase, EvalResult
+from tests._mock_provider import make_mock_provider
+
+
+class _MockLLM:
+    """Test double that wraps MockProvider and acts as LLMClient.
+
+    Returns scripted ProviderResponses in sequence on each invoke() call.
+    """
+
+    def __init__(self, *responses: ProviderResponse, model: str = "test-model") -> None:
+        self._responses = list(responses)
+        self._call_index = 0
+        self.model = model
+        self.provider = make_mock_provider()
+
+    def get_context_window(self, _model: str | None = None) -> int:
+        return 200000
+
+    def invoke(
+        self,
+        system: str | list,
+        messages: list,
+        tools: list,
+        max_tokens: int | None = None,
+    ) -> ProviderResponse:
+        if self._call_index >= len(self._responses):
+            return ProviderResponse(
+                model=self.model,
+                content=[],
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(),
+            )
+        resp = self._responses[self._call_index]
+        self._call_index += 1
+        return resp
 
 # ── Case 1: bash tool timeout ───────────────────────────────────────────────
 
@@ -56,13 +100,28 @@ class FailureModeLlmApi5xx(EvalCase):
     description = "agent_loop propagates APIStatusError-like exception to caller (does not swallow)"
 
     def run(self) -> EvalResult:
-        mock_client = MagicMock()
-        mock_client.messages.create.side_effect = Exception("anthropic.APIStatusError: 500 server_error")
 
-        mock_llm = MagicMock()
-        mock_llm.model = "fake-model"
-        mock_llm.client = mock_client
-        mock_llm.get_context_window.return_value = 200000
+        class _FailingMock:
+            """LLMClient test double whose invoke() always raises ProviderError."""
+
+            model = "test-model"
+
+            def __init__(self) -> None:
+                self.provider = make_mock_provider()
+
+            def get_context_window(self, _model: str | None = None) -> int:
+                return 200000
+
+            def invoke(
+                self,
+                system: str | list,
+                messages: list,
+                tools: list,
+                max_tokens: int | None = None,
+            ) -> ProviderResponse:
+                raise ProviderError(ProviderErrorCode.SERVER, "APIStatusError: 500 server_error")
+
+        mock_llm = _FailingMock()
 
         raised: Exception | None = None
         try:
@@ -145,19 +204,33 @@ class FailureModeUnexpectedStopReason(EvalCase):
     description = "LLM stop_reason='content_filtered' is treated as end_turn (not tool_use)"
 
     def run(self) -> EvalResult:
-        mock_response = MagicMock()
-        mock_response.stop_reason = "content_filtered"
-        mock_response.content = [MagicMock(type="text", text="I cannot help with that")]
-        mock_response.usage.input_tokens = 5
-        mock_response.usage.output_tokens = 5
 
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
+        class _ContentFilteredMock:
+            """LLMClient test double returning content_filtered stop_reason."""
 
-        mock_llm = MagicMock()
-        mock_llm.model = "fake-model"
-        mock_llm.client = mock_client
-        mock_llm.get_context_window.return_value = 200000
+            model = "test-model"
+
+            def __init__(self) -> None:
+                self.provider = make_mock_provider()
+
+            def get_context_window(self, _model: str | None = None) -> int:
+                return 200000
+
+            def invoke(
+                self,
+                system: str | list,
+                messages: list,
+                tools: list,
+                max_tokens: int | None = None,
+            ) -> ProviderResponse:
+                return ProviderResponse(
+                    model=self.model,
+                    content=[TextBlock(text="I cannot help with that")],
+                    stop_reason=StopReason.CONTENT_FILTERED,
+                    usage=Usage(input_tokens=5, output_tokens=5),
+                )
+
+        mock_llm = _ContentFilteredMock()
 
         messages = [{"role": "user", "content": "x"}]
         initial_len = len(messages)
@@ -253,29 +326,26 @@ class FailureModeSubagentToolError(EvalCase):
         from loom.agent.hooks import Hooks
         from loom.agent.tools import spawn_subagent
 
-        mock_response_tool = MagicMock()
-        mock_response_tool.stop_reason = "tool_use"
-        mock_response_tool.content = [
-            MagicMock(type="tool_use", id="call-1", name="bash",
-                      input={"command": "false"}),
-        ]
-        mock_response_tool.usage.input_tokens = 5
-        mock_response_tool.usage.output_tokens = 5
-
-        mock_response_end = MagicMock()
-        mock_response_end.stop_reason = "end_turn"
-        mock_response_end.content = [MagicMock(type="text", text="Done with error")]
-        mock_response_end.usage.input_tokens = 5
-        mock_response_end.usage.output_tokens = 5
-
-        mock_client = MagicMock()
-        mock_client.client.messages.create.side_effect = [mock_response_tool, mock_response_end]
-        mock_client.model = "fake-model"
+        mock_llm = _MockLLM(
+            ProviderResponse(
+                content=[ToolUseBlock(id="call-1", name="bash", input={"command": "false"})],
+                stop_reason=StopReason.TOOL_USE,
+                usage=Usage(input_tokens=5, output_tokens=5),
+                model="fake-model",
+            ),
+            ProviderResponse(
+                content=[TextBlock(text="Done with error")],
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(input_tokens=5, output_tokens=5),
+                model="fake-model",
+            ),
+            model="fake-model",
+        )
 
         hooks = Hooks()
 
         try:
-            result = spawn_subagent("test task", llm_client=mock_client, hooks=hooks)
+            result = spawn_subagent("test task", llm_client=mock_llm, hooks=hooks)
         except Exception as exc:
             return EvalResult(
                 name=self.name, passed=False,
@@ -311,15 +381,15 @@ class FailureModeSubagentDoesntTriggerSessionEndInitSh(EvalCase):
         from loom.agent.hooks import Hooks
         from loom.agent.tools import spawn_subagent
 
-        mock_response = MagicMock()
-        mock_response.stop_reason = "end_turn"
-        mock_response.content = [MagicMock(type="text", text="subagent done")]
-        mock_response.usage.input_tokens = 5
-        mock_response.usage.output_tokens = 5
-
-        mock_client = MagicMock()
-        mock_client.client.messages.create.return_value = mock_response
-        mock_client.model = "fake-model"
+        mock_llm = _MockLLM(
+            ProviderResponse(
+                content=[TextBlock(text="subagent done")],
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(input_tokens=5, output_tokens=5),
+                model="fake-model",
+            ),
+            model="fake-model",
+        )
 
         hooks = Hooks()
 
@@ -337,7 +407,7 @@ class FailureModeSubagentDoesntTriggerSessionEndInitSh(EvalCase):
 
         with patch.object(builtins, "open", new=tracking_open):
             try:
-                spawn_subagent("quick task", llm_client=mock_client, hooks=hooks)
+                spawn_subagent("quick task", llm_client=mock_llm, hooks=hooks)
             except Exception:
                 pass
 

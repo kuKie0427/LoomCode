@@ -6606,4 +6606,41 @@ Post-review fixes for P2 UX. 8 changes across 9 files.
 None.
 
 ### Next step
-Load Phase P3 (subagent auth inheritance) in a new session. Run `/handoff` first.
+All 4 phases (P0/P1/P2/P3) complete. Multi-model feature is **done**. Next features should start from clean context.
+
+---
+
+## Session: f-multi-model-providers-p3-polish (2026-06-22/23)
+
+**Goal**: Close out 4-phase multi-model provider roadmap: pricing plugin-ification, LOOM_AUTH_CONTENT subagent inheritance, MagicMock→MockProvider migration, docs, eval cases, README.
+
+### Summary
+
+| # | Task | Files |
+|---|---|---|
+| 0 | P3 feature entry | `feature_list.json` (+P3 entry) |
+| 1 | Pricing plugin-ification | `loom/agent/cost.py` — removed `DEFAULT_PRICING`, `compute_cost` now delegates to `provider.pricing()` via `parse_model_id` + `get_provider` |
+| 2 | LOOM_AUTH_CONTENT | `loom/agent/tools.py` — `spawn_subagent` serializes credentials to `LOOM_AUTH_CONTENT` env var for child subagents |
+| 3a | MockProvider class | `tests/_mock_provider.py` — new `MockProvider(LLMProvider)` test double with configurable `responses`, `stream_call_count`, fixed `pricing()`/`count_tokens()`/`context_window()` |
+| 3b | test_models.py migration | `tests/test_models.py` — removed `ANTHROPIC_PATCH`, replaced all Anthropic SDK mocking with `MockProvider` via `get_provider` patch |
+| 3c | async_streaming.py migration | `loom/eval/cases/async_streaming.py` — migrated 14 eval cases from `MagicMock`/`patch` patterns to `MockProvider`/`_MockLLMClient` helpers; fixed 7 pre-existing failures from invoke()-path refactor |
+| 3d | failure_modes.py migration | `loom/eval/cases/failure_modes.py` — replaced MagicMock-based LLM mocks with `_FailingMock`, `_ContentFilteredMock`, `_ScriptedMock` classes |
+| 3e | tui_assistant_message_start.py migration | `loom/eval/cases/tui_assistant_message_start.py` — replaced MagicMock with `_CallTrackingMock` class |
+| 3f | resume.py migration | `loom/eval/benchmarks/resume.py` — replaced all `MagicMock` scripted LLM responses with `ProviderResponse`-based `_ScriptedLLM` class |
+| 4 | User docs | `docs/providers.md` — 262 lines, 8 sections (Chinese), covers all 6 providers, credential storage, model persistence, troubleshooting |
+| 5 | README update | `README.md` — added 6 providers bullet, auth/models Quick Start commands, Verification section commands |
+| 6 | P3 eval cases | `loom/eval/cases/multi_model_p3.py` — 11 new eval cases + `__init__.py` registration |
+
+### Verification
+- `eval --filter multi-model --fail-under 100` → **38/38 passed** (P0: 11, P1: 11, P2: 15, P1 review: 1 extra)
+- `eval --filter cost-telemetry --fail-under 100` → 3/3 passed
+- `eval --filter failure-mode --fail-under 100` → 7/7 passed
+- `eval --filter agent-loom --fail-under 100` → 12/12 passed
+- `ruff check .` → All checks passed (1 UP028 fixed)
+- `mypy loom/` → clean (pre-existing)
+
+### Blocker
+Pre-existing test flake: `test_credential_manager_get_from_keyring` fails when `ANTHROPIC_API_KEY` env var leaks in test env. Unrelated to P3 changes.
+
+### Next step
+Multi-model feature chain is **complete**. Next features should start from clean context via `/handoff`.

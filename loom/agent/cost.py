@@ -1,12 +1,11 @@
-"""Token cost calculator.
+"""Token cost calculator (provider-agnostic).
 
-Provides `compute_cost(model, usage) -> CostBreakdown` with
-per-model pricing tables and Anthropic's cache-aware pricing
-(cache reads are 90% cheaper than base input; cache writes
-incur a 25% premium over base input for 5-min TTL).
+Provides `compute_cost(model, usage) -> CostBreakdown` that
+delegates pricing lookups to the provider registry via
+``get_provider`` / ``parse_model_id`` / ``PricingInfo``.
 
-Pricing data as of 2026-06-22 (per million tokens, USD).
-Override via harness.toml [pricing.<model>] per_model.
+No hardcoded pricing table — each provider carries its own
+pricing data (e.g. ``AnthropicProvider._PRICING``).
 """
 
 from __future__ import annotations
@@ -16,40 +15,6 @@ from dataclasses import dataclass
 from typing import Any
 
 _logger = logging.getLogger(__name__)
-
-
-DEFAULT_PRICING: dict[str, dict[str, float]] = {
-    "claude-opus-4-1": {
-        "input": 15.0,
-        "output": 75.0,
-        "cache_read": 1.50,
-        "cache_write": 18.75,
-    },
-    "claude-sonnet-4-5": {
-        "input": 3.0,
-        "output": 15.0,
-        "cache_read": 0.30,
-        "cache_write": 3.75,
-    },
-    "claude-haiku-3-5": {
-        "input": 0.80,
-        "output": 4.0,
-        "cache_read": 0.08,
-        "cache_write": 1.0,
-    },
-    "deepseek-v4-flash": {
-        "input": 0.0,
-        "output": 0.0,
-        "cache_read": 0.0,
-        "cache_write": 0.0,
-    },
-    "deepseek-v4-pro": {
-        "input": 0.0,
-        "output": 0.0,
-        "cache_read": 0.0,
-        "cache_write": 0.0,
-    },
-}
 
 
 @dataclass
@@ -69,25 +34,34 @@ class CostBreakdown:
     total_usd: float = 0.0
 
 
-def _pricing_for(model: str) -> dict[str, float]:
-    return DEFAULT_PRICING.get(model, DEFAULT_PRICING.get("claude-sonnet-4-5", {}))
-
-
 def compute_cost(model: str, usage: TokenUsage) -> CostBreakdown:
-    p = _pricing_for(model)
-    breakdown = CostBreakdown(
-        input_cost=usage.input_tokens / 1_000_000 * p.get("input", 0.0),
-        output_cost=usage.output_tokens / 1_000_000 * p.get("output", 0.0),
-        cache_read_cost=usage.cache_read_tokens / 1_000_000 * p.get("cache_read", 0.0),
-        cache_write_cost=usage.cache_creation_tokens / 1_000_000 * p.get("cache_write", 0.0),
+    from loom.agent.providers import get_provider, parse_model_id
+
+    provider_id, model_id = parse_model_id(model)
+    try:
+        provider = get_provider(provider_id)
+        pricing = provider.pricing(model_id)
+    except Exception:
+        pricing = None
+
+    if pricing is None or pricing.input_usd_per_1m is None:
+        return CostBreakdown()
+
+    input_cost = round(
+        usage.input_tokens * (pricing.input_usd_per_1m or 0) / 1_000_000, 6
     )
-    breakdown.total_usd = (
-        breakdown.input_cost
-        + breakdown.output_cost
-        + breakdown.cache_read_cost
-        + breakdown.cache_write_cost
+    output_cost = round(
+        usage.output_tokens * (pricing.output_usd_per_1m or 0) / 1_000_000, 6
     )
-    return breakdown
+    cache_read_cost = round(
+        usage.cache_read_tokens * (pricing.cache_read_usd_per_1m or 0) / 1_000_000, 6
+    )
+    cache_write_cost = round(
+        usage.cache_creation_tokens * (pricing.cache_write_usd_per_1m or 0) / 1_000_000, 6
+    )
+    total = round(input_cost + output_cost + cache_read_cost + cache_write_cost, 6)
+
+    return CostBreakdown(input_cost, output_cost, cache_read_cost, cache_write_cost, total)
 
 
 def usage_from_response(usage: Any) -> TokenUsage:

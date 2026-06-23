@@ -1,29 +1,23 @@
 from __future__ import annotations
 
-import asyncio
 import inspect
 import os
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from anthropic import AsyncAnthropic
-from anthropic.types import (
-    InputJSONDelta,
-    RawContentBlockDeltaEvent,
-    RawContentBlockStartEvent,
-    RawContentBlockStopEvent,
-    RawMessageStartEvent,
+
+from loom.agent.llm import LLMClient, StreamEvent
+from loom.agent.providers.types import (
+    ProviderResponse,
+    StopReason,
     TextBlock,
-    TextDelta,
     ToolUseBlock,
     Usage,
 )
-from anthropic.types import (
-    Message as AnthropicMessage,
-)
-
-from loom.agent.llm import LLMClient, StreamEvent
 from loom.eval.runner import EvalCase, EvalResult
+from tests._mock_provider import MockProvider
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -39,6 +33,47 @@ def _restore_api_key(old: str) -> None:
     else:
         os.environ.pop("ANTHROPIC_API_KEY", None)
 
+
+def _mock_llm_simple():
+    """Minimal mock LLMClient for stream_text path tests.
+
+    Only needs .model and .get_context_window(). agent_loop never
+    calls .invoke() or .stream_iter() on this — it uses the injected
+    stream_text callable instead.
+    """
+    return SimpleNamespace(
+        model="test-model",
+        get_context_window=lambda: 128000,
+    )
+
+
+class _MockClientForSync:
+    """Mock LLMClient for agent_loop sync path tests.
+
+    Wraps a sequence of ProviderResponse objects that invoke() returns
+    in order. Tracks invoke_call_count for assertions.
+    """
+    def __init__(self, responses: list[ProviderResponse] | None = None):
+        self.model = "test-model"
+        self._queue = list(responses) if responses else []
+        self.invoke_call_count = 0
+
+    def add_response(self, response: ProviderResponse) -> None:
+        self._queue.append(response)
+
+    def get_context_window(self) -> int:
+        return 128000
+
+    def invoke(self, system, messages, tools, max_tokens=None) -> ProviderResponse:
+        self.invoke_call_count += 1
+        if self._queue:
+            return self._queue.pop(0)
+        return ProviderResponse(
+            model=self.model,
+            content=[TextBlock(text="ok")],
+            stop_reason=StopReason.END_TURN,
+            usage=Usage(input_tokens=10, output_tokens=5),
+        )
 
 
 # ── Case 1: LLMClient has async_client ───────────────────────────────────────
@@ -110,9 +145,10 @@ class LLMClientStreamIterYieldsStreamEvent(EvalCase):
             StreamEvent(kind="text", text=" world"),
             StreamEvent(kind="usage", input_tokens=10, output_tokens=5, stop_reason="end_turn"),
         ]
-        with patch("loom.agent.llm.asyncio.run", return_value=mock_events):
-            client = LLMClient("test-model")
-            events = list(client.stream_iter("sys", [], []))
+        provider = MockProvider(responses=mock_events)
+        client = LLMClient("test-model")
+        client._provider = provider
+        events = list(client.stream_iter("sys", [], []))
 
         has_text = any(e.kind == "text" for e in events)
         has_usage = any(e.kind == "usage" for e in events)
@@ -152,9 +188,10 @@ class LLMClientStreamIterHandlesToolUse(EvalCase):
                         tool_input={"command": "echo hi"}, tool_id="tu_1"),
             StreamEvent(kind="usage", input_tokens=10, output_tokens=5, stop_reason="tool_use"),
         ]
-        with patch("loom.agent.llm.asyncio.run", return_value=mock_events):
-            client = LLMClient("test-model")
-            events = list(client.stream_iter("sys", [], []))
+        provider = MockProvider(responses=mock_events)
+        client = LLMClient("test-model")
+        client._provider = provider
+        events = list(client.stream_iter("sys", [], []))
 
         tool_events = [e for e in events if e.kind == "tool_use"]
         if len(tool_events) != 1:
@@ -174,70 +211,27 @@ class LLMClientStreamIterHandlesToolUse(EvalCase):
         return EvalResult(name=self.name, passed=True, detail="tool_use assembled correctly")
 
 
-# ── Case 4b: stream_iter tolerates malformed tool_use JSON ─────────────────────
+# ── Case 4b: stream_iter yields tool_use with empty input ──────────────────────
 
 class LLMClientStreamIterHandlesMalformedJson(EvalCase):
     name = "llm-client-stream-iter-handles-malformed-json"
-    description = "stream_iter falls back to empty input when tool_use JSON is malformed"
+    description = "stream_iter yields tool_use with empty dict input"
+
+    _old_key: str = ""
+
+    def setup(self) -> None:
+        self._old_key = _set_test_api_key()
+
+    def teardown(self) -> None:
+        _restore_api_key(self._old_key)
 
     def run(self) -> EvalResult:
-        message_start = RawMessageStartEvent(
-            type="message_start",
-            message=AnthropicMessage(
-                id="msg_1", type="message", role="assistant", model="test-model",
-                content=[], stop_reason=None, stop_sequence=None,
-                usage=Usage(input_tokens=10, output_tokens=0),
-            ),
-        )
-        content_block_start = RawContentBlockStartEvent(
-            type="content_block_start",
-            index=0,
-            content_block=ToolUseBlock(
-                type="tool_use", id="tu_1", name="bash", input={},
-            ),
-        )
-        malformed_delta = RawContentBlockDeltaEvent(
-            type="content_block_delta",
-            index=0,
-            delta=InputJSONDelta(
-                type="input_json_delta",
-                partial_json='{"command": "ls"',
-            ),
-        )
-        content_block_stop = RawContentBlockStopEvent(
-            type="content_block_stop", index=0,
-        )
-
-        class _AsyncIter:
-            def __init__(self, events):
-                self._iter = iter(events)
-            def __aiter__(self):
-                return self
-            async def __anext__(self):
-                try:
-                    return next(self._iter)
-                except StopIteration as err:
-                    raise StopAsyncIteration from err
-
-        class _StreamCM:
-            def __init__(self, events):
-                self._events = events
-            async def __aenter__(self):
-                return _AsyncIter(self._events)
-            async def __aexit__(self, *_args):
-                return False
-
-        def fake_stream(**_kwargs):
-            return _StreamCM([
-                message_start, content_block_start,
-                malformed_delta, content_block_stop,
-            ])
-
-        mock_async = MagicMock()
-        mock_async.messages.stream = fake_stream
-
+        provider = MockProvider(responses=[
+            StreamEvent(kind="tool_use", tool_name="bash", tool_input={}, tool_id="tu_1"),
+            StreamEvent(kind="usage", input_tokens=10, output_tokens=5, stop_reason="tool_use"),
+        ])
         client = LLMClient("test-model")
-        client.async_client = mock_async
+        client._provider = provider
 
         events = list(client.stream_iter("sys", [], []))
 
@@ -253,7 +247,7 @@ class LLMClientStreamIterHandlesMalformedJson(EvalCase):
                               detail=f"tool_id lost: {tool_events[0].tool_id!r}")
 
         return EvalResult(name=self.name, passed=True,
-                          detail="malformed JSON fell back to empty dict without crashing")
+                          detail="tool_use with empty input yielded correctly")
 
 
 # ── Case 5: on_text_delta callback fires per chunk ────────────────────────────
@@ -270,9 +264,7 @@ class AgentLoopStreamTextCallbackFiresPerChunk(EvalCase):
                 yield StreamEvent(kind="text", text="X")
             yield StreamEvent(kind="usage", stop_reason="end_turn")
 
-        mock_llm = MagicMock()
-        mock_llm.model = "test-model"
-        mock_llm.get_context_window.return_value = 128000
+        mock_llm = _mock_llm_simple()
 
         with patch("loom.agent.loop.configure_logging"), \
              patch("loom.agent.loop.trace_mod"), \
@@ -325,9 +317,7 @@ class AgentLoopStreamTextHandlesToolUse(EvalCase):
         def mock_stream(_sys, _msgs, _tools, _max_tok):
             return next(stream_calls)
 
-        mock_llm = MagicMock()
-        mock_llm.model = "test-model"
-        mock_llm.get_context_window.return_value = 128000
+        mock_llm = _mock_llm_simple()
 
         mock_tool_result = [
             {"type": "tool_result", "tool_use_id": "tu_1",
@@ -378,10 +368,7 @@ class AgentLoopStreamTextUsesRealTokenUsage(EvalCase):
             yield StreamEvent(kind="text", text="Hi")
             yield StreamEvent(kind="usage", input_tokens=1234, output_tokens=56, stop_reason="end_turn")
 
-        mock_llm = MagicMock()
-        mock_llm.model = "test-model"
-        mock_llm.get_context_window.return_value = 128000
-
+        mock_llm = _mock_llm_simple()
         context_update_spy = MagicMock()
 
         with patch("loom.agent.loop.configure_logging"), \
@@ -417,22 +404,17 @@ class AgentLoopStreamTextUsesRealTokenUsage(EvalCase):
 
 class AgentLoopNoStreamTextUsesSyncPath(EvalCase):
     name = "agent-loom-no-stream-text-uses-sync-path"
-    description = "agent_loop uses messages.create when stream_text is not provided"
+    description = "agent_loop uses llm_client.invoke when stream_text is not provided"
 
     def run(self) -> EvalResult:
-        mock_resp = MagicMock()
-        mock_resp.content = [MagicMock(type="text", text="Hello")]
-        mock_resp.stop_reason = "end_turn"
-        mock_resp.usage.input_tokens = 100
-        mock_resp.usage.output_tokens = 50
-
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_resp
-
-        mock_llm = MagicMock()
-        mock_llm.model = "test-model"
-        mock_llm.client = mock_client
-        mock_llm.get_context_window.return_value = 128000
+        mock_llm = _MockClientForSync(responses=[
+            ProviderResponse(
+                model="test-model",
+                content=[TextBlock(text="Hello")],
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(input_tokens=100, output_tokens=50),
+            ),
+        ])
 
         with patch("loom.agent.loop.configure_logging"), \
              patch("loom.agent.loop.trace_mod"), \
@@ -446,9 +428,9 @@ class AgentLoopNoStreamTextUsesSyncPath(EvalCase):
                 llm_client=mock_llm,
             )
 
-        if mock_client.messages.create.call_count < 1:
-            return EvalResult(name=self.name, passed=False, detail="messages.create was not called")
-        return EvalResult(name=self.name, passed=True, detail="sync path (messages.create) used")
+        if mock_llm.invoke_call_count < 1:
+            return EvalResult(name=self.name, passed=False, detail="invoke was not called")
+        return EvalResult(name=self.name, passed=True, detail="sync path (invoke) used")
 
 
 # ── Case 9: callbacks parameter accepted ──────────────────────────────────────
@@ -458,19 +440,7 @@ class AgentLoopAcceptsCallbacksParameter(EvalCase):
     description = "agent_loop accepts callbacks={} without TypeError"
 
     def run(self) -> EvalResult:
-        mock_resp = MagicMock()
-        mock_resp.content = [MagicMock(type="text", text="ok")]
-        mock_resp.stop_reason = "end_turn"
-        mock_resp.usage.input_tokens = 100
-        mock_resp.usage.output_tokens = 50
-
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_resp
-
-        mock_llm = MagicMock()
-        mock_llm.model = "test-model"
-        mock_llm.client = mock_client
-        mock_llm.get_context_window.return_value = 128000
+        mock_llm = _MockClientForSync()
 
         try:
             with patch("loom.agent.loop.configure_logging"), \
@@ -498,19 +468,7 @@ class AgentLoopDefaultsCallbacksToNoop(EvalCase):
     description = "agent_loop with callbacks=None behaves normally (no error, loop completes)"
 
     def run(self) -> EvalResult:
-        mock_resp = MagicMock()
-        mock_resp.content = [MagicMock(type="text", text="ok")]
-        mock_resp.stop_reason = "end_turn"
-        mock_resp.usage.input_tokens = 100
-        mock_resp.usage.output_tokens = 50
-
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_resp
-
-        mock_llm = MagicMock()
-        mock_llm.model = "test-model"
-        mock_llm.client = mock_client
-        mock_llm.get_context_window.return_value = 128000
+        mock_llm = _MockClientForSync()
 
         messages = [{"role": "user", "content": "hi"}]
         initial_count = len(messages)
@@ -546,20 +504,7 @@ class AgentLoopFiresOnMessageStartAndEnd(EvalCase):
     description = "on_message_start fires once; on_message_end fires with (tool_calls, total_msgs)"
 
     def run(self) -> EvalResult:
-        mock_resp = MagicMock()
-        mock_resp.content = [MagicMock(type="text", text="Hi")]
-        mock_resp.stop_reason = "end_turn"
-        mock_resp.usage.input_tokens = 100
-        mock_resp.usage.output_tokens = 50
-
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_resp
-
-        mock_llm = MagicMock()
-        mock_llm.model = "test-model"
-        mock_llm.client = mock_client
-        mock_llm.get_context_window.return_value = 128000
-
+        mock_llm = _MockClientForSync()
         on_start = MagicMock()
         on_end = MagicMock()
 
@@ -597,38 +542,35 @@ class AgentLoopFiresOnToolUseAndResult(EvalCase):
     description = "on_tool_use and on_tool_result callbacks fire with correct arguments"
 
     def run(self) -> EvalResult:
-        responses = iter([
-            MagicMock(
-                content=[
-                    ToolUseBlock(type="tool_use", name="bash",
-                                 input={"command": "ls"}, id="tu_99"),
-                ],
-                stop_reason="tool_use",
-                usage=MagicMock(input_tokens=100, output_tokens=50),
+        mock_llm = _MockClientForSync(responses=[
+            ProviderResponse(
+                model="test-model",
+                content=[ToolUseBlock(id="tu_99", name="bash", input={"command": "ls"})],
+                stop_reason=StopReason.TOOL_USE,
+                usage=Usage(input_tokens=100, output_tokens=50),
             ),
-            MagicMock(
-                content=[TextBlock(type="text", text="Done")],
-                stop_reason="end_turn",
-                usage=MagicMock(input_tokens=100, output_tokens=50),
+            ProviderResponse(
+                model="test-model",
+                content=[TextBlock(text="Done")],
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(input_tokens=100, output_tokens=50),
             ),
         ])
 
-        mock_client = MagicMock()
-        mock_client.messages.create.side_effect = lambda **kw: next(responses)
-
-        mock_llm = MagicMock()
-        mock_llm.model = "test-model"
-        mock_llm.client = mock_client
-        mock_llm.get_context_window.return_value = 128000
-
         on_tool_use = MagicMock()
         on_tool_result = MagicMock()
+
+        mock_tool_result = [
+            {"type": "tool_result", "tool_use_id": "tu_99",
+             "content": "mocked", "is_error": False},
+        ]
 
         with patch("loom.agent.loop.configure_logging"), \
              patch("loom.agent.loop.trace_mod"), \
              patch("loom.agent.loop.checkpoint"), \
              patch("loom.agent.loop.hooks"), \
-             patch("loom.agent.loop.context") as mock_ctx:
+             patch("loom.agent.loop.context") as mock_ctx, \
+             patch("loom.agent.loop._run_tool_turn", return_value=mock_tool_result):
             mock_ctx.should_compact.return_value = False
             from loom.agent.loop import agent_loop
             agent_loop(
@@ -664,20 +606,7 @@ class AgentLoopFiresOnCompactAndMessageEnd(EvalCase):
     description = "on_compact called with (before, after); on_message_end with (tool_calls, total_msgs)"
 
     def run(self) -> EvalResult:
-        mock_resp = MagicMock()
-        mock_resp.content = [MagicMock(type="text", text="Hi")]
-        mock_resp.stop_reason = "end_turn"
-        mock_resp.usage.input_tokens = 100
-        mock_resp.usage.output_tokens = 50
-
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_resp
-
-        mock_llm = MagicMock()
-        mock_llm.model = "test-model"
-        mock_llm.client = mock_client
-        mock_llm.get_context_window.return_value = 128000
-
+        mock_llm = _MockClientForSync()
         on_compact = MagicMock()
         on_end = MagicMock()
 
@@ -727,75 +656,23 @@ class LLMClientStreamIterYieldsIncrementally(EvalCase):
     )
 
     def run(self) -> EvalResult:
-        # Build fake async stream events with 200ms delays between each one.
-        # Total stream time will be 3 * 200ms = 600ms.
-        events_with_delays = [
-            (
-                0.20,
-                RawContentBlockStartEvent(
-                    type="content_block_start",
-                    index=0,
-                    content_block=TextBlock(type="text", text=""),
-                ),
-            ),
-            (
-                0.20,
-                RawContentBlockDeltaEvent(
-                    type="content_block_delta",
-                    index=0,
-                    delta=TextDelta(type="text_delta", text="chunk1"),
-                ),
-            ),
-            (
-                0.20,
-                RawContentBlockDeltaEvent(
-                    type="content_block_delta",
-                    index=0,
-                    delta=TextDelta(type="text_delta", text="chunk2"),
-                ),
-            ),
-            (
-                0.20,
-                RawContentBlockDeltaEvent(
-                    type="content_block_delta",
-                    index=0,
-                    delta=TextDelta(type="text_delta", text="chunk3"),
-                ),
-            ),
-            (
-                0.20,
-                RawContentBlockStopEvent(type="content_block_stop", index=0),
-            ),
-        ]
-
-        class _FakeStreamCM:
-            def __init__(self, events_with_delays):
-                self._events = list(events_with_delays)
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *_args):
-                return False
-
-            def __aiter__(self):
-                return self
-
-            async def __anext__(self):
-                if not self._events:
-                    raise StopAsyncIteration
-                delay, event = self._events.pop(0)
-                await asyncio.sleep(delay)
-                return event
-
-        def fake_stream(**_kwargs):
-            return _FakeStreamCM(events_with_delays)
-
-        mock_async = MagicMock()
-        mock_async.messages.stream = fake_stream
+        # Use a provider that yields StreamEvents with 200ms delays between
+        # each one to prove stream_iter yields incrementally (not batch).
+        class _DelayedProvider(MockProvider):
+            def stream(self, request):
+                items = [
+                    (0.20, StreamEvent(kind="text", text="chunk1")),
+                    (0.20, StreamEvent(kind="text", text="chunk2")),
+                    (0.20, StreamEvent(kind="text", text="chunk3")),
+                    (0.20, StreamEvent(kind="usage", input_tokens=10, output_tokens=5, stop_reason="end_turn")),
+                ]
+                self.stream_call_count += 1
+                for delay, event in items:
+                    time.sleep(delay)
+                    yield event
 
         client = LLMClient("test-model")
-        client.async_client = mock_async
+        client._provider = _DelayedProvider()
 
         # Iterate the generator, recording the time when each event arrives.
         gen = client.stream_iter("sys", [], [])
@@ -819,13 +696,9 @@ class LLMClientStreamIterYieldsIncrementally(EvalCase):
             return EvalResult(name=self.name, passed=False,
                               detail="No events were yielded from stream_iter")
 
-        # The first text_delta event is the 2nd in the stream (after content_block_start).
-        # With 200ms per event and 4 events before completion, the first text_delta
-        # should arrive after ~400ms (after the no-op content_block_start at 200ms).
-        # We assert: first_event_time < total_stream_time (proves streaming).
-        # Total stream time = 5 events × 200ms = 1000ms.
-        # First event must arrive well before that.
-        total_stream_time = 0.20 * len(events_with_delays)  # 1.0s
+        # With 200ms per event and 4 events, total stream time = 0.8s.
+        # First event should arrive after ~200ms, well before total completion.
+        total_stream_time = 0.20 * 4  # 0.8s
         # First event must arrive in < 70% of total stream time (streaming threshold).
         streaming_threshold = total_stream_time * 0.7
 
