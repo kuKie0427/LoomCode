@@ -7308,5 +7308,25 @@ None
 
 ---
 
+## Session: TP-5 generator prompt (2026-06-24)
+
+**Feature**: `f-triangle-generator-prompt`
+
+**Changes**:
+- `loom/agent/tools.py::SUB_SYSTEM` — rewrote (2739 chars, ≤5000 budget). New identity: "Generator — 三角架构中的'生成'角色", mentions Reviewer will review. Added "## 输入解析" section teaching <feature_card> + <scope_envelope> parsing. Added "## 输出协议（必须遵守）" mandating <delta_report> at end. Added "## 例子" with scope_creep guard (R5: "allow_paths 是'你最多能碰这些'，不是'你必须碰这些'"). Added anti-pattern: "不要伪造 delta_report" (R1: Reviewer 会 git diff 对账).
+- Dual-mode: existing "工作原则" (delegation craft), "Escalation 标记" (4 markers), "反模式" (4 anti-patterns) sections preserved verbatim. Legacy prompt-rewrite-subsystem-* eval cases (delegation-craft, escalation-markers, anti-patterns, honesty-anchor) continue to assert their keywords and still pass.
+
+**Verification**:
+- `uv run pytest tests/test_generator_prompt.py -v` → 9/9 passed
+- `uv run pytest tests/test_spawn_subagent_structured.py tests/test_triangle_protocol.py tests/test_triangle_integration.py tests/test_triangle_trace.py tests/test_orchestrator_prompt.py tests/test_generator_prompt.py tests/test_session_mutable_prompt.py tests/test_trace.py tests/test_review_pre_compact.py tests/test_review_tool.py tests/test_tools.py -q` → 163/163 passed (zero regression)
+- `uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100` → 10/10 passed (dual-mode: all 4 legacy subsystem cases + 6 main cases)
+- `uv run python -m loom.cli eval --filter review --fail-under 100` → 15/15 passed (TP-2 zero regression)
+- `uv run ruff check loom/` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in 175 source files
+
+**Files changed this session**: 1 file modified, 1 file added, 1 commit pending
+
+---
+
 
 

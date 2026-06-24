@@ -1424,6 +1424,17 @@
       "status": "done",
       "verification": "uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100 && uv run python -m loom.cli eval --filter review --fail-under 100 && uv run pytest tests/test_orchestrator_prompt.py tests/test_session_mutable_prompt.py -v",
       "evidence": "uv run pytest tests/test_orchestrator_prompt.py tests/test_session_mutable_prompt.py -v → 7/7 + 6/6 = 13/13 passed; uv run pytest tests/test_orchestrator_prompt.py tests/test_session_mutable_prompt.py tests/test_triangle_protocol.py tests/test_triangle_integration.py tests/test_triangle_trace.py tests/test_trace.py tests/test_review_pre_compact.py tests/test_review_tool.py tests/test_tools.py -q → 150/150 passed (zero regression); uv run python -m loom.cli eval --filter review --fail-under 100 → 15/15 passed (TP-2 zero regression); uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100 → 10/10 passed (dual-mode confirmed: legacy prompt tests don't assert Triangle Protocol keywords, new section coexists); uv run ruff check loom/ → All checks passed; uv run mypy loom/ → Success: no issues found in 175 source files; Triangle Protocol new section = 1157 chars (≤1500 plan budget)"
+    },
+    {
+      "id": "f-triangle-generator-prompt",
+      "name": "Phase TP-5: Generator (SUB_SYSTEM) prompt 升级（双跑模式）",
+      "description": "loom/agent/tools.py::SUB_SYSTEM 升级：身份段明确'Generator——三角中的生成角色'，提到输出会被独立 Reviewer 审查；加 <feature_card> + <scope_envelope> 输入解析规则；加 <delta_report> 输出协议（必须以该块结尾）；Escalation 标记嵌入 delta_report.escalations 数组；反模式加'不要伪造 delta_report'。双跑模式：保留工作原则 / Escalation 标记 / 反模式 3 段原措辞（被 prompt-rewrite-subsystem-* eval 断言关键词），身份段替换；如果 prompt 缺 <feature_card>，按老格式 description-only 工作但输出仍鼓励 <delta_report>。",
+      "dependencies": [
+        "f-triangle-orchestrator-prompt"
+      ],
+      "status": "done",
+      "verification": "uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100 && uv run python -m loom.cli eval --filter review --fail-under 100 && uv run pytest tests/test_generator_prompt.py tests/test_spawn_subagent_structured.py -v",
+      "evidence": "uv run pytest tests/test_generator_prompt.py -v → 9/9 passed; uv run pytest tests/test_spawn_subagent_structured.py tests/test_triangle_protocol.py tests/test_triangle_integration.py tests/test_triangle_trace.py tests/test_orchestrator_prompt.py tests/test_generator_prompt.py tests/test_session_mutable_prompt.py tests/test_trace.py tests/test_review_pre_compact.py tests/test_review_tool.py tests/test_tools.py -q → 163/163 passed (zero regression); uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100 → 10/10 passed (dual-mode confirmed: 4 subsystem legacy cases still pass with new identity section + input parsing + output protocol + example + no-fabricate anti-pattern); uv run python -m loom.cli eval --filter review --fail-under 100 → 15/15 passed (TP-2 zero regression); uv run ruff check loom/agent/tools.py → All checks passed; uv run mypy loom/agent/tools.py → Success: no issues found; SUB_SYSTEM new length = 2739 chars (≤5000 plan budget)"
     }
   ]
 }
