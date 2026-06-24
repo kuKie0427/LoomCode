@@ -26,6 +26,12 @@ from loguru import logger
 
 TRACE_FILENAME = "trace.jsonl"
 
+# Triangle Protocol events (TP-3)
+TRIANGLE_DELEGATE = "triangle.delegate"
+TRIANGLE_DELTA = "triangle.delta"
+TRIANGLE_REVIEW = "triangle.review"
+TRIANGLE_FEEDBACK = "triangle.feedback"
+
 _CURRENT: Trace | None = None
 _CURRENT_LOCK = threading.Lock()
 

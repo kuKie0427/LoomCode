@@ -24,6 +24,7 @@ from loom.agent.tools import (
     get_tool_handlers,
     get_tools,
 )
+from loom.agent.triangle_protocol import FeedbackDirective
 from loom.agent.user_hooks import discover_user_hooks, make_shell_callback
 from loom.memory import load_session_continuity, load_tier1, load_tier2
 from loom.skills import build_skill_index
@@ -289,6 +290,10 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
     configure_logging()
     global _LAST_REVIEWED_FEATURE_ID
     _LAST_REVIEWED_FEATURE_ID = None
+    # Reset per-feature review attempt counter at session boundary (TP-3).
+    # TP-4 will replace this with feature_list.json persistence.
+    from loom.agent.review import _REVIEW_ATTEMPT_COUNTER
+    _REVIEW_ATTEMPT_COUNTER.clear()
     cb = {**DEFAULT_CALLBACKS, **(callbacks or {})}
     hooks.trigger_hooks("SessionStart")
     if llm_client is None:
@@ -475,10 +480,10 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                     if sess is not None:
                         d = sess.as_dict()
                         d.pop("turns", None)
-                        tr.record("loop_limit_reached", turn=turn + 1, tool_calls=tool_call_count,
+                        tr.record("loop_limit_reached", turn=_turn + 1, tool_calls=tool_call_count,
                                   max_turns=max_turns, **d)
                     else:
-                        tr.record("loop_limit_reached", turn=turn + 1, tool_calls=tool_call_count,
+                        tr.record("loop_limit_reached", turn=_turn + 1, tool_calls=tool_call_count,
                                   max_turns=max_turns)
                 messages.append({
                     "role": "user",
@@ -755,6 +760,30 @@ def _run_session_end_review(workdir: Path, config: HarnessConfig, history: list)
             logger.warning("SessionEnd review failed: %s", exc)
 
     threading.Thread(target=_runner, daemon=True).start()
+
+
+def _execute_feedback_directive(feat_id: str, fd: FeedbackDirective) -> None:
+    """Record triangle.feedback trace event and execute the action.
+
+    TP-3 only records the trace event. Actual action execution (scope_trim,
+    fix_bug, etc.) is Orchestrator-side logic implemented in TP-4 via
+    system prompt guidance — the trace event here is the contract surface.
+    """
+    import loom.agent.trace as trace_mod
+    from loom.agent.review import _REVIEW_ATTEMPT_COUNTER
+    tr = trace_mod.current()
+    if tr is not None:
+        try:
+            tr.record(
+                trace_mod.TRIANGLE_FEEDBACK,
+                feature_id=feat_id,
+                action=list(fd.action),
+                target_files=list(fd.target_files),
+                retry_count=_REVIEW_ATTEMPT_COUNTER.get(feat_id, 0),
+            )
+        except Exception as trace_exc:
+            logger.warning("_execute_feedback_directive: trace.record(triangle.feedback) failed: {}", trace_exc)
+    # Action execution intentionally no-op in TP-3; see TP-4 plan.
 
 
 def _terminate_proc(proc: subprocess.Popen) -> None:

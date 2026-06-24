@@ -1497,7 +1497,48 @@ def spawn_subagent(
 
 
 def run_task(description: str, feature_card=None, scope=None) -> str:
-    return spawn_subagent(description, feature_card=feature_card, scope=scope)
+    # === Triangle Protocol: record delegate event (TP-3) ===
+    # C8 fix: trace at the outer run_task handler, NOT inside spawn_subagent.
+    # This prevents triangle.delegate from firing when run_review internally
+    # calls spawn_subagent for the Reviewer role (which fires triangle.review).
+    if feature_card is not None:
+        import loom.agent.trace as trace_mod
+        tr = trace_mod.current()
+        if tr is not None:
+            try:
+                tr.record(
+                    trace_mod.TRIANGLE_DELEGATE,
+                    feature_id=feature_card.id,
+                    role="generator",
+                    scope_paths_allow=list(scope.allow_paths) if scope else [],
+                    scope_paths_deny=list(scope.deny_paths) if scope else [],
+                    max_turns=30,
+                )
+            except Exception as trace_exc:
+                logger.warning("run_task: trace.record(triangle.delegate) failed: {}", trace_exc)
+
+    result = spawn_subagent(description, feature_card=feature_card, scope=scope)
+
+    # === Triangle Protocol: record delta event (TP-3) ===
+    if feature_card is not None:
+        from loom.agent.triangle_protocol import parse_delta_report
+        delta = parse_delta_report(result)
+        tr = trace_mod.current()
+        if tr is not None:
+            try:
+                tr.record(
+                    trace_mod.TRIANGLE_DELTA,
+                    feature_id=feature_card.id,
+                    status=delta.status if delta is not None else "unknown",
+                    files_modified_count=len(delta.files_modified) if delta is not None else 0,
+                    files_created_count=len(delta.files_created) if delta is not None else 0,
+                    escalation_count=len(delta.escalations) if delta is not None else 0,
+                    parse_success=delta is not None,
+                )
+            except Exception as trace_exc:
+                logger.warning("run_task: trace.record(triangle.delta) failed: {}", trace_exc)
+
+    return result
 
 
 # Register "task" via TOOL_REGISTRY (instead of mutating the module-level

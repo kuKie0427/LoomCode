@@ -1357,6 +1357,15 @@
       "status": "done",
       "verification": "uv run pytest tests/test_triangle_integration.py tests/test_triangle_protocol.py tests/test_review_tool.py tests/test_spawn_subagent_structured.py -v && uv run python -m loom.cli eval --filter review --fail-under 100",
       "evidence": "uv run pytest tests/test_triangle_integration.py tests/test_triangle_protocol.py tests/test_review_tool.py tests/test_spawn_subagent_structured.py -v → 79/79 passed; uv run python -m loom.cli eval --filter review --fail-under 100 → 15/15 passed; uv run ruff check loom/agent/tools.py loom/agent/review.py loom/agent/loop.py → All checks passed (1 pre-existing B007); uv run mypy loom/agent/tools.py loom/agent/review.py loom/agent/loop.py → Success: no issues found"
+    },
+    {
+      "id": "f-triangle-protocol-trace",
+      "name": "Phase TP-3: Triangle Protocol trace events",
+      "description": "loom/agent/trace.py 加 4 个新事件类型：triangle.delegate（run_task 入口）/ triangle.delta（run_task 返回且 parse_delta_report 成功时）/ triangle.review（run_review 返回时）/ triangle.feedback（Orchestrator 执行 feedback_directive 时）。每个事件 payload 见 docs/triangle-protocol.md §5d。trace 事件 record 失败不抛异常（trace 是 best-effort）。C8 fix：trace 事件在 run_task handler 而非 spawn_subagent 内部 record，避免 run_review 调 spawn_subagent 触发 triangle.delegate 事件。",
+      "dependencies": ["f-triangle-protocol-integration"],
+      "status": "done",
+      "verification": "uv run pytest tests/test_triangle_trace.py tests/test_trace.py -v && uv run ruff check loom/agent/trace.py",
+      "evidence": "uv run pytest tests/test_triangle_trace.py tests/test_trace.py -v → 10/10 triangle_trace + 10/10 trace = 20/20 passed; uv run pytest tests/test_triangle_protocol.py tests/test_triangle_integration.py tests/test_triangle_trace.py tests/test_trace.py tests/test_review_pre_compact.py tests/test_review_tool.py tests/test_tools.py -q → 130/130 passed (zero regression); uv run ruff check loom/ → All checks passed; uv run mypy loom/ → Success: no issues found in 175 source files"
     }
   ]
 }

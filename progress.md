@@ -7256,3 +7256,32 @@ None
 - `_KNOWN_OLDER_VERSIONS` is empty set — deprecation warning path is dead code until older versions are added.
 
 **Files changed this session**: 11 files (10 modified, 3 docs added, 3 logs removed, 1 handoff reverted), 3 commits (be5779a, 341e83d, 716bcbf)
+
+---
+
+## Session: TP-3 trace events (2026-06-24)
+
+**Feature**: `f-triangle-protocol-trace`
+
+**Changes**:
+- `loom/agent/trace.py` — 4 event name constants (`TRIANGLE_DELEGATE`/`TRIANGLE_DELTA`/`TRIANGLE_REVIEW`/`TRIANGLE_FEEDBACK`).
+- `loom/agent/tools.py` — `run_task` rewritten from pass-through to handler: records `triangle.delegate` on entry (with role/feature_id/scope paths/max_turns), spawns subagent, records `triangle.delta` on return (with status/file counts/escalation count/parse_success). All `tr.record()` calls wrapped in try/except (best-effort).
+- `loom/agent/review.py` — `run_review` records `triangle.review` before return (with role/verdict_status/feedback_action/retry_review/attempt). Per-feature `_REVIEW_ATTEMPT_COUNTER` module-level dict tracks attempt count for I9 invariant.
+- `loom/agent/loop.py` — `agent_loop` resets `_REVIEW_ATTEMPT_COUNTER` at session boundary. New `_execute_feedback_directive(feat_id, fd)` helper records `triangle.feedback` (with action list/target_files/retry_count). Action execution deferred to TP-4.
+- `tests/test_triangle_trace.py` — 10 new tests covering all 4 events + C8 fix regression guard (run_review must NOT fire triangle.delegate) + counter increments + best-effort resilience + legacy no-feature-card mode.
+
+**C8 fix**: trace events fire in the outer `run_task` handler, NOT inside `spawn_subagent`. This prevents `triangle.delegate` from firing when `run_review` calls `spawn_subagent` for the Reviewer role. Regression test: `test_trace_no_delegate_on_run_review` asserts `triangle.delegate` count is 0 after `run_review` and `triangle.review` count is 1.
+
+**Test design**: tests use `loom.agent.trace.start(workdir, session_id)` to set a real Trace, mock `loom.agent.tools.spawn_subagent` to return controlled output, then read `.minicode/trace.jsonl` and assert event payloads.
+
+**Verification**:
+- `uv run pytest tests/test_triangle_trace.py tests/test_trace.py -v` → 10/10 + 10/10 = 20/20 passed
+- `uv run pytest tests/test_triangle_protocol.py tests/test_triangle_integration.py tests/test_triangle_trace.py tests/test_trace.py tests/test_review_pre_compact.py tests/test_review_tool.py tests/test_tools.py -q` → 130/130 passed (zero regression)
+- `uv run ruff check loom/` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in 175 source files
+
+**Files changed this session**: 5 files (1 modified test, 4 modified core), 1 commit pending
+
+---
+
+

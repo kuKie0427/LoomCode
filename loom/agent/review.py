@@ -20,6 +20,10 @@ from loom.agent.triangle_protocol import (
 
 VerdictStatus = Literal["pass", "fail", "scope_creep", "quality_issue", "unknown"]
 
+# Per-feature review attempt counter for I9 invariant (≤3 attempts per feature).
+# Reset at agent_loop entry — TP-3 only. TP-4 will persist to feature_list.json.
+_REVIEW_ATTEMPT_COUNTER: dict[str, int] = {}
+
 
 @dataclass
 class ReviewVerdict:
@@ -215,6 +219,25 @@ def run_review(
     fd = parse_feedback_directive(result)
     if fd is None:
         logger.warning("run_review: feedback_directive missing or invalid for {}", feature_id)
+
+    # === Triangle Protocol: record review event (TP-3) ===
+    attempt = _REVIEW_ATTEMPT_COUNTER.get(feature_id, 0) + 1
+    _REVIEW_ATTEMPT_COUNTER[feature_id] = attempt
+    import loom.agent.trace as trace_mod
+    tr = trace_mod.current()
+    if tr is not None:
+        try:
+            tr.record(
+                trace_mod.TRIANGLE_REVIEW,
+                feature_id=feature_id,
+                role="reviewer",
+                verdict_status=verdict.status,
+                feedback_action=list(fd.action) if fd is not None else ["missing"],
+                retry_review=fd.retry_review if fd is not None else False,
+                attempt=attempt,
+            )
+        except Exception as trace_exc:
+            logger.warning("run_review: trace.record(triangle.review) failed: {}", trace_exc)
 
     return (verdict_str, fd)
 
