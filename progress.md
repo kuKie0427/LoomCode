@@ -7035,3 +7035,149 @@ Feature: `f-init-sh-two-tier` umbrella + `f-init-sh-two-tier-polish` review fixe
 - `uv run mypy loom/` → Success (0 issues in 173 source files)
 
 **Next:** Load `loop-review-p4.md` for PR-4.
+
+## Session: f-review-pre-compact-and-docs (PR-4) — 2026-06-24
+
+Phase PR-4: PreCompact review opt-in + docs/review.md + README + umbrella close.
+
+### What was done
+
+- **Task 1 — loop.py**: Added `_run_pre_compact_review()` + `_find_active_feature_for_review()` + `_LAST_REVIEWED_FEATURE_ID` dedup cache. PreCompact hook now optionally triggers review before autocompact. Fail-closed: exceptions logged, autocompact proceeds. SessionStart resets the cache.
+- **Task 2 — docs/review.md**: 206 lines, 9 sections covering what/why, quick start, configuration (3 TOML examples), usage patterns, verdict format, division with verify tool, troubleshooting, triangular architecture, design decisions. Matches docs/lsp.md style. No Sisyphus/Momus/Prometheus mentions.
+- **Task 3 — README.md**: Added "Reviewer agent (triangular orchestration)" bullet between "Eval-driven" and "Production-ready" in the "does well" section.
+- **Task 4a — tests**: 7/7 pytest pass (3 classes: TestPreCompactReview ×4, TestPreCompactNotDoubleReview ×2, TestSessionStartResetsCache ×1).
+- **Task 4b+c — eval cases**: 3/3 eval pass (config-respects-opt-in, injects-verdict-as-system-reminder, fail-closed). Registered in __init__.py.
+- **Task 5 — umbrella**: f-review-pre-compact-and-docs → done, f-review-triangle → done (umbrella covering all 4 PR phases).
+
+### Verification
+- `uv run pytest tests/test_review_pre_compact.py -v` → 7/7 passed
+- `uv run python -m loom.cli eval --filter review-pre-compact --fail-under 100` → 3/3 passed
+- `uv run python -m loom.cli eval --filter review --fail-under 100` → 15/15 passed (all 4 PR phases)
+- `uv run ruff check .` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in 174 source files
+- `./init.sh` → 1306 passed / 18 failed (all pre-existing env/snapshot flakes)
+- `docs/review.md` → 206 lines, 9 sections ✓
+- `README.md` → reviewer agent bullet present ✓
+
+### Pre-existing failures (unrelated)
+18 test failures are all pre-existing environment issues: deepseek env vars, MCP subagent, thinking display snapshot flakes, model picker TUI, command palette, provider status indicator.
+
+### Files changed
+- `loom/agent/loop.py` (+67): PreCompact review hook + helper functions
+- `docs/review.md` (NEW, +206): User documentation for reviewer agent
+- `tests/test_review_pre_compact.py` (NEW, +181): 7 unit tests
+- `loom/eval/cases/review_pre_compact.py` (NEW, +143): 3 eval cases
+- `loom/eval/cases/__init__.py` (+1): Registered review_pre_compact
+- `feature_list.json` (+17): f-review-pre-compact-and-docs + f-review-triangle
+- `README.md` (+1): Reviewer agent bullet
+
+
+## Final Review (auto, 2026-06-24T11:15:40.139942+00:00)
+
+**Feature**: f-triangle-protocol-parser
+
+**Verdict**:
+[review: unknown]
+
+证据: []
+建议: []
+
+
+## Final Review (auto, 2026-06-24T11:16:10.657241+00:00)
+
+**Feature**: f-triangle-protocol-parser
+
+**Verdict**:
+[review: unknown]
+
+证据: []
+建议: []
+
+
+## Final Review (auto, 2026-06-24T11:16:42.881865+00:00)
+
+**Feature**: f-triangle-protocol-parser
+
+**Verdict**:
+[review: unknown]
+
+证据: []
+建议: []
+
+
+## Final Review (auto, 2026-06-24T11:17:12.949464+00:00)
+
+**Feature**: f-triangle-protocol-parser
+
+**Verdict**:
+[review: unknown]
+
+证据: []
+建议: []
+
+
+## Final Review (auto, 2026-06-24T11:17:13.389452+00:00)
+
+**Feature**: f-triangle-protocol-parser
+
+**Verdict**:
+[review: unknown]
+
+证据: []
+建议: []
+
+
+## Final Review (auto, 2026-06-24T11:17:26.340459+00:00)
+
+**Feature**: f-triangle-protocol-parser
+
+**Verdict**:
+None
+
+
+## Final Review (auto, 2026-06-24T11:17:33.418704+00:00)
+
+**Feature**: f-triangle-protocol-parser
+
+**Verdict**:
+[review: unknown]
+
+证据: []
+建议: []
+
+
+## Final Review (auto, 2026-06-24T11:18:10.476907+00:00)
+
+**Feature**: f-triangle-protocol-parser
+
+**Verdict**:
+[review: unknown]
+
+证据: []
+建议: []
+
+
+## Session: f-triangle-protocol-parser (2026-06-24)
+
+**Feature**: TP-1 protocol parser + validators
+
+**What was done**:
+- Created `loom/agent/triangle_protocol.py` (549 lines) with:
+  - 4 frozen dataclasses: FeatureCard, ScopeEnvelope, FileChange, DeltaReport, FeedbackDirective
+  - PROTOCOL_VERSION = "v1" constant, Action Literal type, _KNOWN_OLDER_VERSIONS empty set
+  - 4 serialize functions: serialize_feature_card, serialize_scope_envelope, serialize_delta_report, serialize_feedback_directive
+  - 2 parse functions: parse_delta_report, parse_feedback_directive (version-aware, tolerant parsing)
+  - 4 helpers: _parse_yaml_ish, _parse_action_list, _parse_list_of_dicts, _parse_simple_list
+  - 2 validate functions: validate_delta_against_scope (pathspec gitignore), validate_delta_against_git_diff (git diff --numstat ±10%)
+- Created `tests/test_triangle_protocol.py` with 30 unit tests (6 classes covering constants, dataclass defaults, serde round-trips, parse success/failure/version/combination rules, scope validation, git diff validation)
+- Added `f-triangle-protocol-parser` feature entry to `feature_list.json`
+
+**Verification**:
+- `uv run pytest tests/test_triangle_protocol.py -v` → 30/30 passed
+- `uv run ruff check loom/agent/triangle_protocol.py` → All checks passed
+- `uv run mypy loom/agent/triangle_protocol.py` → Success
+- `./init.sh` → 1338/1354 passed (16 pre-existing unrelated failures in MCP/models/providers)
+
+**Files changed**: 2 new (loom/agent/triangle_protocol.py, tests/test_triangle_protocol.py), 2 modified (feature_list.json, progress.md)
+
+**Commit**: `feat(triangle): TP-1 protocol parser + validators`
