@@ -310,7 +310,29 @@ def _serialize_messages(
                 serialized.append(block)
             else:
                 serialized.append(str(block))
-        msg["content"] = serialized
+
+        # Extract tool_use blocks → tool_calls on the message level
+        # (OpenAI API format: assistant.tool_calls[], not content blocks).
+        tool_calls = []
+        cleaned_content = []
+        for block in serialized:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                tool_calls.append({
+                    "id": block.get("id", ""),
+                    "type": "function",
+                    "function": {
+                        "name": block.get("name", ""),
+                        "arguments": json.dumps(block.get("input", {}), ensure_ascii=False),
+                    },
+                })
+            else:
+                cleaned_content.append(block)
+        if tool_calls:
+            msg["tool_calls"] = tool_calls
+            msg["content"] = cleaned_content if cleaned_content else None
+        else:
+            msg["content"] = serialized
+
         result.append(msg)
     return result
 

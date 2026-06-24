@@ -179,9 +179,9 @@ class LLMClient:
                     )
                 )
 
-        from loom.agent.providers.types import TextBlock
+        from loom.agent.providers.types import TextBlock, ToolUseBlock
 
-        # Replace TextBlock objects with plain dicts so both the Anthropic
+        # Replace domain objects with plain dicts so both the Anthropic
         # and OpenAI-compatible paths can JSON-serialize without crashing.
         clean_messages: list[dict] = []
         for msg in messages:
@@ -192,6 +192,13 @@ class LLMClient:
                 for block in content:
                     if isinstance(block, TextBlock):
                         cleaned.append({"type": "text", "text": block.text})
+                    elif isinstance(block, ToolUseBlock):
+                        cleaned.append({
+                            "type": "tool_use",
+                            "id": block.id,
+                            "name": block.name,
+                            "input": block.input,
+                        })
                     elif isinstance(block, dict):
                         cleaned.append(block)
                     else:

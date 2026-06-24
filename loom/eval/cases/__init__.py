@@ -58,6 +58,7 @@ from loom.eval.cases import (
     real_token_counter,  # noqa: F401
     repomap,  # noqa: F401
     resume_benchmark,  # noqa: F401
+    review_pre_compact,  # noqa: F401
     review_session_end,  # noqa: F401
     review_state_machine,  # noqa: F401
     review_tool,  # noqa: F401

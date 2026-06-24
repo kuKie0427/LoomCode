@@ -311,7 +311,7 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
             tool_call_count = 0
             tokens_at_last_checkpoint = context.current_tokens(messages)
             max_turns = _active_config.max_turns
-            for turn in range(max_turns):
+            for _turn in range(max_turns):
                 from loom.agent.tool_errors import build_retry_guidance, detect_repeated_failures
                 detection = detect_repeated_failures(messages)
                 if detection is not None and (not messages or messages[-1].get("role") != "user" or "<system-reminder>" not in str(messages[-1].get("content", ""))[:200]):

@@ -62,7 +62,7 @@ class TestPreCompactReview:
         )
         config = _make_config(pre_compact_review=True)
         messages: list = []
-        with patch("loom.agent.review.run_review", return_value="[review: pass] OK"):
+        with patch("loom.agent.review.run_review", return_value=("[review: pass] OK", None)):
             _run_pre_compact_review(messages, config)
         assert len(messages) == 1
         assert messages[0]["role"] == "user"
@@ -103,7 +103,7 @@ class TestPreCompactReview:
         )
         config = _make_config(pre_compact_review=True)
         messages: list = []
-        with patch("loom.agent.review.run_review", return_value="[review: pass] OK"):
+        with patch("loom.agent.review.run_review", return_value=("[review: pass] OK", None)):
             _run_pre_compact_review(messages, config)
         assert messages[0]["content"].startswith("[system-reminder]")
 
@@ -127,7 +127,7 @@ class TestPreCompactNotDoubleReview:
         )
         config = _make_config(pre_compact_review=True)
         messages: list = []
-        with patch("loom.agent.review.run_review", return_value="[review: pass] OK") as mock_run:
+        with patch("loom.agent.review.run_review", return_value=("[review: pass] OK", None)) as mock_run:
             _run_pre_compact_review(messages, config)
             _run_pre_compact_review(messages, config)
         assert mock_run.call_count == 1
@@ -141,7 +141,7 @@ class TestPreCompactNotDoubleReview:
         config = _make_config(pre_compact_review=True)
         messages: list = []
 
-        with patch("loom.agent.review.run_review", return_value="[review: pass] OK") as mock_run:
+        with patch("loom.agent.review.run_review", return_value=("[review: pass] OK", None)) as mock_run:
             # First call with feature A
             fl.write_text(
                 json.dumps({
