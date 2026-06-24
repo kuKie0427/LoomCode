@@ -1294,6 +1294,15 @@
       "status": "done",
       "verification": "uv run pytest tests/test_init_sh_polish.py -v && uv run python -m loom.cli eval --filter init-sh-polish --fail-under 100",
       "evidence": "13/13 pytest pass, 3/3 eval cases pass, ruff+mypy clean. Smoke: loom init /tmp/pi2-test with pyproject.toml [tool.ruff] generates init.sh with 'ruff check .' in both tiers. Generic stack returns 3-step skeleton (tests/lint/build). Marker injection appends slow/snapshot markers to pyproject.toml. docs/init-sh.md created with 7 sections. README updated with two-tier bullet."
+    },
+    {
+      "id": "f-init-sh-two-tier",
+      "name": "Umbrella: init.sh 两档优化 (PI-1 + PI-2)",
+      "description": "Umbrella feature covering both PI-1 (VerificationPlan + MODE flag + verify-quick.sh) and PI-2 (Python ruff/mypy detection + generic skeleton + marker injection + docs/init-sh.md). Review fixes B1-B7: no doubled echo headers in generic init.sh, MODE env var works, verify-quick.sh is stack-aware with auto-detected tools flowing in, UnicodeDecodeError handled, AGENTS.md template teaches two-tier. 77/77 pytest, 17/17 eval, ruff+mypy clean.",
+      "dependencies": ["f-init-sh-two-tier-core", "f-init-sh-two-tier-polish"],
+      "status": "done",
+      "verification": "uv run pytest tests/test_detect.py tests/test_init_cmd.py tests/test_init_sh_two_tier.py tests/test_init_sh_polish.py -v && uv run python -m loom.cli eval --filter init-sh --fail-under 100",
+      "evidence": "77/77 pytest pass, 17/17 eval pass (init-sh filter), ruff+mypy clean. Smoke: MODE=quick → Harness Initialization (quick); generic init.sh no doubled headers; Python+ruff → ruff/mypy in both init.sh and verify-quick.sh; Node → npm run lint + npm test + .js ext; Go → go test + .go ext; marker injection idempotent across --force. B1: render_block handles multi-line commands. B2: MODE=\"${1:-${MODE:-full}}\". B3+B4: verify-quick.sh stack-aware with VQ_STACK_EXT mapping. B5: agents.md template shows two-tier in Quick Start + Working Rules + Verification Commands. B6: new eval case asserts rendered init.sh has no doubled headers. B7: catch (OSError, UnicodeDecodeError) in both pyproject readers."
     }
   ]
 }

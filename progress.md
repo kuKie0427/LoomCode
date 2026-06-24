@@ -6942,3 +6942,24 @@ Feature: `f-init-sh-two-tier-polish` — Phase PI-2: Python ruff/mypy 检测 + g
 - `tests/test_init_cmd.py`: Updated `test_generic_uses_placeholder` to match new skeleton format.
 
 **Verification:** 13/13 pytest (test_init_sh_polish), 3/3 eval (init-sh-polish filter), 44/44 detect+init_cmd tests, 16/16 init-sh filter eval. ruff+mypy clean. Smoke: `loom init /tmp/pi2-test` with pyproject.toml containing `[tool.ruff]` → init.sh full tier includes `ruff check .`.
+
+## Session: PI-2 Review Fixes — B1–B7 (2026-06-24)
+
+Feature: `f-init-sh-two-tier` umbrella + `f-init-sh-two-tier-polish` review fixes
+
+**Review findings (5-agent parallel review):** Code Quality FAIL (doubled headers, MODE env var not working, verify-quick.sh hardcoded Python), Context Mining FAIL (verify-quick.sh ignores project.stack, AGENTS.md template doesn't teach two-tier).
+
+**Fixes applied:**
+
+| Bug | Description | Fix |
+|-----|-------------|-----|
+| B1 | Generic init.sh doubled echo headers | `render_block` detects `\n` in cmd → emit as-is without wrapper |
+| B2 | `MODE=quick ./init.sh` env var doesn't work | `MODE="${1:-${MODE:-full}}"` |
+| B3+B4 | verify-quick.sh hardcodes Python, no auto-detected tools | Stack-aware: `_VQ_STACK_EXT` dict maps stack→grep pattern+ext; static/tests split from `verification_plan()` |
+| B5 | AGENTS.md template doesn't teach two-tier | Quick Start shows `./init.sh` + `./init.sh quick` + `scripts/verify-quick.sh`; Working Rule #2 for two-tier; Verification Commands split into full/quick |
+| B6 | Eval cases only test plan tuples, not rendered output | New `init-sh-polish-rendered-init-sh-no-doubled-headers` eval case asserts on rendered string |
+| B7 | `UnicodeDecodeError` crashes `loom init` | `except (OSError, UnicodeDecodeError)` in both pyproject readers |
+
+**Also cleaned up:** `force` dead param removed from `_maybe_inject_pytest_markers`, `.is_file()` vs `.exists()` inconsistency fixed, umbrella feature `f-init-sh-two-tier` created in feature_list.json.
+
+**Verification:** 77/77 pytest (detect + init_cmd + init_sh_two_tier + init_sh_polish), 17/17 eval (init-sh filter), ruff+mypy clean. Smoke: `MODE=quick` → `Harness Initialization (quick)`; generic init.sh no doubled headers; Python+ruff → ruff/mypy in both init.sh and verify-quick.sh; Node → `npm run lint` + `npm test` + `.js` auto-scope; Go → `go test` + `.go` ext.

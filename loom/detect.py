@@ -212,7 +212,7 @@ def verification_plan(project: ProjectInfo, explicit_pm: str | None = None) -> V
                 if "[tool.mypy]" in content or "[tool.mypy." in content:
                     quick_list.insert(0, "mypy .")
                     full_list.insert(0, "mypy .")
-            except OSError:
+            except (OSError, UnicodeDecodeError):
                 pass
 
         return VerificationPlan(
@@ -267,9 +267,14 @@ def init_script_content(plan: VerificationPlan) -> str:
     """Generate two-tier init.sh with MODE flag (quick|full)."""
     
     def render_block(commands: tuple[str, ...]) -> str:
-        return "\n\n".join(
-            f'echo "=== {escape(cmd)} ==="\n{cmd}' for cmd in commands
-        )
+        parts: list[str] = []
+        for cmd in commands:
+            if "\n" in cmd:
+                # multi-line command: emit as-is (already contains echo header + TODO)
+                parts.append(cmd)
+            else:
+                parts.append(f'echo "=== {escape(cmd)} ==="\n{cmd}')
+        return "\n\n".join(parts)
     
     def escape(value: str) -> str:
         return value.replace('"', '\\"')
@@ -285,7 +290,7 @@ set -e
 #
 # Unix-only. See docs/init-sh.md for customization.
 
-MODE="${{1:-full}}"
+MODE="${{1:-${{MODE:-full}}}}"
 cd "$(dirname "$0")"
 
 echo "=== Harness Initialization ($MODE) ==="

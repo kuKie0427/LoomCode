@@ -83,12 +83,12 @@ class TestPytestMarkerInjection:
     """_maybe_inject_pytest_markers() behavior."""
 
     def test_no_pyproject_skips(self, tmp_path: Path) -> None:
-        result = _maybe_inject_pytest_markers(tmp_path, False)
+        result = _maybe_inject_pytest_markers(tmp_path)
         assert result is None
 
     def test_injects_markers_when_missing(self, tmp_path: Path) -> None:
         (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
-        result = _maybe_inject_pytest_markers(tmp_path, False)
+        result = _maybe_inject_pytest_markers(tmp_path)
         assert result is not None
         assert result.status == "written"
         content = (tmp_path / "pyproject.toml").read_text()
@@ -97,7 +97,7 @@ class TestPytestMarkerInjection:
 
     def test_skips_when_section_exists(self, tmp_path: Path) -> None:
         (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
-        result = _maybe_inject_pytest_markers(tmp_path, False)
+        result = _maybe_inject_pytest_markers(tmp_path)
         assert result is None
 
     def test_skips_when_markers_exist_R5(self, tmp_path: Path) -> None:
@@ -108,7 +108,7 @@ class TestPytestMarkerInjection:
             '    "snapshot: visual snapshot tests",\n'
             "]\n"
         )
-        result = _maybe_inject_pytest_markers(tmp_path, False)
+        result = _maybe_inject_pytest_markers(tmp_path)
         assert result is None
 
 

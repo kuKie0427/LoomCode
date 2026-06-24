@@ -9,13 +9,15 @@
 ## Quick Start
 
 ```bash
-./init.sh                    # Install deps + run full verification
+./init.sh                    # Full verification (closeout, before marking feature done)
+./init.sh quick              # Quick dev cycle (<10s, fast feedback)
+scripts/verify-quick.sh     # Even faster: smart test subset from git diff
 ```
 
 ## Working Rules
 
 1. **One feature at a time**: Pick exactly one unfinished feature from `feature_list.json`
-2. **Verification required**: Don't claim done without running verification commands
+2. **Two-tier verification**: Use `./init.sh quick` or `scripts/verify-quick.sh` during development for fast feedback; run `./init.sh` (full) before marking a feature done. See `docs/init-sh.md` for details.
 3. **Update artifacts**: Before ending session, update `progress.md` and `feature_list.json`
 4. **Stay in scope**: Don't modify files unrelated to the current feature
 5. **Leave clean state**: Next session must be able to run `./init.sh` immediately
@@ -41,9 +43,15 @@ Before ending a session:
 
 ## Verification Commands
 
+### Full (closeout)
 ```bash
-# Full verification (recommended)
 {{PRIMARY_VERIFICATION_COMMAND}}
+```
+
+### Quick (dev cycle)
+```bash
+./init.sh quick              # fast feedback, target <10s
+scripts/verify-quick.sh     # auto-scopes to changed files
 ```
 
 Required checks:

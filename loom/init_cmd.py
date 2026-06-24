@@ -61,13 +61,58 @@ def _render_init_sh(project: ProjectInfo, custom_commands: list[str] | None) -> 
     return init_script_content(plan)
 
 
+# Stack → (grep-ext-pattern, primary-ext) for verify-quick.sh auto-scope.
+_VQ_STACK_EXT: dict[str, tuple[str, str]] = {
+    "python": (r"\.py$", "py"),
+    "typescript": (r"\.(ts|tsx)$", "ts"),
+    "typescript-react": (r"\.(ts|tsx)$", "tsx"),
+    "node": (r"\.(js|ts|tsx|jsx)$", "js"),
+    "go": (r"\.go$", "go"),
+    "rust": (r"\.rs$", "rs"),
+    "java-maven": (r"\.java$", "java"),
+    "java-gradle": (r"\.java$", "java"),
+    "dotnet": (r"\.cs$", "cs"),
+}
+
+
 def _render_verify_quick_sh(project: ProjectInfo, custom_commands: list[str] | None) -> str:
     if custom_commands:
         static_commands = "\n".join(custom_commands)
-        pytest_cmd = custom_commands[0] if custom_commands else "python -m pytest"
+        test_cmd = custom_commands[0] if custom_commands else "echo 'no test command configured'"
+    elif project.stack == "generic":
+        # generic: all skeleton TODO steps go to static checks; test is a placeholder
+        plan = verification_plan(project)
+        static_commands = "\n".join(plan.quick)
+        test_cmd = 'echo "# TODO: configure your test command in init.sh"'
     else:
-        static_commands = ""
-        pytest_cmd = "python -m pytest"
+        plan = verification_plan(project)
+        test_keywords = ("test",)
+        static_cmds = [c for c in plan.quick if not any(kw in c for kw in test_keywords)]
+        test_cmds = [c for c in plan.full if any(kw in c for kw in test_keywords)]
+        static_commands = "\n".join(static_cmds)
+        test_cmd = test_cmds[0] if test_cmds else (plan.full[0] if plan.full else "echo 'no test command configured'")
+
+    ext_pair = _VQ_STACK_EXT.get(project.stack)
+    if ext_pair:
+        grep_ext = f"grep -E '{ext_pair[0]}'"
+        pri_ext = ext_pair[1]
+    else:
+        grep_ext = "cat"   # no filter — include all changed files
+        pri_ext = ""
+
+    test_file_loop = ""
+    if pri_ext:
+        test_file_loop = f"""\
+        for f in $changed; do
+            base=$(basename "$f" .{pri_ext})
+            if [ -f "tests/test_${{base}}.{pri_ext}" ]; then
+                test_files+=("tests/test_${{base}}.{pri_ext}")
+            fi
+        done"""
+    else:
+        test_file_loop = """\
+        # no primary extension — include all changed files as test files
+        test_files=($changed)"""
 
     return f"""#!/bin/bash
 # scripts/verify-quick.sh — fast dev-cycle verification.
@@ -90,33 +135,28 @@ echo "=== verify-quick: static checks ==="
 {static_commands}
 
 echo ""
-echo "=== verify-quick: pytest (smart subset) ==="
+echo "=== verify-quick: test (smart subset) ==="
 MARKER_ARGS=()
 if [ "$SKIP_SNAPSHOT" = "1" ]; then
     MARKER_ARGS=(-m "not snapshot")
 fi
 
 if [ ${{#EXPLICIT_TESTS[@]}} -gt 0 ]; then
-    {pytest_cmd} "${{EXPLICIT_TESTS[@]}}" -q "${{MARKER_ARGS[@]}}"
+    {test_cmd} "${{EXPLICIT_TESTS[@]}}" -q "${{MARKER_ARGS[@]}}"
 else
-    changed=$(git diff --name-only HEAD 2>/dev/null | grep -E '\\.py$' | sort -u || true)
+    changed=$(git diff --name-only HEAD 2>/dev/null | {grep_ext} | sort -u || true)
     if [ -n "$changed" ]; then
         test_files=()
-        for f in $changed; do
-            base=$(basename "$f" .py)
-            if [ -f "tests/test_${{base}}.py" ]; then
-                test_files+=("tests/test_${{base}}.py")
-            fi
-        done
+{test_file_loop}
         if [ ${{#test_files[@]}} -gt 0 ]; then
             echo "Scope: ${{test_files[*]}}"
-            {pytest_cmd} "${{test_files[@]}}" -q "${{MARKER_ARGS[@]}}"
+            {test_cmd} "${{test_files[@]}}" -q "${{MARKER_ARGS[@]}}"
         else
             echo "No test files inferred — running smoke"
-            {pytest_cmd} -q "${{MARKER_ARGS[@]}}"
+            {test_cmd} -q "${{MARKER_ARGS[@]}}"
         fi
     else
-        {pytest_cmd} -q "${{MARKER_ARGS[@]}}"
+        {test_cmd} -q "${{MARKER_ARGS[@]}}"
     fi
 fi
 
@@ -144,14 +184,14 @@ def _agents_file_replacements(project: ProjectInfo, agent_file: str,
     }
 
 
-def _maybe_inject_pytest_markers(target: Path, force: bool) -> FileResult | None:
+def _maybe_inject_pytest_markers(target: Path) -> FileResult | None:
     pyproject = target / "pyproject.toml"
-    if not pyproject.exists():
+    if not pyproject.is_file():
         return None
 
     try:
         content = pyproject.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         logger.warning("Could not read %s for marker injection", pyproject)
         return None
 
@@ -248,7 +288,7 @@ def init(
         write_default_config(target)
         results.append(FileResult(harness_path, "written"))
 
-    marker_result = _maybe_inject_pytest_markers(target, force)
+    marker_result = _maybe_inject_pytest_markers(target)
     if marker_result:
         results.append(marker_result)
 
