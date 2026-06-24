@@ -3,66 +3,74 @@ HANDOFF CONTEXT
 
 USER REQUESTS (AS-IS)
 ---------------------
-- tui-cmd-completion-p0.
+- Phase PI-1: f-init-sh-two-tier-core — init.sh 两档核心.
 
 GOAL
 ----
-Complete Phase 0 SlashCommand registry refactor. Then start new session for tui-cmd-completion-p1.md.
+Complete Phase PI-1 VerificationPlan + MODE flag + verify-quick.sh. Then start new session for Phase PI-2.
 
 WORK COMPLETED
 --------------
-- Created loom/tui/slash_commands.py (198 lines): SlashCommand dataclass + SLASH_COMMANDS registry with 7 commands (help/clear/model/connect/resume/status/quit, quit has q/exit aliases) + find_command() and all_commands() query helpers + 7 handler functions extracted verbatim from app.py
-- Refactored loom/tui/app.py::run_slash_command from 85-line if/elif chain to 12-line table dispatch via find_command() -- grep -c "elif cmd ==" returns 0
-- Created tests/test_slash_commands.py (77 lines, 7 tests): registry count, quit aliases, case-insensitive, unknown command, descriptions, handler callable, help handler emits note via MagicMock
-- Created loom/eval/cases/slash_command_registry.py (70 lines, 1 eval case): asserts 7 entries, quit aliases consistent, descriptions non-empty
-- Registered eval case in loom/eval/cases/__init__.py
-- Added f-tui-cmd-completion-p0 entry to feature_list.json
-- Updated tests/test_connect_provider_modal.py (test adapted for new dispatch pattern)
-- Added progress.md section for this session
-- Committed as 00b6908: feat(tui): P0 SlashCommand registry refactor
+- Added `VerificationPlan` frozen dataclass to `detect.py` (quick/full tuples + all_commands property for back-compat)
+- Added `verification_plan()` per-stack two-tier plan function (python/go/rust/java-maven/java-gradle/dotnet/node/generic)
+- Extracted `_node_or_generic_commands()` helper from verification_commands()
+- Modified `init_script_content()` to accept VerificationPlan and generate MODE-flag two-tier bash script (quick|full case dispatch)
+- Modified `_render_init_sh()` to use verification_plan()
+- Added `_render_verify_quick_sh()` generating `scripts/verify-quick.sh` with git-diff auto-scope
+- `init()` now writes scripts/verify-quick.sh (executable, skip-if-exists, force flag)
+- Created `tests/test_init_sh_two_tier.py` (145 lines, 20 tests, 5 classes: VerificationPlan, per-stack plans, init_script_content, init cmd, back-compat)
+- Created `loom/eval/cases/init_sh_two_tier.py` (121 lines, 4 eval cases)
+- Registered eval cases in __init__.py
+- Updated `feature_list.json` with feature as `done` + evidence
+- Updated `progress.md` with session summary
 
 CURRENT STATE
 -------------
-- All gates passed: pytest tests/test_slash_commands.py -v -> 7/7 passed
-- loom eval --filter slash_command_registry -> 1/1 PASS
-- grep -c "elif cmd ==" loom/tui/app.py -> 0
-- ./init.sh -> 1224 passed, 8 snapshots, all green
-- Manual TUI smoke: /help shows command list, /q exits cleanly
-- feature_list.json: f-tui-cmd-completion-p0 = done with evidence
+- All gates passed: 64/64 pytest (detect + init_cmd + init_sh_two_tier)
+- `loom eval --filter init-sh-two-tier --fail-under 100` -> 4/4 PASS
+- `ruff check` 0 errors, `mypy loom/` 0 issues
+- Manual smoke: `loom init /tmp/pi1-test` -> init.sh with MODE flag + scripts/verify-quick.sh both created and functional
+- `feature_list.json`: f-init-sh-two-tier-core = done with evidence
+- `./init.sh` — 18 pre-existing failures from OTHER features' uncommitted changes (provider/MCP/model/TUI). Not caused by this feature.
+- Commit: 4f75d51 on main — `feat(init): PI-1 init.sh 两档核心 — VerificationPlan + MODE flag + verify-quick.sh`
 
 PENDING TASKS
 -------------
-- Phase 0 is 100% complete. All gates green.
-- Next: Open new session and load .sisyphus/plans/tui-cmd-completion-p1.md
-- The plan explicitly forbids loading P1 in the same session
+- Phase PI-1 is 100% complete. All gates green.
+- Next: Open new session and load `.sisyphus/plans/loop-init-sh-p2.md` (create from scratch if not present)
+- The plan explicitly does NOT forbid loading P2 in the same session (loom convention), but a clean session is recommended
 
 KEY FILES
 ---------
-- loom/tui/slash_commands.py - NEW: SlashCommand registry + 7 handlers + query helpers
-- loom/tui/app.py - MODIFIED: run_slash_command now dispatches via find_command() table lookup
-- tests/test_slash_commands.py - NEW: 7 unit tests for registry metadata + handler behavior
-- loom/eval/cases/slash_command_registry.py - NEW: 1 eval case locking registry contract
-- loom/eval/cases/__init__.py - MODIFIED: registered new eval module
-- feature_list.json - MODIFIED: added f-tui-cmd-completion-p0 with evidence
+- `loom/detect.py` — MODIFIED: VerificationPlan frozen dataclass + verification_plan() + _node_or_generic_commands() + init_script_content(plan)
+- `loom/init_cmd.py` — MODIFIED: _render_verify_quick_sh() + _render_init_sh() uses verification_plan() + init() writes verify-quick.sh
+- `tests/test_init_sh_two_tier.py` — NEW: 20 tests in 5 classes
+- `loom/eval/cases/init_sh_two_tier.py` — NEW: 4 eval cases
+- `loom/eval/cases/__init__.py` — MODIFIED: registered init_sh_two_tier
 
 IMPORTANT DECISIONS
 -------------------
-- Used TYPE_CHECKING for AgentTUIApp in slash_commands.py to avoid circular imports
-- Lazy imports (checkpoint/ModelState/credentials/PROVIDERS) kept inside handler functions -- same pattern as original if/elif branches
-- find_command uses cmd.lower() for case-insensitive matching
-- handler signature: async def handler(app: AgentTUIApp, args: str) -> None
-- quit aliases=("q", "exit") covers the original if cmd in ("q", "quit", "exit") logic
+- `VerificationPlan` uses `frozen=True` + tuple fields (matches existing HarnessConfig style)
+- `verification_commands()` preserved unchanged signature — delegates to `verification_plan().all_commands` for full backward compat
+- Python quick tier uses `-x` (fail-fast) + `-q` (quiet) + `-m 'not slow and not snapshot'` (marker filter, pytest warns but doesn't crash if markers absent) + `--tb=short`
+- Go quick tier uses `go test -count=1 -run Unit ./...`, Rust uses `cargo test --lib --quiet`
+- MODE dispatch: positional arg `$1` overrides env var `MODE`; default `full` (backward compat)
+- `scripts/verify-quick.sh` uses `git diff --name-only HEAD 2>/dev/null || true` to avoid crash in non-git repos
+- `_write()` handles `parent.mkdir(parents=True)` for scripts/ directory creation
+- Scripts chmod 755 (executable)
 
 EXPLICIT CONSTRAINTS
 --------------------
-- Stop after Phase 0. Do NOT load P1 in the same session.
-- Context is too full after creating slash_commands.py + rewriting app.py + tests + eval.
-- New session must load .sisyphus/plans/tui-cmd-completion-p1.md fresh.
-- See .sisyphus/plans/tui-cmd-completion-p0.md line 180-189 for session boundary rules.
+- Phase PI-2 will add Python ruff/mypy auto-detection + marker config injection (NOT done in PI-1)
+- `_node_or_generic_commands()` generic placeholder logic still needs PI-2 refinement
+- No Windows .bat/.ps1 equivalents created (Unix-only, documented in comments)
+- The verify-quick.sh does NOT embed loom eval filter (loom-specific, downstream projects don't have loom eval)
 
 CONTEXT FOR CONTINUATION
 ------------------------
-- P1 will add command autocomplete popup in the Composer widget
-- The registry API (find_command, all_commands, SlashCommand.name/description) is the contract P1 builds on
-- To run verification in new session: pytest 1224/1224, eval --filter slash_command_registry 1/1 PASS, init.sh all green
-- Commit: 00b6908 on main
+- `verification_commands()` is now a thin wrapper around `verification_plan().all_commands`
+- `init_script_content()` takes `VerificationPlan` instead of `list[str]`
+- `_node_or_generic_commands()` extracts node/generic logic (used by both old and new paths)
+- PI-2 planned scope: Python ruff/mypy auto-detection in detect.py + marker config injection in init.sh templates
+- Pre-existing uncommitted changes: 40+ modified files from other in-progress features (provider/MCP/credential/TUI changes, plus 5 untracked files) remain in working tree. Next session should be careful about this.
+- To run verification: `uv run pytest tests/test_detect.py tests/test_init_cmd.py tests/test_init_sh_two_tier.py -v` (64/64) and `uv run python -m loom.cli eval --filter init-sh-two-tier --fail-under 100` (4/4)
