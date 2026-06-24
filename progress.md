@@ -7016,3 +7016,22 @@ Feature: `f-init-sh-two-tier` umbrella + `f-init-sh-two-tier-polish` review fixe
 - ✅ 25 references of `review-pending` across `loom/` (threshold: ≥4)
 
 **Next:** Load `loop-review-p3.md` for PR-3 (f-review-session-end-hook).
+
+## Session: f-review-session-end-hook (PR-3) (2026-06-24)
+
+**Feature**: `f-review-session-end-hook` — Phase PR-3: SessionEnd 自动审查 hook + progress.md verdict 段
+
+**Done**:
+- `loom/agent/config.py`: +`ReviewConfig` frozen dataclass (enabled/session_end_review/pre_compact_review/max_turns) + `_parse_review_section()` + `[review]` skeleton comment
+- `loom/agent/loop.py`: +`_run_session_end_review()` (daemon thread, reads feature_list.json, calls run_review, writes verdict) + `_write_verdict_to_progress_md()` (appends ISO-timestamped Final Review section) + wired into `run_repl()` SessionEnd exit path
+- `loom/tui/app.py`: wired `_run_session_end_review()` into `action_quit()` (fire-and-forget, daemon thread)
+- `tests/test_review_session_end.py`: 15 tests in 4 classes (TestReviewConfig, TestRunSessionEndReview, TestRunReplIntegration, TestTuiActionQuitIntegration)
+- `loom/eval/cases/review_session_end.py`: 4 eval cases (config-parses, fires-when-active, skips-when-no-active, fail-closed-on-exception)
+
+**Verification**:
+- `uv run pytest tests/test_review_session_end.py -v` → 15/15 passed
+- `uv run python -m loom.cli eval --filter review-session-end --fail-under 100` → 4/4 passed
+- `uv run ruff check .` → All checks passed
+- `uv run mypy loom/` → Success (0 issues in 173 source files)
+
+**Next:** Load `loop-review-p4.md` for PR-4.

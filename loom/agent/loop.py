@@ -1,4 +1,5 @@
 import concurrent.futures
+import json
 import os
 import subprocess
 import threading
@@ -632,6 +633,63 @@ def _log_init_sh_failure_to_progress_md(
         logger.warning("Failed to write progress.md: {}", exc)
 
 
+def _write_verdict_to_progress_md(workdir: Path, feature_id: str, verdict_str: str) -> None:
+    """Append a review verdict to progress.md (best-effort).
+
+    Used by ``_run_session_end_review`` to log the auto-review result.
+    Best-effort: swallows all exceptions (OSError specifically).
+    """
+    try:
+        import datetime
+        progress_path = workdir / "progress.md"
+        ts = datetime.datetime.now(datetime.UTC).isoformat()
+        section = (
+            f"\n\n## Final Review (auto, {ts})\n\n"
+            f"**Feature**: {feature_id}\n\n"
+            f"**Verdict**:\n{verdict_str}\n"
+        )
+        with progress_path.open("a", encoding="utf-8") as f:
+            f.write(section)
+    except OSError as exc:
+        logger.warning("Failed to write review verdict to progress.md: {}", exc)
+
+
+def _run_session_end_review(workdir: Path, config: HarnessConfig, history: list) -> None:
+    """Fire-and-forget code review at session end.
+
+    Spawns a daemon thread that reads ``feature_list.json``, finds the active
+    feature, calls ``run_review()``, and writes the verdict to progress.md.
+    Never blocks process exit — the daemon thread dies when the process exits.
+    """
+    def _runner() -> None:
+        if not config.review.enabled or not config.review.session_end_review:
+            return
+        try:
+            fl_path = workdir / "feature_list.json"
+            fl = json.loads(fl_path.read_text(encoding="utf-8"))
+            active = [
+                f
+                for f in fl.get("features", [])
+                if isinstance(f, dict) and f.get("status") in ("in-progress", "review-pending")
+            ]
+            if not active:
+                return
+            if len(active) > 1:
+                logger.warning(
+                    "Multiple active features at SessionEnd, reviewing first only: %s",
+                    [f.get("id") for f in active],
+                )
+            feat = active[0]
+            from loom.agent.review import run_review
+
+            verdict_str = run_review(feat["id"], feat.get("description", ""), feat.get("name", ""))
+            _write_verdict_to_progress_md(workdir, feat["id"], verdict_str)
+        except Exception as exc:
+            logger.warning("SessionEnd review failed: %s", exc)
+
+    threading.Thread(target=_runner, daemon=True).start()
+
+
 def _terminate_proc(proc: subprocess.Popen) -> None:
     try:
         proc.terminate()
@@ -746,4 +804,5 @@ def run_repl(resume: bool = False) -> None:
         WORKDIR, _active_config,
         on_failure_log=_log_init_sh_failure_to_progress_md,
     )
+    _run_session_end_review(WORKDIR, _active_config, history)
 

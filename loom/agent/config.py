@@ -239,6 +239,26 @@ class MCPConfig:
 
 
 @dataclass(frozen=True)
+class ReviewConfig:
+    """Review-agent automation hooks configuration.
+
+    enabled:              master switch — false disables the entire review loop.
+    session_end_review:   auto-call review agent at SessionEnd.
+    pre_compact_review:   call review agent before autocompact (reserved, PR-4).
+    max_turns:            max turns for the review sub-agent.
+    """
+
+    enabled: bool = True
+    session_end_review: bool = True
+    pre_compact_review: bool = False
+    max_turns: int = 15
+
+    @classmethod
+    def from_defaults(cls) -> ReviewConfig:
+        return cls()
+
+
+@dataclass(frozen=True)
 class HarnessConfig:
     policy: PermissionPolicy
     checkpoint: CheckpointConfig
@@ -249,6 +269,7 @@ class HarnessConfig:
     max_turns: int = 100
     lsp: LSPConfig = field(default_factory=LSPConfig.from_defaults)
     mcp: MCPConfig = field(default_factory=MCPConfig.from_defaults)
+    review: ReviewConfig = field(default_factory=ReviewConfig)
 
     @classmethod
     def from_defaults(cls) -> HarnessConfig:
@@ -256,6 +277,7 @@ class HarnessConfig:
             policy=DEFAULT_POLICY,
             checkpoint=CheckpointConfig.from_defaults(),
             disabled_tools=frozenset(),
+            review=ReviewConfig(),
         )
 
 
@@ -567,6 +589,30 @@ def _parse_mcp_permissions(section: dict | None) -> MCPPermissions:
     return MCPPermissions(auto_approve=tuple(auto_approve), deny=tuple(deny))
 
 
+def _parse_review_section(section: dict | None) -> ReviewConfig:
+    """Parse the [review] section from harness.toml."""
+    if not section:
+        return ReviewConfig()
+    enabled = section.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise ConfigError("[review].enabled must be a boolean")
+    session_end_review = section.get("session_end_review", True)
+    if not isinstance(session_end_review, bool):
+        raise ConfigError("[review].session_end_review must be a boolean")
+    pre_compact_review = section.get("pre_compact_review", False)
+    if not isinstance(pre_compact_review, bool):
+        raise ConfigError("[review].pre_compact_review must be a boolean")
+    max_turns = section.get("max_turns", 15)
+    if not isinstance(max_turns, int) or max_turns < 1:
+        raise ConfigError("[review].max_turns must be a positive integer")
+    return ReviewConfig(
+        enabled=enabled,
+        session_end_review=session_end_review,
+        pre_compact_review=pre_compact_review,
+        max_turns=max_turns,
+    )
+
+
 def load_config(workdir: Path) -> HarnessConfig:
     """Read `<workdir>/harness.toml` and return a HarnessConfig.
 
@@ -596,6 +642,7 @@ def load_config(workdir: Path) -> HarnessConfig:
         max_turns=_parse_agent_section(data.get("agent")),
         lsp=_parse_lsp_section(data.get("lsp")),
         mcp=_parse_mcp_section(data.get("mcp")),
+        review=_parse_review_section(data.get("review")),
     )
 
 
@@ -656,4 +703,10 @@ _SKELETON = """# harness.toml — per-project loom agent config
 # deny = ["*__delete", "*__drop_table", "*__rm"]
 # # Pattern grammar: "server__tool" with optional "*" wildcard per segment.
 # # Unmatched tools → y/N prompt via Hooks._ask_user (never silently allow).
+
+# [review]
+# enabled = true              # review 工具总开关(false 关闭整个审查闭环)
+# session_end_review = true   # SessionEnd 自动调 review agent
+# pre_compact_review = false  # autocompact 前调 review(PR-4,关键 session 才开)
+# max_turns = 15              # 审查 agent max_turns
 """

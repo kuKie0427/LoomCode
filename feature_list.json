@@ -1287,6 +1287,15 @@
       "evidence": "uv run pytest tests/test_review_state_machine.py -v → 11/11 passed; uv run python -m loom.cli eval --filter review-state-machine --fail-under 100 → 3/3 passed; uv run ruff check . → All checks passed; uv run mypy loom/ → Success, 0 issues in 172 source files; audit state dimension 6/6 (review-pending check passes); grep -rn \"review-pending\" loom/ → 25 references covering schema, scope, audit, system_prompt. Files: feature_list.schema.json (modified — status enum + \"review-pending\"), loom/templates/feature-list.schema.json (modified — same), loom/agent/scope.py (modified — check_wip1 counts review-pending as active), loom/audit_cmd.py (modified — state check recognizes review-pending), loom/agent/system_prompt.py (modified — static rule about review before done), tests/test_review_state_machine.py (NEW, 170 lines, 11 tests in 4 classes), loom/eval/cases/review_state_machine.py (NEW, 91 lines, 3 eval cases), loom/eval/cases/__init__.py (modified — registered review_state_machine)."
     },
     {
+      "id": "f-review-session-end-hook",
+      "name": "Phase PR-3: SessionEnd 自动审查 hook + progress.md verdict 段",
+      "description": "run_repl / TUI action_quit 退出时自动调 review,verdict 写 progress.md '## Final Review' 段。harness.toml [review] session_end_review = true 默认开。走 schedule_init_sh_on_session_end daemon thread 模式(R5: 不阻塞退出)。fail-closed: review 失败只 warn。本 phase 不做 PreCompact review(PR-4)。",
+      "dependencies": ["f-review-tool", "f-review-state-machine"],
+      "status": "done",
+      "verification": "uv run pytest tests/test_review_session_end.py -v && uv run python -m loom.cli eval --filter review-session-end --fail-under 100",
+      "evidence": "uv run pytest tests/test_review_session_end.py -v → 15/15 passed; uv run python -m loom.cli eval --filter review-session-end --fail-under 100 → 4/4 passed; uv run ruff check . → All checks passed; uv run mypy loom/ → Success, 0 issues in 173 source files. Files: loom/agent/config.py (modified — +ReviewConfig dataclass + _parse_review_section + skeleton), loom/agent/loop.py (modified — +_run_session_end_review + _write_verdict_to_progress_md + run_repl integration), loom/tui/app.py (modified — action_quit integration), tests/test_review_session_end.py (NEW, 428 lines, 15 tests in 4 classes), loom/eval/cases/review_session_end.py (NEW, 217 lines, 4 eval cases), loom/eval/cases/__init__.py (modified — registered review_session_end)."
+    },
+    {
       "id": "f-init-sh-two-tier-core",
       "name": "Phase PI-1: init.sh 两档核心 — VerificationPlan + MODE flag",
       "description": "detect.py 加 VerificationPlan(quick, full) dataclass + verification_plan() 函数。init_script_content() 改接受 VerificationPlan,生成带 `./init.sh quick|full` 分支的脚本。init_cmd.py 额外生成 scripts/verify-quick.sh 独立文件。verification_commands() 保留向后兼容(返回 plan.full)。本 phase 不做 Python ruff/mypy 自动检测(PI-2)、不做 marker 配置注入(PI-2)。",

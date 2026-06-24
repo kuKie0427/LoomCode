@@ -881,7 +881,12 @@ class AgentTUIApp(App):
 
     async def action_quit(self) -> None:
         """Override default quit: fire-and-forget init.sh, exit immediately."""
-        from loom.agent.loop import _active_config, hooks, schedule_init_sh_on_session_end
+        from loom.agent.loop import (
+            _active_config,
+            _run_session_end_review,
+            hooks,
+            schedule_init_sh_on_session_end,
+        )
 
         hooks.trigger_hooks("SessionEnd", self.history, self.tool_call_count)
 
@@ -893,6 +898,8 @@ class AgentTUIApp(App):
                 on_complete=on_done,
                 timeout=120.0,
             )
+
+        _run_session_end_review(WORKDIR, _active_config, self.history)
 
         hooks._asker = hooks._default_asker
         self.exit()
