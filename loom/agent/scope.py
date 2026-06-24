@@ -15,7 +15,7 @@ from loguru import logger
 
 
 def check_wip1(workdir: Path) -> list[str]:
-    """Return IDs of in-progress features. Logs warning if > 1.
+    """Return IDs of active features (in-progress or review-pending). Logs warning if > 1.
 
     Silent on missing or malformed feature_list.json — never crashes
     the CLI for a guideline check.
@@ -30,15 +30,15 @@ def check_wip1(workdir: Path) -> list[str]:
     features = data.get("features", [])
     if not isinstance(features, list):
         return []
-    in_progress = [
+    active = [
         f.get("id", "<no-id>")
         for f in features
-        if isinstance(f, dict) and f.get("status") == "in-progress"
+        if isinstance(f, dict) and f.get("status") in ("in-progress", "review-pending")
     ]
-    if len(in_progress) > 1:
+    if len(active) > 1:
         logger.warning(
-            "WIP=1 violation: {} features in-progress: {}. "
+            "WIP=1 violation: {} features in-progress or review-pending: {}. "
             "Finish or move one to 'blocked' before starting another.",
-            len(in_progress), in_progress,
+            len(active), active,
         )
-    return in_progress
+    return active

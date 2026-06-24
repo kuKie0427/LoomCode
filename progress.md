@@ -6990,3 +6990,29 @@ Feature: `f-init-sh-two-tier` umbrella + `f-init-sh-two-tier-polish` review fixe
 
 **Pre-existing test failures** (unchanged from prior sessions): MCP subagent tests (5), thinking display tests (2), header snapshot (1), model picker TUI (2), provider registry context window (1). Total 19 failing, 1272 passing.
 **Eval:** 45/48 multi-model filter pass. 3 pre-existing failures (change-model, deepseek profile, context-window missing providers).
+
+---
+
+## Phase PR-2 — f-review-state-machine: review-pending state + audit sync (2026-06-24)
+
+**Session ID:** ses_1074e5d36ffetz7WIwS7OxN3pL
+**Status:** done ✅
+
+**Changes:**
+- `feature_list.schema.json` + `loom/templates/feature-list.schema.json`: Added `"review-pending"` to status enum (between `blocked` and `done`)
+- `loom/agent/scope.py`: `check_wip1` now counts both `in-progress` and `review-pending` as active (WIP=1 enforcement)
+- `loom/audit_cmd.py`: State dimension check recognizes `review-pending` status
+- `loom/agent/system_prompt.py`: Added `审查优先` static rule — must review before marking done
+- `tests/test_review_state_machine.py` (NEW): 11 tests across 4 classes (Schema, Scope, Audit, SystemPrompt)
+- `loom/eval/cases/review_state_machine.py` (NEW): 3 eval cases locking schema/scope/audit behavior
+- `loom/eval/cases/__init__.py`: Registered `review_state_machine`
+
+**Verification:**
+- ✅ `uv run pytest tests/test_review_state_machine.py -v` → 11/11 passed
+- ✅ `uv run python -m loom.cli eval --filter review-state-machine --fail-under 100` → 3/3 passed
+- ✅ `uv run ruff check .` → All checks passed
+- ✅ `uv run mypy loom/` → Success (0 issues in 172 source files)
+- ✅ Audit: state dimension 6/6, overall 83/100
+- ✅ 25 references of `review-pending` across `loom/` (threshold: ≥4)
+
+**Next:** Load `loop-review-p3.md` for PR-3 (f-review-session-end-hook).

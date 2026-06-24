@@ -31,8 +31,8 @@
           },
           "status": {
             "type": "string",
-            "enum": ["not-started", "in-progress", "blocked", "done"],
-            "description": "Current implementation state"
+            "enum": ["not-started", "in-progress", "blocked", "review-pending", "done"],
+            "description": "Current implementation state. review-pending = implementation complete, awaiting reviewer agent verdict."
           },
           "evidence": {
             "type": "string",

@@ -26,8 +26,8 @@
           },
           "status": {
             "type": "string",
-            "enum": ["not-started", "in-progress", "blocked", "done"],
-            "description": "Current state. 'done' is reserved for verification-passed features."
+            "enum": ["not-started", "in-progress", "blocked", "review-pending", "done"],
+            "description": "Current implementation state. review-pending = implementation complete, awaiting reviewer agent verdict."
           },
           "verification": {
             "type": "string",

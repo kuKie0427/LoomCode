@@ -156,6 +156,7 @@ def score_harness(files: list[HarnessFile], *, target: Path, skip_self_test: boo
             _text_check(progress, ("Current State", "What", "Next"), "Progress log supports restart"),
             _text_check((handoff or progress), ("Blockers", "Files", "Next Session"),
                         "Handoff captures blockers/files/next step"),
+            _text_check(feature_list, ("review-pending",), "State dimension recognizes review-pending status"),
         ],
         "verification": [
             _file_check(by_path, ("init.sh",), "Verification entrypoint exists"),
