@@ -78,7 +78,7 @@ LoomCode 把单干拆成三个角色互相制衡：
 
 <br>
 
-<pre lang="mermaid" style="background: #f6f8fa; padding: 16px; border-radius: 8px; line-height: 1.6;">
+<pre style="background: #f6f8fa; padding: 16px; border-radius: 8px; line-height: 1.6;">
 
       你提需求
          │
