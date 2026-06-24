@@ -89,10 +89,10 @@ class ReviewToolFailClosedOnLlmFailure(EvalCase):
     description = "R2: run_review returns unknown when LLM call fails (no exception propagates)"
 
     def run(self) -> EvalResult:
-        from loom.agent.review import run_review
+        from loom.agent.review import run_review_legacy_str
 
         with patch("loom.agent.tools.spawn_subagent", side_effect=Exception("LLM down")):
-            result = run_review("f-test", "desc")
+            result = run_review_legacy_str("f-test", "desc")
 
         if "unknown" not in result:
             return EvalResult(
@@ -110,14 +110,14 @@ class ReviewToolParsesVerdictTag(EvalCase):
     description = "R3: run_review extracts [review: pass] from <verdict> tag in subagent output"
 
     def run(self) -> EvalResult:
-        from loom.agent.review import run_review
+        from loom.agent.review import run_review_legacy_str
 
         verdict_xml = (
             '<verdict>{"status":"pass","summary":"ok",'
             '"evidence":[],"recommendations":[]}</verdict>'
         )
         with patch("loom.agent.tools.spawn_subagent", return_value=verdict_xml):
-            result = run_review("f-test", "desc")
+            result = run_review_legacy_str("f-test", "desc")
 
         if "[review: pass]" not in result:
             return EvalResult(

@@ -7181,3 +7181,25 @@ None
 **Files changed**: 2 new (loom/agent/triangle_protocol.py, tests/test_triangle_protocol.py), 2 modified (feature_list.json, progress.md)
 
 **Commit**: `feat(triangle): TP-1 protocol parser + validators`
+
+---
+
+## Session: TP-2 Triangle Protocol Integration (2026-06-24)
+
+**Feature**: `f-triangle-protocol-integration`
+
+**Changes**:
+- `loom/agent/tools.py` — `spawn_subagent` extended with `feature_card`/`scope` optional keyword params (C7: kept `description` param name). Protocol header prepending: serializes FeatureCard/ScopeEnvelope and prepends to description. Delta report soft constraint (B1: inline check after subagent loop, not PostToolUse hook): if feature_card provided and result lacks `<delta_report>`, appends `<system-reminder>` violation reminder. `run_task` passes through new params. New `_run_review_tool_handler` forward-compat wrapper. Task tool description updated with Triangle Protocol section. Review tool description/schema updated with delta_report/scope/workdir fields.
+- `loom/agent/review.py` — `run_review` signature extended: `delta_report`, `scope`, `workdir` optional params. Return type changed to `tuple[str, FeedbackDirective | None]`. Pre-processing (I7/I8 enforcement): validates delta against scope/git diff before LLM call; violations bypass LLM. Post-processing: parses `<feedback_directive>` from Reviewer output. Added `run_review_legacy_str()` backward-compat wrapper.
+- `loom/agent/loop.py` — Callers migrated to `run_review_legacy_str()`. Added `_LAST_REVIEWED_FEATURE_ID` dedup guard. Refactored `_find_active_feature_for_review()` shared helper. Added PreCompact review trigger in agent_loop.
+- `tests/test_triangle_integration.py` — 13 new integration tests covering spawn_subagent protocol injection, I4 soft enforcement, run_review delta_report injection, pre-validation bypass (I7/I8), feedback_directive parsing (I5/I6), legacy wrapper backward compat.
+- `loom/eval/cases/review_tool.py` + `review_session_end.py` + `review_pre_compact.py` — Updated eval cases for new `run_review` tuple return type.
+- `tests/test_review_tool.py` — Updated tests to use `run_review_legacy_str()`.
+
+**Verification**:
+- `uv run pytest tests/test_triangle_integration.py tests/test_triangle_protocol.py tests/test_review_tool.py tests/test_spawn_subagent_structured.py -v` → 79/79 passed
+- `uv run python -m loom.cli eval --filter review --fail-under 100` → 15/15 passed
+- `uv run ruff check loom/agent/tools.py loom/agent/review.py loom/agent/loop.py` → All checks passed (1 pre-existing B007)
+- `uv run mypy loom/agent/tools.py loom/agent/review.py loom/agent/loop.py` → Success: no issues found
+
+**Files changed**: 3 core files (tools.py +70, review.py +79, loop.py +84), 2 test files (14 new test files/sections), 3 eval case files

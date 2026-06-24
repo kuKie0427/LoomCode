@@ -57,6 +57,7 @@ DEFAULT_CALLBACKS: dict[str, AgentCallback | None] = {
 # import: tools.py is imported by loop.py). set_active_callbacks() is
 # called once at agent_loop entry; clear_active_callbacks() in finally.
 _active_callbacks: dict | None = None
+_LAST_REVIEWED_FEATURE_ID: str | None = None
 
 
 def set_active_callbacks(cb: dict) -> None:
@@ -286,6 +287,8 @@ def _run_tool_turn(tool_uses, hooks):
 
 def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, stream_text: Callable[[str, list, list, int], Iterator[StreamEvent]] | None = None) -> None:
     configure_logging()
+    global _LAST_REVIEWED_FEATURE_ID
+    _LAST_REVIEWED_FEATURE_ID = None
     cb = {**DEFAULT_CALLBACKS, **(callbacks or {})}
     hooks.trigger_hooks("SessionStart")
     if llm_client is None:
@@ -316,6 +319,8 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                     logger.warning("tool_errors: detected {}-time failure of {}", detection["failure_count"], detection["tool"])
                 if context.should_compact(messages, llm_client.get_context_window(), llm_client.model):
                     hooks.trigger_hooks("PreCompact", messages, context.last_input_tokens)
+                    if _active_config.review.enabled and _active_config.review.pre_compact_review:
+                        _run_pre_compact_review(messages, _active_config)
                     msg_count_before = len(messages)
                     context.autocompact(messages, llm_client, llm_client.get_context_window())
                     if cb["on_compact"] is not None:
@@ -654,6 +659,79 @@ def _write_verdict_to_progress_md(workdir: Path, feature_id: str, verdict_str: s
         logger.warning("Failed to write review verdict to progress.md: {}", exc)
 
 
+def _find_active_feature_for_review(workdir: Path | None = None) -> dict | None:
+    """Read ``feature_list.json`` and find the first active feature.
+
+    Args:
+        workdir: Project directory. Falls back to ``WORKDIR`` when ``None``.
+
+    Returns the feature dict (with ``id``, ``name``, ``description``,
+    ``status`` keys) or None if no active feature is found.
+    """
+    wd = workdir if workdir is not None else WORKDIR
+    try:
+        fl_path = wd / "feature_list.json"
+        if not fl_path.exists():
+            return None
+        fl = json.loads(fl_path.read_text(encoding="utf-8"))
+        active = [
+            f
+            for f in fl.get("features", [])
+            if isinstance(f, dict) and f.get("status") in ("in-progress", "review-pending")
+        ]
+        if not active:
+            return None
+        if len(active) > 1:
+            logger.warning(
+                "Multiple active features found, reviewing first only: %s",
+                [f.get("id") for f in active],
+            )
+        return active[0]
+    except OSError as exc:
+        logger.warning("_find_active_feature_for_review: IO error: %s", exc)
+        return None
+    except json.JSONDecodeError as exc:
+        logger.warning("_find_active_feature_for_review: invalid JSON: %s", exc)
+        return None
+
+
+def _run_pre_compact_review(messages: list, config: HarnessConfig) -> None:
+    """Run a code review before autocompact, if a new active feature is found.
+
+    Fail-closed: exceptions are caught and logged; autocompact proceeds.
+    Uses ``_LAST_REVIEWED_FEATURE_ID`` to avoid re-reviewing the same feature
+    multiple times within the same session.
+    """
+    global _LAST_REVIEWED_FEATURE_ID
+    if not config.review.enabled or not config.review.pre_compact_review:
+        return
+    try:
+        feat = _find_active_feature_for_review()
+        if feat is None:
+            return
+        feat_id = feat.get("id")
+        if not feat_id or feat_id == _LAST_REVIEWED_FEATURE_ID:
+            return
+        from loom.agent.review import run_review_legacy_str
+
+        verdict_str = run_review_legacy_str(
+            feat_id,
+            feat.get("description", ""),
+            feat.get("name", ""),
+        )
+        messages.append({
+            "role": "user",
+            "content": (
+                f"[system-reminder] PreCompact review verdict for {feat_id}:\n"
+                f"{verdict_str}\n"
+                f"保留此 verdict 作为下次 session 的上下文。"
+            ),
+        })
+        _LAST_REVIEWED_FEATURE_ID = feat_id
+    except Exception as exc:
+        logger.warning("_run_pre_compact_review: failed: %s", exc)
+
+
 def _run_session_end_review(workdir: Path, config: HarnessConfig, history: list) -> None:
     """Fire-and-forget code review at session end.
 
@@ -665,25 +743,14 @@ def _run_session_end_review(workdir: Path, config: HarnessConfig, history: list)
         if not config.review.enabled or not config.review.session_end_review:
             return
         try:
-            fl_path = workdir / "feature_list.json"
-            fl = json.loads(fl_path.read_text(encoding="utf-8"))
-            active = [
-                f
-                for f in fl.get("features", [])
-                if isinstance(f, dict) and f.get("status") in ("in-progress", "review-pending")
-            ]
-            if not active:
+            feat = _find_active_feature_for_review(workdir)
+            if feat is None:
                 return
-            if len(active) > 1:
-                logger.warning(
-                    "Multiple active features at SessionEnd, reviewing first only: %s",
-                    [f.get("id") for f in active],
-                )
-            feat = active[0]
-            from loom.agent.review import run_review
+            from loom.agent.review import run_review_legacy_str
 
-            verdict_str = run_review(feat["id"], feat.get("description", ""), feat.get("name", ""))
-            _write_verdict_to_progress_md(workdir, feat["id"], verdict_str)
+            feat_id = feat["id"]
+            verdict_str = run_review_legacy_str(feat_id, feat.get("description", ""), feat.get("name", ""))
+            _write_verdict_to_progress_md(workdir, feat_id, verdict_str)
         except Exception as exc:
             logger.warning("SessionEnd review failed: %s", exc)
 

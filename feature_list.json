@@ -1348,6 +1348,15 @@
       "status": "done",
       "verification": "uv run pytest tests/test_triangle_protocol.py -v && uv run ruff check loom/agent/triangle_protocol.py && uv run mypy loom/agent/triangle_protocol.py",
       "evidence": "uv run pytest tests/test_triangle_protocol.py -v → 30/30 passed in 0.70s. uv run ruff check loom/agent/triangle_protocol.py → All checks passed. uv run mypy loom/agent/triangle_protocol.py → Success: no issues found in 1 source file. Files: loom/agent/triangle_protocol.py (549 lines, 4 frozen dataclasses + 4 serialize + 4 parse + 2 validate + helpers + PROTOCOL_VERSION), tests/test_triangle_protocol.py (30 tests covering constants, dataclass defaults, serializers, parse success/failure, version handling, combination rules, scope validation, git diff validation). ./init.sh: 1338/1354 passed, 16 pre-existing failures in MCP/models/providers — all unrelated to this feature."
+    },
+    {
+      "id": "f-triangle-protocol-integration",
+      "name": "Phase TP-2: Triangle Protocol integration (spawn_subagent + run_review + PostToolUse hook)",
+      "description": "spawn_subagent 加 feature_card/scope 可选参数（保留 description 参数名 C7），自动序列化注入 description 头部。run_review 加 delta_report/scope/workdir 可选参数，自动序列化注入 Reviewer prompt + 预校验 validator（I7/I8 B2 fix——违规直接返回 unknown bypass LLM）。task 工具描述更新提到 <feature_card>+<scope_envelope> 格式。review 工具描述更新提到 <delta_report>。spawn_subagent 返回前 inline 检查 delta_report（B1 fix——不是 PostToolUse hook，因为 tools.py:1412 丢弃 hook 返回值），失败注入 <system-reminder> 软约束。run_review 返回值从 str 改为 tuple[str, FeedbackDirective | None]，parse_feedback_directive 校验 action list 组合规则（硬约束）。",
+      "dependencies": ["f-triangle-protocol-parser"],
+      "status": "done",
+      "verification": "uv run pytest tests/test_triangle_integration.py tests/test_triangle_protocol.py tests/test_review_tool.py tests/test_spawn_subagent_structured.py -v && uv run python -m loom.cli eval --filter review --fail-under 100",
+      "evidence": "uv run pytest tests/test_triangle_integration.py tests/test_triangle_protocol.py tests/test_review_tool.py tests/test_spawn_subagent_structured.py -v → 79/79 passed; uv run python -m loom.cli eval --filter review --fail-under 100 → 15/15 passed; uv run ruff check loom/agent/tools.py loom/agent/review.py loom/agent/loop.py → All checks passed (1 pre-existing B007); uv run mypy loom/agent/tools.py loom/agent/review.py loom/agent/loop.py → Success: no issues found"
     }
   ]
 }

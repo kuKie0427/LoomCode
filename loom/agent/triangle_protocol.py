@@ -93,9 +93,12 @@ def _parse_yaml_ish(body: str) -> dict[str, str | list[str]]:
     block_lines: list[str] = []
 
     for line in body.splitlines():
-        # Multi-line block continuation
+        # Multi-line block continuation. Strip the 2-space literal-block indent
+        # so the parsed value matches the original (YAML semantics: `key: |`
+        # content is the unindented text). Blank lines are preserved as empty
+        # strings to keep multi-line roundtrip stable.
         if current_block_key and (line.startswith("  ") or line == ""):
-            block_lines.append(line)
+            block_lines.append(line[2:] if line.startswith("  ") else "")
             continue
         if current_block_key is not None:
             result[current_block_key] = "\n".join(block_lines)
@@ -336,10 +339,12 @@ def parse_feedback_directive(
     """Extract and parse ``<feedback_directive>...</feedback_directive>`` from Reviewer's final message.
 
     Returns ``None`` if no block found, parse error, incompatible version, or
-    action list violates combination rules (§7.3):
+    action list violates combination rules (§7.3 / §7.6):
     - list MUST be non-empty
     - ``none`` MAY only appear alone
     - ``clarify_with_user`` MAY only appear alone
+    - ``retry_review=true`` + ``action=[none]`` is contradictory
+    - ``target_files`` required when action contains ``scope_trim``/``fix_bug``/``improve_quality``
     """
     m = re.search(
         r"<feedback_directive>(.*?)</feedback_directive>", text, re.DOTALL
@@ -347,6 +352,13 @@ def parse_feedback_directive(
     if not m:
         return None
     body = m.group(1)
+
+    # I4 last-block check: closing tag should be followed only by whitespace/EOF
+    tail = text[m.end():]
+    if tail.strip():
+        logger.warning(
+            "parse_feedback_directive: content after </feedback_directive> (I4 soft violation)"
+        )
 
     # Check _protocol version
     ver_match = re.search(r"_protocol:\s*(\S+)", body)
@@ -357,13 +369,26 @@ def parse_feedback_directive(
                 "parse_feedback_directive: unknown protocol version %s", ver
             )
             return None
+        if ver != max_version and ver in _KNOWN_OLDER_VERSIONS:
+            logger.warning(
+                "parse_feedback_directive: deprecated protocol version %s (current %s)",
+                ver, max_version,
+            )
 
     # Parse action list
     actions = _parse_action_list(body)
     if not actions:
         return None
 
-    # Validate combination rules (§7.3)
+    # Parse remaining fields (needed for combination-rule validation below)
+    parsed = _parse_yaml_ish(body)
+    target_files_raw = _parse_simple_list(body, "target_files")
+    target_lines_raw = _parse_simple_list(body, "target_lines")
+    retry_raw = str(parsed.get("retry_review", "false")).strip().lower()
+    retry_review = retry_raw == "true"
+    notes = str(parsed.get("notes", ""))
+
+    # Validate combination rules (§7.3 / §7.6) — ALL 6 cases
     if "none" in actions and len(actions) > 1:
         logger.warning(
             "parse_feedback_directive: 'none' mixed with other actions %r",
@@ -376,14 +401,20 @@ def parse_feedback_directive(
             actions,
         )
         return None
-
-    # Parse remaining fields
-    parsed = _parse_yaml_ish(body)
-    target_files_raw = _parse_simple_list(body, "target_files")
-    target_lines_raw = _parse_simple_list(body, "target_lines")
-    retry_raw = str(parsed.get("retry_review", "false")).strip().lower()
-    retry_review = retry_raw == "true"
-    notes = str(parsed.get("notes", ""))
+    # §7.6: retry_review=true + action=[none] is contradictory
+    if "none" in actions and retry_review:
+        logger.warning(
+            "parse_feedback_directive: 'none' with retry_review=true is contradictory"
+        )
+        return None
+    # §7.6: target_files required when action contains scope_trim/fix_bug/improve_quality
+    requires_target = {"scope_trim", "fix_bug", "improve_quality"}
+    if any(a in requires_target for a in actions) and not target_files_raw:
+        logger.warning(
+            "parse_feedback_directive: target_files missing for action %r",
+            actions,
+        )
+        return None
 
     return FeedbackDirective(
         action=tuple(actions),  # type: ignore[arg-type]
@@ -466,7 +497,9 @@ def validate_delta_against_scope(
 
     Checks all paths in ``delta.files_modified`` and ``delta.files_created``
     against ``scope.allow_paths`` and ``scope.deny_paths`` using
-    ``pathspec.PathSpec.from_lines("gitwildmatch", ...)``.
+    ``pathspec.PathSpec.from_lines("gitignore", ...)``.
+    (Note: ``pathspec`` deprecated ``gitwildmatch`` in favor of ``gitignore``
+    which is the non-deprecated GitIgnoreBasicPattern API.)
     """
     import pathspec
 

@@ -7,9 +7,16 @@ dataclass, _parse_verdict(), and run_review() for the ``review`` tool.
 import json
 import re
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Literal
 
 from loguru import logger
+
+from loom.agent.triangle_protocol import (
+    DeltaReport,
+    FeedbackDirective,
+    ScopeEnvelope,
+)
 
 VerdictStatus = Literal["pass", "fail", "scope_creep", "quality_issue", "unknown"]
 
@@ -109,49 +116,114 @@ REVIEW_SYSTEM = (
 )
 
 
-def run_review(feature_id: str, feature_description: str, scope_hint: str = "") -> str:
+def run_review(
+    feature_id: str,
+    feature_description: str,
+    scope_hint: str = "",
+    delta_report: DeltaReport | None = None,
+    scope: ScopeEnvelope | None = None,
+    workdir: Path | None = None,
+) -> tuple[str, FeedbackDirective | None]:
     """Run a code review for the given feature.
 
     Spawns a read-only subagent with REVIEW_SYSTEM + REVIEW_TOOLS, parses
-    the ``<verdict>`` from its output, and returns a structured result string.
+    the ``<verdict>`` from its output, and returns (verdict_str, feedback_directive).
+
+    Pre-processing (I7/I8 enforcement, hard):
+    If delta_report AND scope/workdir are provided, call
+    validate_delta_against_scope() and validate_delta_against_git_diff()
+    BEFORE spawning the Reviewer LLM. If violations are non-empty,
+    return (verdict_str_with_unknown, None) immediately — bypasses the
+    LLM round-trip.
+
+    Post-processing (I5/I6 enforcement, hard):
+    Parse <verdict> and <feedback_directive> from Reviewer output.
+    parse_feedback_directive() validates action list combination rules (§7.3).
+    If invalid → returns fd=None. If <verdict> missing → returns verdict=unknown.
 
     Args:
-        feature_id: Short identifier for the feature (e.g. "f-review-tool").
+        feature_id: Short identifier for the feature.
         feature_description: Description of what was implemented.
-        scope_hint: Optional hint about what scope to check against.
+        scope_hint: Optional hint about scope boundary.
+        delta_report: Optional DeltaReport for three-way reconciliation.
+        scope: Optional ScopeEnvelope for pre-validation.
+        workdir: Optional working directory for git diff validation.
 
     Returns:
-        Formatted review result string.
+        Tuple of (formatted_review_result_string, FeedbackDirective_or_None).
     """
     # Lazy import to avoid circular dependency (tools.py imports from review.py)
     from loom.agent.tools import REVIEW_TOOLS, spawn_subagent
+
+    # === PRE-PROCESSING: validate delta before spending LLM tokens (I7/I8) ===
+    if delta_report is not None:
+        violations: list[str] = []
+        if scope is not None:
+            from loom.agent.triangle_protocol import validate_delta_against_scope
+            violations.extend(validate_delta_against_scope(delta_report, scope))
+        if workdir is not None:
+            from loom.agent.triangle_protocol import validate_delta_against_git_diff
+            violations.extend(validate_delta_against_git_diff(delta_report, workdir))
+        if violations:
+            violation_str = "; ".join(violations)
+            logger.warning("run_review: pre-validation failed for {}: {}", feature_id, violation_str)
+            return (
+                f"[review: unknown]\n预校验失败，未启动 Reviewer LLM：\n{violation_str}",
+                None,
+            )
 
     # Truncate feature_description to 2000 chars
     desc = feature_description
     if len(desc) > 2000:
         desc = desc[:2000] + "... (truncated)"
 
+    # === BUILD PROMPT ===
     prompt = (
         f"请审查功能: {feature_id}\n\n"
         f"功能描述: {desc}\n"
     )
     if scope_hint:
         prompt += f"范围提示: {scope_hint}\n"
+    if delta_report is not None:
+        from loom.agent.triangle_protocol import serialize_delta_report
+        prompt += "\n" + serialize_delta_report(delta_report) + "\n"
     prompt += (
         "\n请检查实现是否正确、完整，是否超出范围。\n"
         "使用只读工具检查代码。最终输出必须包含 <verdict>...</verdict> 标签。"
     )
 
+    # === SPAWN REVIEWER ===
     try:
         result = spawn_subagent(prompt, system=REVIEW_SYSTEM, tools=REVIEW_TOOLS, max_turns=15)
     except Exception as exc:
         logger.warning("run_review: LLM call failed: {}", exc)
-        return f"[review: unknown — LLM call failed: {exc}]"
+        return (f"[review: unknown — LLM call failed: {exc}]", None)
 
+    # === POST-PROCESSING: parse verdict + feedback_directive ===
     verdict = _parse_verdict(result)
-    return (
+    verdict_str = (
         f"[review: {verdict.status}]\n"
         f"{verdict.summary}\n"
         f"证据: {verdict.evidence}\n"
         f"建议: {verdict.recommendations}"
     )
+
+    # parse_feedback_directive handles I6 internally:
+    # - returns None if action list empty / invalid combination (§7.3 rules)
+    # - returns None if block missing entirely
+    from loom.agent.triangle_protocol import parse_feedback_directive
+    fd = parse_feedback_directive(result)
+    if fd is None:
+        logger.warning("run_review: feedback_directive missing or invalid for {}", feature_id)
+
+    return (verdict_str, fd)
+
+
+def run_review_legacy_str(feature_id: str, feature_description: str, scope_hint: str = "") -> str:
+    """Backward-compat wrapper for callers expecting str return.
+
+    Calls the new run_review and discards the FeedbackDirective.
+    To be removed in TP-8.
+    """
+    verdict_str, _ = run_review(feature_id, feature_description, scope_hint)
+    return verdict_str

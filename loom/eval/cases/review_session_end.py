@@ -89,7 +89,7 @@ class ReviewSessionEndFiresWhenActiveFeature(EvalCase):
             with patch("loom.agent.review.run_review") as mock_run:
                 def _mock_run(feature_id, description="", scope_hint=""):
                     done.set()
-                    return expected_verdict
+                    return (expected_verdict, None)
                 mock_run.side_effect = _mock_run
 
                 _run_session_end_review(tmp, config, [])

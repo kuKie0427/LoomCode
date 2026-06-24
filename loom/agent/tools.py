@@ -1318,6 +1318,31 @@ from loom.agent.review import (  # noqa: E402  — intentional mid-file import t
     ReviewVerdict,  # noqa: F401  — re-exported for external access
     run_review,
 )
+from loom.agent.triangle_protocol import (  # noqa: E402  — protocol data contracts
+    FeatureCard,
+    ScopeEnvelope,
+)
+
+
+def _run_review_tool_handler(
+    feature_id: str,
+    feature_description: str,
+    scope_hint: str = "",
+    delta_report: str | None = None,
+    scope: str | None = None,
+    workdir: str | None = None,
+) -> str:
+    """Handler for the review tool — extracts str from run_review's tuple return.
+
+    Accepts optional serialized protocol params (delta_report, scope, workdir)
+    for forward compatibility with Task 2 (which changes run_review's return
+    type to ``tuple[str, FeedbackDirective | None]``).
+    """
+    result = run_review(feature_id, feature_description, scope_hint)
+    # Forward-compat: after Task 2, run_review returns tuple[str, FeedbackDirective | None]
+    if isinstance(result, tuple):
+        return result[0]
+    return result
 
 # Read-only tool schemas for the review subagent — excludes all write/mutation tools
 REVIEW_TOOLS: tuple[dict, ...] = (
@@ -1363,7 +1388,29 @@ def _content_to_message_dict(content) -> list:
     return out
 
 
-def spawn_subagent(description: str, llm_client=None, hooks=None, *, system=None, tools=None, max_turns=30) -> str:
+def spawn_subagent(
+    description: str,
+    llm_client=None,
+    hooks=None,
+    *,
+    system=None,
+    tools=None,
+    max_turns=30,
+    feature_card: FeatureCard | None = None,
+    scope: ScopeEnvelope | None = None,
+) -> str:
+    # === PROTOCOL HEADERS (TP-2) ===
+    # If feature_card and/or scope are provided, serialize and prepend to description
+    from loom.agent.triangle_protocol import serialize_feature_card, serialize_scope_envelope
+
+    headers = []
+    if feature_card is not None:
+        headers.append(serialize_feature_card(feature_card))
+    if scope is not None:
+        headers.append(serialize_scope_envelope(scope))
+    if headers:
+        description = "\n\n".join(headers) + "\n\n" + description
+
     # Inherit all current credentials into LOOM_AUTH_CONTENT for child subagents
     _creds = credentials.all()
     if _creds:
@@ -1428,11 +1475,29 @@ def spawn_subagent(description: str, llm_client=None, hooks=None, *, system=None
     if tr is not None:
         tr.record("subagent_end", turns=turn_count, tool_calls=tool_call_count,
                   duration_ms=elapsed_ms)
+
+    # === PROTOCOL CHECK (I4 soft enforcement, TP-2) ===
+    # Only check if protocol mode is active (feature_card was provided)
+    if feature_card is not None:
+        from loom.agent.triangle_protocol import parse_delta_report
+        if parse_delta_report(result) is None:
+            result = result + (
+                "\n\n<system-reminder>\n"
+                "[triangle-protocol violation] Generator 未输出 <delta_report> 块。\n"
+                "按 docs/triangle-protocol.md 该块是 task 返回的必须部分。\n"
+                "该次委派的 Reviewer 审查将以 quality_issue 起步。\n"
+                "</system-reminder>"
+            )
+            logger.warning(
+                "spawn_subagent: feature_card={} but no <delta_report> in result (I4 violation)",
+                feature_card.id,
+            )
+
     return f"[done: {turn_count} turns, {tool_call_count} tool calls]\n{result}"
 
 
-def run_task(description: str) -> str:
-    return spawn_subagent(description)
+def run_task(description: str, feature_card=None, scope=None) -> str:
+    return spawn_subagent(description, feature_card=feature_card, scope=scope)
 
 
 # Register "task" via TOOL_REGISTRY (instead of mutating the module-level
@@ -1487,8 +1552,17 @@ TOOL_REGISTRY.register(Tool(
         "shape matches):\n"
         "- `task_investigate_code`: read-only codebase search, returns structured findings\n"
         "- `task_refactor_across_files`: cross-file rename/replace with multi_edit + verify\n"
-        "- `task_fix_failing_test`: TDD bug fix (reads failing test, locates source, "
-        "minimal fix, re-runs — refuses to edit the test file)"
+         "- `task_fix_failing_test`: TDD bug fix (reads failing test, locates source, "
+         "minimal fix, re-runs — refuses to edit the test file)\n"
+         "\n"
+         "Triangle Protocol:\n"
+         "When delegating, the prompt SHOULD start with <feature_card> and\n"
+         "<scope_envelope> blocks (see docs/triangle-protocol.md). The subagent\n"
+         "parses these to understand scope. If blocks are missing, the subagent\n"
+         "falls back to the legacy \"description-only\" mode.\n"
+         "\n"
+         "Generator MUST end its final message with <delta_report>. Missing\n"
+         "delta_report triggers a protocol-violation reminder (soft constraint)."
     ),
     input_schema={
         "type": "object",
@@ -1513,7 +1587,20 @@ TOOL_REGISTRY.register(Tool(
         "Parameters:\n"
         "- feature_id: short identifier (e.g. 'f-review-tool')\n"
         "- feature_description: what was implemented (up to 2000 chars)\n"
-        "- scope_hint (optional): hint about the scope boundary for scope_creep detection"
+        "- scope_hint (optional): hint about the scope boundary for scope_creep detection\n"
+        "- delta_report (optional): serialized <delta_report> for three-way reconciliation\n"
+        "- scope (optional): serialized <scope_envelope> for pre-validation\n"
+        "- workdir (optional): working directory for git diff validation\n"
+        "\n"
+        "Triangle Protocol:\n"
+        "Optionally pass a delta_report (Generator's structured change report)\n"
+        "via the tool args. Reviewer uses it for three-way reconciliation\n"
+        "against feature_card and git diff.\n"
+        "\n"
+        "Reviewer MUST output both <verdict> and <feedback_directive>. The\n"
+        "feedback_directive.action tells you the next step (none/scope_trim/\n"
+        "fix_bug/improve_quality/clarify_with_user/escalate). See\n"
+        "docs/triangle-protocol.md §7.3 for the action mapping."
     ),
     input_schema={
         "type": "object",
@@ -1521,10 +1608,13 @@ TOOL_REGISTRY.register(Tool(
             "feature_id": {"type": "string", "description": "Short feature identifier (e.g. 'f-review-tool')."},
             "feature_description": {"type": "string", "description": "Description of what was implemented (truncated to 2000 chars)."},
             "scope_hint": {"type": "string", "description": "Optional hint about the scope boundary."},
+            "delta_report": {"type": "string", "description": "Optional serialized DeltaReport for three-way reconciliation."},
+            "scope": {"type": "string", "description": "Optional serialized ScopeEnvelope for pre-validation."},
+            "workdir": {"type": "string", "description": "Optional working directory for git diff validation."},
         },
         "required": ["feature_id", "feature_description"],
     },
-    handler=run_review,
+    handler=_run_review_tool_handler,
     is_read_only=True,
 ))
 _resync_from_registry()

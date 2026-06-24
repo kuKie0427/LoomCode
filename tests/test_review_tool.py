@@ -129,8 +129,8 @@ class TestRunReviewHandler:
                 '[done: 3 turns, 5 tool calls]\n'
                 '<verdict>{"status":"pass","summary":"All good","evidence":[],"recommendations":[]}</verdict>'
             )
-            from loom.agent.review import run_review
-            result = run_review("f-test", "test feature")
+            from loom.agent.review import run_review_legacy_str
+            result = run_review_legacy_str("f-test", "test feature")
             assert "[review: pass]" in result
             assert "All good" in result
 
@@ -138,8 +138,8 @@ class TestRunReviewHandler:
         """spawn_subagent raises Exception → result contains 'unknown'."""
         with patch("loom.agent.tools.spawn_subagent") as mock_spawn:
             mock_spawn.side_effect = Exception("API error")
-            from loom.agent.review import run_review
-            result = run_review("f-test", "test feature")
+            from loom.agent.review import run_review_legacy_str
+            result = run_review_legacy_str("f-test", "test feature")
             assert "unknown" in result
             assert "API error" in result
 
@@ -164,8 +164,8 @@ class TestRunReviewHandler:
             mock_spawn.return_value = (
                 '<verdict>{"status":"pass","summary":"no scope hint","evidence":[],"recommendations":[]}</verdict>'
             )
-            from loom.agent.review import run_review
-            result = run_review("f-scope", "test feature")  # no scope_hint
+            from loom.agent.review import run_review_legacy_str
+            result = run_review_legacy_str("f-scope", "test feature")  # no scope_hint
             assert "[review: pass]" in result
 
     def test_max_turns_15(self):
@@ -185,8 +185,8 @@ class TestRunReviewHandler:
             mock_spawn.return_value = (
                 '<verdict>{"status":"quality_issue","summary":"Needs cleanup","evidence":["a.py:5"],"recommendations":["fix style"]}</verdict>'
             )
-            from loom.agent.review import run_review
-            result = run_review("f-format", "test format")
+            from loom.agent.review import run_review_legacy_str
+            result = run_review_legacy_str("f-format", "test format")
             assert "[review: quality_issue]" in result
             assert "Needs cleanup" in result
             assert "a.py:5" in result
