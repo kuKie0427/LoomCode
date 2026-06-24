@@ -43,3 +43,7 @@ skills-lock.json
 
 .DS_Store
 snapshot_report.html
+
+# Session artifacts (not committed — auto-loaded on cold start)
+progress.md
+session-handoff.md
