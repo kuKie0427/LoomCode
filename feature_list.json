@@ -1285,6 +1285,15 @@
       "status": "done",
       "verification": "uv run pytest tests/test_detect.py tests/test_init_cmd.py tests/test_init_sh_two_tier.py -v && uv run python -m loom.cli eval --filter init-sh-two-tier --fail-under 100",
       "evidence": "64/64 pytest pass, 4/4 eval cases pass, ruff+mypy clean. Smoke: loom init /tmp/pi1-test creates init.sh with MODE flag + scripts/verify-quick.sh executable. VerificationPlan(frozen) + verification_plan() + init_script_content(plan) two-tier bash script with quick|full case dispatch. Backward compat: verification_commands() still returns list[str]. init_cmd.py generates verify-quick.sh with git-diff auto-scope."
+    },
+    {
+      "id": "f-init-sh-two-tier-polish",
+      "name": "Phase PI-2: Python ruff/mypy 检测 + generic 骨架 + marker 注入 + docs",
+      "description": "verification_plan() 检测 pyproject.toml [tool.ruff]/[tool.mypy] 自动加进 full 档(R4)。generic stack 返回骨架式 placeholder(tests/lint/build TODO 段)替代单行 echo。loom init 检测 pyproject.toml 已有 markers 配置时跳过注入,无则追加 slow/snapshot marker(R5)。docs/init-sh.md 含两档使用 + 自定义 + 故障排查。",
+      "dependencies": ["f-init-sh-two-tier-core"],
+      "status": "done",
+      "verification": "uv run pytest tests/test_init_sh_polish.py -v && uv run python -m loom.cli eval --filter init-sh-polish --fail-under 100",
+      "evidence": "13/13 pytest pass, 3/3 eval cases pass, ruff+mypy clean. Smoke: loom init /tmp/pi2-test with pyproject.toml [tool.ruff] generates init.sh with 'ruff check .' in both tiers. Generic stack returns 3-step skeleton (tests/lint/build). Marker injection appends slow/snapshot markers to pyproject.toml. docs/init-sh.md created with 7 sections. README updated with two-tier bullet."
     }
   ]
 }

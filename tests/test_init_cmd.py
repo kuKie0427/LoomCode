@@ -88,7 +88,9 @@ class TestInitStackAware:
     def test_generic_uses_placeholder(self, tmp_path: Path) -> None:
         init(tmp_path)
         content = (tmp_path / "init.sh").read_text()
-        assert "No package manifest detected" in content
+        assert "STEP 1: tests" in content
+        assert "STEP 2: lint" in content
+        assert "STEP 3: build" in content
 
 
 class TestInitOptions:

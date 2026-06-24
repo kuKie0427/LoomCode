@@ -199,9 +199,25 @@ def _node_or_generic_commands(project: ProjectInfo, explicit_pm: str | None = No
 def verification_plan(project: ProjectInfo, explicit_pm: str | None = None) -> VerificationPlan:
     """Return two-tier verification plan for the project's stack."""
     if project.stack == "python":
+        quick_list = ["python -m pytest -x -q -m 'not slow and not snapshot' --tb=short"]
+        full_list = ["python -m pytest", "python -m compileall ."]
+
+        pyproject = project.root / "pyproject.toml"
+        if pyproject.is_file():
+            try:
+                content = pyproject.read_text(encoding="utf-8")
+                if "[tool.ruff]" in content or "[tool.ruff." in content:
+                    quick_list.insert(0, "ruff check .")
+                    full_list.insert(0, "ruff check .")
+                if "[tool.mypy]" in content or "[tool.mypy." in content:
+                    quick_list.insert(0, "mypy .")
+                    full_list.insert(0, "mypy .")
+            except OSError:
+                pass
+
         return VerificationPlan(
-            quick=("python -m pytest -x -q -m 'not slow and not snapshot' --tb=short",),
-            full=("python -m pytest", "python -m compileall ."),
+            quick=tuple(quick_list),
+            full=tuple(full_list),
         )
     if project.stack == "go":
         return VerificationPlan(
@@ -221,11 +237,16 @@ def verification_plan(project: ProjectInfo, explicit_pm: str | None = None) -> V
         return VerificationPlan(quick=("dotnet test --filter Category=Unit",), full=("dotnet test",))
 
     # generic / node
-    full = _node_or_generic_commands(project, explicit_pm)
     if project.package_json is None:
-        # generic: quick = full = skeleton (PI-2 improves this)
-        return VerificationPlan(quick=tuple(full), full=tuple(full))
+        # generic: skeleton TODO placeholders
+        skeleton = [
+            'echo "=== STEP 1: tests ==="\n# TODO: replace with your test command (e.g., pytest / go test / cargo test)\n# (replace me)',
+            'echo "=== STEP 2: lint ==="\n# TODO: replace with your lint command (e.g., ruff / golangci-lint / clippy)\n# (replace me)',
+            'echo "=== STEP 3: build ==="\n# TODO: replace with your build command (e.g., cargo build / go build / tsc)\n# (replace me)',
+        ]
+        return VerificationPlan(quick=tuple(skeleton), full=tuple(skeleton))
     # node: quick = lint + typecheck (if available), full = install + all scripts
+    full = _node_or_generic_commands(project, explicit_pm)
     scripts = project.package_json.get("scripts", {}) or {}
     pm = explicit_pm or project.package_manager or "npm"
     quick_cmds = [c for c in [

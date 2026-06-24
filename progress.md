@@ -6927,3 +6927,18 @@ Feature: `f-init-sh-two-tier-core` — Phase PI-1: init.sh 两档核心 (Verific
 **Verification:** 64/64 pytest (detect + init_cmd + init_sh_two_tier), 4/4 eval (init-sh-two-tier filter), ruff+mypy clean. Pre-existing 18 test failures from other features' uncommitted changes (provider/MCP/model) — not caused by this feature.
 
 **Manual smoke:** `loom init /tmp/pi1-test` → init.sh with MODE flag + scripts/verify-quick.sh both created and functional.
+
+## Session: PI-2 — Python ruff/mypy 检测 + generic 骨架 + marker 注入 + docs (2026-06-24)
+
+Feature: `f-init-sh-two-tier-polish` — Phase PI-2: Python ruff/mypy 检测 + generic 骨架 + marker 注入 + docs
+
+**Changes:**
+- `loom/detect.py`: Python branch in `verification_plan()` now detects `[tool.ruff]`/`[tool.mypy]` in pyproject.toml and prepends to both quick/full tiers. Generic branch returns 3-step skeleton (tests/lint/build) with TODO placeholders instead of echo commands.
+- `loom/init_cmd.py`: Added `_maybe_inject_pytest_markers()` that appends slow/snapshot/integration pytest markers to pyproject.toml when `[tool.pytest.ini_options]` is absent. Conservative skip when section already exists.
+- `docs/init-sh.md`: New 123-line doc with 7 sections covering two-tier usage, quick mode details, customization, markers, troubleshooting, Unix-only notes.
+- `tests/test_init_sh_polish.py`: 13 tests (5 ruff/mypy detection + 3 generic skeleton + 4 marker injection + 1 docs).
+- `loom/eval/cases/init_sh_polish.py`: 3 new eval cases (python-detects-ruff, generic-returns-skeleton, marker-injection-skips-existing).
+- `README.md`: Added "Two-tier init.sh" bullet to "What loom does well" section.
+- `tests/test_init_cmd.py`: Updated `test_generic_uses_placeholder` to match new skeleton format.
+
+**Verification:** 13/13 pytest (test_init_sh_polish), 3/3 eval (init-sh-polish filter), 44/44 detect+init_cmd tests, 16/16 init-sh filter eval. ruff+mypy clean. Smoke: `loom init /tmp/pi2-test` with pyproject.toml containing `[tool.ruff]` → init.sh full tier includes `ruff check .`.

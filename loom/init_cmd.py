@@ -8,6 +8,7 @@ the 5-file set shipped by the reference: ``AGENTS.md`` (or ``CLAUDE.md``) +
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from importlib.resources import files
@@ -21,6 +22,8 @@ from loom.detect import (
     verification_commands,
     verification_plan,
 )
+
+logger = logging.getLogger(__name__)
 
 TEMPLATES_DIR = files("loom").joinpath("templates")
 
@@ -141,6 +144,39 @@ def _agents_file_replacements(project: ProjectInfo, agent_file: str,
     }
 
 
+def _maybe_inject_pytest_markers(target: Path, force: bool) -> FileResult | None:
+    pyproject = target / "pyproject.toml"
+    if not pyproject.exists():
+        return None
+
+    try:
+        content = pyproject.read_text(encoding="utf-8")
+    except OSError:
+        logger.warning("Could not read %s for marker injection", pyproject)
+        return None
+
+    # Conservative: skip entirely if section already exists.
+    if "[tool.pytest.ini_options]" in content:
+        return None
+
+    markers_section = """
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \\"not slow\\"')",
+    "snapshot: visual snapshot tests (deselect with '-m \\"not snapshot\\"')",
+    "integration: end-to-end integration tests",
+]
+"""
+    try:
+        pyproject.write_text(content + markers_section, encoding="utf-8")
+    except OSError:
+        logger.warning("Could not write markers to %s", pyproject)
+        return None
+
+    return FileResult(pyproject, "written", "markers injected")
+
+
 def init(
     target: Path,
     *,
@@ -211,6 +247,10 @@ def init(
     else:
         write_default_config(target)
         results.append(FileResult(harness_path, "written"))
+
+    marker_result = _maybe_inject_pytest_markers(target, force)
+    if marker_result:
+        results.append(marker_result)
 
     return results
 

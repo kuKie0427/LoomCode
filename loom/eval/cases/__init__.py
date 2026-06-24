@@ -24,6 +24,7 @@ from loom.eval.cases import (
     harness_polish_baseline,  # noqa: F401
     harness_toml,  # noqa: F401
     init,  # noqa: F401  — triggers case class definitions
+    init_sh_polish,  # noqa: F401
     init_sh_session_end,  # noqa: F401
     init_sh_two_tier,  # noqa: F401
     instructions_static,  # noqa: F401
