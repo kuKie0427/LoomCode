@@ -7328,5 +7328,33 @@ None
 
 ---
 
+## Session: TP-6 reviewer prompt (2026-06-24)
+
+**Feature**: `f-triangle-reviewer-prompt`
+
+**Changes**:
+- `loom/agent/review.py::REVIEW_SYSTEM` — rewrote (4052 chars, ≤5000 budget). New identity: "Reviewer — 三角架构中的'审查'角色" + 3 must-know facts (reviews Generator's work, three-way reconciliation input, two-block output). Added 7 sections:
+  1. **重要规则（只读约束）** — preserved verbatim
+  2. **输入解析** — `<feature_card>` + `<delta_report>` + git diff 三方对账 + dual-mode fallback
+  3. **三方对账标准** — 5 step categories (真实性 / 范围 / 完整性 / 质量 / 验证)
+  4. **Verdict 决策树** — 5 if branches in plan order (fabrication → scope_creep → fail → quality_issue → unknown → pass)
+  5. **Verdict 类型枚举** — preserved (5 enum values)
+  6. **输出协议** — extends old `<verdict>{json}</verdict>` with new `<feedback_directive>` block (action/target_files/target_lines/retry_review/notes) + status↔action mapping table
+  7. **自审禁令** — don't call task (infinite delegation), don't fix (recommend only), don't fake pass, don't trust previous reviews of same feature
+
+- Dual-mode: read-only constraint + Verdict type enum preserved. The 15 review eval cases test behavior (verdict status, fail-closed, etc.) — not prompt text — so they continue to pass without modification. No review-prompt-rewrite eval cases exist, so no keyword constraints to satisfy.
+
+**Verification**:
+- `uv run pytest tests/test_reviewer_prompt.py -v` → 11/11 passed
+- `uv run pytest tests/test_reviewer_prompt.py tests/test_review_tool.py tests/test_spawn_subagent_structured.py tests/test_triangle_protocol.py tests/test_triangle_integration.py tests/test_triangle_trace.py tests/test_orchestrator_prompt.py tests/test_generator_prompt.py tests/test_session_mutable_prompt.py tests/test_trace.py tests/test_review_pre_compact.py tests/test_tools.py -q` → 174/174 passed (zero regression)
+- `uv run python -m loom.cli eval --filter review --fail-under 100` → 15/15 passed (TP-2 zero regression)
+- `uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100` → 10/10 passed (TP-5 zero regression)
+- `uv run ruff check loom/agent/review.py` → All checks passed
+- `uv run mypy loom/agent/review.py` → Success: no issues found
+
+**Files changed this session**: 1 file modified, 1 file added, 1 commit pending
+
+---
+
 
 

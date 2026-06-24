@@ -1435,6 +1435,17 @@
       "status": "done",
       "verification": "uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100 && uv run python -m loom.cli eval --filter review --fail-under 100 && uv run pytest tests/test_generator_prompt.py tests/test_spawn_subagent_structured.py -v",
       "evidence": "uv run pytest tests/test_generator_prompt.py -v → 9/9 passed; uv run pytest tests/test_spawn_subagent_structured.py tests/test_triangle_protocol.py tests/test_triangle_integration.py tests/test_triangle_trace.py tests/test_orchestrator_prompt.py tests/test_generator_prompt.py tests/test_session_mutable_prompt.py tests/test_trace.py tests/test_review_pre_compact.py tests/test_review_tool.py tests/test_tools.py -q → 163/163 passed (zero regression); uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100 → 10/10 passed (dual-mode confirmed: 4 subsystem legacy cases still pass with new identity section + input parsing + output protocol + example + no-fabricate anti-pattern); uv run python -m loom.cli eval --filter review --fail-under 100 → 15/15 passed (TP-2 zero regression); uv run ruff check loom/agent/tools.py → All checks passed; uv run mypy loom/agent/tools.py → Success: no issues found; SUB_SYSTEM new length = 2739 chars (≤5000 plan budget)"
+    },
+    {
+      "id": "f-triangle-reviewer-prompt",
+      "name": "Phase TP-6: Reviewer (REVIEW_SYSTEM) prompt 升级（双跑模式）",
+      "description": "loom/agent/review.py::REVIEW_SYSTEM 升级：身份段明确'Reviewer——三角中的审查角色'，提到审查 Generator 的工作；加 <feature_card> + <delta_report> 输入解析规则；加三方对账标准（delta vs git diff / git diff vs feature_card / git diff vs 风格 / verification 真实性）；加 Verdict 决策树（按 fabrication → scope_creep → fail → quality_issue → unknown → pass 顺序匹配）；加 <feedback_directive> 输出协议 + verdict.status↔action 映射表；加自审禁令。双跑模式：保留'只读'约束和 Verdict 类型枚举（向后兼容）；如果 prompt 缺 <delta_report>，按老格式做通用审查。",
+      "dependencies": [
+        "f-triangle-generator-prompt"
+      ],
+      "status": "done",
+      "verification": "uv run python -m loom.cli eval --filter review --fail-under 100 && uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100 && uv run pytest tests/test_reviewer_prompt.py tests/test_review_tool.py -v",
+      "evidence": "uv run pytest tests/test_reviewer_prompt.py -v → 11/11 passed; uv run pytest tests/test_reviewer_prompt.py tests/test_review_tool.py tests/test_spawn_subagent_structured.py tests/test_triangle_protocol.py tests/test_triangle_integration.py tests/test_triangle_trace.py tests/test_orchestrator_prompt.py tests/test_generator_prompt.py tests/test_session_mutable_prompt.py tests/test_trace.py tests/test_review_pre_compact.py tests/test_tools.py -q → 174/174 passed (zero regression); uv run python -m loom.cli eval --filter review --fail-under 100 → 15/15 passed (TP-2 zero regression); uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100 → 10/10 passed (TP-5 zero regression); uv run ruff check loom/agent/review.py → All checks passed; uv run mypy loom/agent/review.py → Success: no issues found; REVIEW_SYSTEM new length = 4052 chars (≤5000 plan budget)"
     }
   ]
 }
