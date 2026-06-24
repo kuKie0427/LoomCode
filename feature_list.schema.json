@@ -37,6 +37,11 @@
             "type": ["string", "null"],
             "description": "Real command + output snippet proving the feature is 'done'. Null for non-done statuses. Never 'looks correct'."
           },
+          "review_attempts": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "I9 persistence: number of non-pass reviews on this feature. Incremented on each non-pass verdict, reset to 0 on pass. Orchestrator enforces escalate at >=3. Survives autocompact and cross-session (persisted in JSON, not prompt context)."
+          },
           "blocker": {
             "type": "string",
             "description": "Why the feature is blocked. Required when status='blocked'."

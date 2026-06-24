@@ -7356,5 +7356,39 @@ None
 
 ---
 
+## Session: TP-7 eval cases (2026-06-24)
+
+**Feature**: `f-triangle-protocol-eval`
+
+**Changes**:
+- `loom/eval/cases/triangle_protocol.py` (new, ~600 lines, 19 EvalCase subclasses). 7 categories:
+  - **3 prompt keyword presence**: orchestrator knows 3 roles, SUB_SYSTEM references 3 protocol blocks, REVIEW_SYSTEM references delta_report + feedback_directive
+  - **4 dataclass roundtrip**: FeatureCard / ScopeEnvelope fields preserved; DeltaReport / FeedbackDirective serialize→parse identity
+  - **1 action list validation**: 5 verdict↔action pairs present (I6 contract)
+  - **2 integration points**: spawn_subagent injects feature_card, run_review injects delta_report
+  - **2 validators**: delta vs scope (I8) + delta vs git diff (I7) detect violations
+  - **2 I7/I8 pre-validation bypass**: run_review skips LLM when scope/git_diff validation fails (hard enforcement)
+  - **3 invariants**: no self-review (I2+I3), retry bounded with schema persistence (I9), PreCompact verdict recognition (I12)
+  - **2 trace lifecycle**: delegate-delta pair + C8 fix (run_review doesn't emit delegate), review attempt monotonic 1,2,3 (I9 trace contract)
+- `loom/eval/cases/__init__.py` — registered `triangle_protocol` module
+- `feature_list.schema.json` — added `review_attempts: integer` field (was missing, TP-4 was writing without schema declaration — caught by `triangle-protocol-feedback-retry-bounded`)
+- `docs/triangle-protocol.md` §8 — Enforced by column updated for all 12 invariants to point to specific `triangle-protocol-*` eval case names
+
+**Test helpers** (in same file): `_tmp_git_repo` and `_tmp_trace` context managers for isolated git repo / trace jsonl paths. Both fall back gracefully if git is unavailable.
+
+**Verification**:
+- `uv run python -m loom.cli eval --filter triangle-protocol --fail-under 100` → 19/19 passed
+- `uv run python -m loom.cli eval --filter "review-" --fail-under 100` → 20/20 passed (15 legacy + 5 triangle-protocol substring)
+- `uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100` → 10/10 passed (TP-5 zero regression)
+- `uv run pytest tests/test_reviewer_prompt.py tests/test_review_tool.py tests/test_spawn_subagent_structured.py tests/test_triangle_protocol.py tests/test_triangle_integration.py tests/test_triangle_trace.py tests/test_orchestrator_prompt.py tests/test_generator_prompt.py tests/test_session_mutable_prompt.py tests/test_trace.py tests/test_review_pre_compact.py tests/test_tools.py -q` → 174/174 passed (zero regression)
+- `uv run ruff check loom/eval/cases/triangle_protocol.py` → All checks passed (9 auto-fixed: 1 unused import + 6 import order + 2 f-string without placeholders)
+- `uv run mypy loom/eval/cases/triangle_protocol.py` → Success: no issues found
+
+**Real bug caught**: `feature_list.schema.json` was missing the `review_attempts` field that TP-4 already writes. The eval case `triangle-protocol-feedback-retry-bounded` flagged this on first run — fixed by adding the field to the schema. The 12 invariants are now properly typed in the schema.
+
+**Files changed this session**: 3 files modified, 1 file added, 1 commit pending
+
+---
+
 
 

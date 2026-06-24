@@ -1446,6 +1446,19 @@
       "status": "done",
       "verification": "uv run python -m loom.cli eval --filter review --fail-under 100 && uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100 && uv run pytest tests/test_reviewer_prompt.py tests/test_review_tool.py -v",
       "evidence": "uv run pytest tests/test_reviewer_prompt.py -v → 11/11 passed; uv run pytest tests/test_reviewer_prompt.py tests/test_review_tool.py tests/test_spawn_subagent_structured.py tests/test_triangle_protocol.py tests/test_triangle_integration.py tests/test_triangle_trace.py tests/test_orchestrator_prompt.py tests/test_generator_prompt.py tests/test_session_mutable_prompt.py tests/test_trace.py tests/test_review_pre_compact.py tests/test_tools.py -q → 174/174 passed (zero regression); uv run python -m loom.cli eval --filter review --fail-under 100 → 15/15 passed (TP-2 zero regression); uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100 → 10/10 passed (TP-5 zero regression); uv run ruff check loom/agent/review.py → All checks passed; uv run mypy loom/agent/review.py → Success: no issues found; REVIEW_SYSTEM new length = 4052 chars (≤5000 plan budget)"
+    },
+    {
+      "id": "f-triangle-protocol-eval",
+      "name": "Phase TP-7: Triangle Protocol eval cases (19 个)",
+      "description": "loom/eval/cases/triangle_protocol.py 新文件：19 个 EvalCase 锁 docs/triangle-protocol.md §8 的 12 个 lifecycle invariants + 协议关键词 + 预校验 enforcement + trace 生命周期。覆盖：三个 prompt 含协议关键词 / 4 个 dataclass roundtrip / action list 组合规则 / spawn_subagent 注入 / run_review 注入 / delta_scope 校验 / delta_git_diff 校验 / run_review 预校验 bypass LLM (I7/I8) / 不自审 / retry 上限 + feature_list.json 持久化 / trace 事件配对 + attempt bounded / PreCompact 识别。loom eval --filter triangle-protocol 全绿。",
+      "dependencies": [
+        "f-triangle-orchestrator-prompt",
+        "f-triangle-generator-prompt",
+        "f-triangle-reviewer-prompt"
+      ],
+      "status": "done",
+      "verification": "uv run python -m loom.cli eval --filter triangle-protocol --fail-under 100 && uv run python -m loom.cli eval --filter review --fail-under 100",
+      "evidence": "uv run python -m loom.cli eval --filter triangle-protocol --fail-under 100 → 19/19 passed (3 prompt keyword presence + 4 dataclass roundtrip + 1 action list validation + 2 integration + 2 validators + 2 I7/I8 pre-validation bypass + 3 invariants + 2 trace lifecycle); uv run python -m loom.cli eval --filter 'review-' --fail-under 100 → 20/20 passed (15 review-* legacy + 5 triangle-protocol-* filtered to substring); uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100 → 10/10 passed (TP-5 zero regression); uv run pytest tests/test_reviewer_prompt.py tests/test_review_tool.py tests/test_spawn_subagent_structured.py tests/test_triangle_protocol.py tests/test_triangle_integration.py tests/test_triangle_trace.py tests/test_orchestrator_prompt.py tests/test_generator_prompt.py tests/test_session_mutable_prompt.py tests/test_trace.py tests/test_review_pre_compact.py tests/test_tools.py -q → 174/174 passed (zero regression); uv run ruff check loom/eval/cases/triangle_protocol.py → All checks passed (9 auto-fixed: 1 unused import + 6 import order + 2 f-string without placeholders); uv run mypy loom/eval/cases/triangle_protocol.py → Success: no issues found; also added 'review_attempts' field to feature_list.schema.json (was missing, TP-4 was writing it without schema declaration); docs/triangle-protocol.md §8 Enforced by column updated for all 12 invariants to point to specific triangle-protocol-* eval case names"
     }
   ]
 }
