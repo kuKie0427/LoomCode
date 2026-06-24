@@ -6879,3 +6879,51 @@ Provider status indicators across 3 TUI surfaces + tests.
 - **P1** (`f-tui-cmd-completion-p1`): `CommandCompleter` — Tab 触发 `/` 补全弹窗，difflib 模糊匹配，↑↓ 导航
 - **P2** (`f-tui-cmd-completion-p2`): `CommandPaletteModal` — Ctrl+P 全局命令面板，Input 过滤 + ListView 模糊搜索
 - 双入口：Tab（Composer 内） + Ctrl+P（全局快捷键）
+
+---
+
+## Session: f-review-tool — review 工具 + 审查 agent subagent (2026-06-24)
+
+Phase PR-1: implement review tool, REVIEW_SYSTEM, ReviewVerdict, REVIEW_TOOLS whitelist, fail-closed, and subagent recursion prevention. ~3h total.
+
+### Changes
+
+| File | Action | Lines | Purpose |
+|---|---|---|---|
+| `loom/agent/review.py` | NEW | 157 | ReviewVerdict dataclass + REVIEW_SYSTEM + `_parse_verdict` + `run_review` |
+| `loom/agent/tools.py` | MODIFIED | +54 | `spawn_subagent` extended (keyword-only `system`/`tools`/`max_turns`), `REVIEW_TOOLS` tuple, `review` tool registered |
+| `tests/test_review_tool.py` | NEW | 237 | 20 tests: dataclass roundtrip, parse verdict, handler, whitelist, registry |
+| `loom/eval/cases/review_tool.py` | NEW | 130 | 5 eval cases (R1/R2/R3 contracts) |
+| `loom/eval/cases/__init__.py` | MODIFIED | +1 | Registered `review_tool` |
+
+### Key Design Decisions
+
+- **Circular import avoidance**: `review.py` uses lazy import (`from loom.agent.tools import ...` inside function body) to avoid circular dep with `tools.py`
+- **R1 Recursion prevention**: `review` tool NOT in `SUB_TOOLS`/`SUB_HANDLERS` — subagent cannot spawn a reviewer
+- **R2 Fail-closed**: `run_review` catches all exceptions → returns `[review: unknown — ...]`
+- **R3 Parse fallback**: `<verdict>` tag parse failure → `ReviewVerdict(status="unknown", raw_response=text)`
+- **REVIEW_TOOLS** is `tuple[dict,...]` (immutable) with only `read_file`, `grep`, `glob`, `bash`
+- **Backward-compat**: `spawn_subagent` keyword-only params preserve existing callers
+
+### Verification
+
+- `uv run pytest tests/test_review_tool.py -v` → **20/20 passed**
+- `uv run python -m loom.cli eval --filter review-tool --fail-under 100` → **5/5 passed**
+- `uv run ruff check loom/agent/review.py loom/agent/tools.py tests/test_review_tool.py loom/eval/cases/review_tool.py loom/eval/cases/__init__.py` → **All checks passed**
+- `uv run mypy loom/agent/review.py` → **Success: no issues found**
+- `grep -rn fake_block loom/agent/` → **0 matches** (R3 regression guard)
+- `grep -rn '"review"' loom/agent/tools.py | grep SUB_TOOLS` → **0 matches** (R1 recursion prevention)
+
+## Session: PI-1 — init.sh 两档核心 (2026-06-24)
+
+Feature: `f-init-sh-two-tier-core` — Phase PI-1: init.sh 两档核心 (VerificationPlan + MODE flag + verify-quick.sh)
+
+**Changes:**
+- `loom/detect.py`: Added `VerificationPlan` frozen dataclass (quick/full tuples + all_commands property), `verification_plan()` function returning per-stack two-tier plans, `_node_or_generic_commands()` helper, `init_script_content(plan)` generating MODE-flag bash script, `verification_commands()` simplified to delegate to plan (backward compat)
+- `loom/init_cmd.py`: Added `_render_verify_quick_sh()` generating scripts/verify-quick.sh with git-diff auto-scope. `_render_init_sh()` uses verification_plan(). init() writes scripts/verify-quick.sh (executable)
+- `loom/eval/cases/init_sh_two_tier.py`: 4 new eval cases (quick/full distinct, MODE init.sh, init writes verify-quick.sh, backward compat)
+- `tests/test_init_sh_two_tier.py`: 20 new tests (5 classes: VerificationPlan, per-stack plans, init_script_content, init cmd, back compat)
+
+**Verification:** 64/64 pytest (detect + init_cmd + init_sh_two_tier), 4/4 eval (init-sh-two-tier filter), ruff+mypy clean. Pre-existing 18 test failures from other features' uncommitted changes (provider/MCP/model) — not caused by this feature.
+
+**Manual smoke:** `loom init /tmp/pi1-test` → init.sh with MODE flag + scripts/verify-quick.sh both created and functional.

@@ -35,6 +35,22 @@ class ProjectInfo:
         return self.stack in STACKS_WITH_MANIFEST
 
 
+@dataclass(frozen=True)
+class VerificationPlan:
+    """Two-tier verification commands for init.sh generation.
+    
+    quick: dev cycle commands (lint + smart test subset, target <10s)
+    full:  closeout commands (full test + build, target whatever it takes)
+    """
+    quick: tuple[str, ...]
+    full: tuple[str, ...]
+    
+    @property
+    def all_commands(self) -> list[str]:
+        """Back-compat: flat list of full-tier commands for verification_commands()."""
+        return list(self.full)
+
+
 def _walk(root: Path, max_files: int = 800) -> list[str]:
     results: list[str] = []
     try:
@@ -146,28 +162,8 @@ def detect_project(root: Path) -> ProjectInfo:
     )
 
 
-def verification_commands(project: ProjectInfo, explicit_pm: str | None = None) -> list[str]:
-    """Return the verification commands for the project's stack.
-
-    These are the commands written into the generated ``init.sh``. For Node
-    stacks the package manager is honored; for Python/Go/Rust/Java/.NET the
-    canonical tool is used. For ``generic`` stacks a placeholder is returned
-    so the user is forced to replace it.
-    """
-    if project.stack == "python":
-        return ["python -m pytest", "python -m compileall ."]
-
-    if project.stack == "go":
-        return ["go test ./..."]
-    if project.stack == "rust":
-        return ["cargo test"]
-    if project.stack == "java-maven":
-        return ["mvn test"]
-    if project.stack == "java-gradle":
-        return ["./gradlew test"]
-    if project.stack == "dotnet":
-        return ["dotnet test"]
-
+def _node_or_generic_commands(project: ProjectInfo, explicit_pm: str | None = None) -> list[str]:
+    """Node/generic verification commands — extracted for two-tier plan reuse."""
     if project.package_json is None:
         return [
             'echo "No package manifest detected; replace this line with your project verification command."'
@@ -200,26 +196,99 @@ def verification_commands(project: ProjectInfo, explicit_pm: str | None = None) 
     return [install, *deduped]
 
 
-def init_script_content(commands: list[str]) -> str:
+def verification_plan(project: ProjectInfo, explicit_pm: str | None = None) -> VerificationPlan:
+    """Return two-tier verification plan for the project's stack."""
+    if project.stack == "python":
+        return VerificationPlan(
+            quick=("python -m pytest -x -q -m 'not slow and not snapshot' --tb=short",),
+            full=("python -m pytest", "python -m compileall ."),
+        )
+    if project.stack == "go":
+        return VerificationPlan(
+            quick=("go test -count=1 -run Unit ./...",),
+            full=("go test ./...",),
+        )
+    if project.stack == "rust":
+        return VerificationPlan(
+            quick=("cargo test --lib --quiet",),
+            full=("cargo test",),
+        )
+    if project.stack == "java-maven":
+        return VerificationPlan(quick=("mvn test",), full=("mvn test",))
+    if project.stack == "java-gradle":
+        return VerificationPlan(quick=("./gradlew test",), full=("./gradlew test",))
+    if project.stack == "dotnet":
+        return VerificationPlan(quick=("dotnet test --filter Category=Unit",), full=("dotnet test",))
 
+    # generic / node
+    full = _node_or_generic_commands(project, explicit_pm)
+    if project.package_json is None:
+        # generic: quick = full = skeleton (PI-2 improves this)
+        return VerificationPlan(quick=tuple(full), full=tuple(full))
+    # node: quick = lint + typecheck (if available), full = install + all scripts
+    scripts = project.package_json.get("scripts", {}) or {}
+    pm = explicit_pm or project.package_manager or "npm"
+    quick_cmds = [c for c in [
+        (f"{pm} run lint" if scripts.get("lint") else None),
+        (f"{pm} run typecheck" if scripts.get("typecheck") else None),
+    ] if isinstance(c, str)]
+    if not quick_cmds:
+        quick_cmds = full  # no lint/typecheck → fallback to full
+    return VerificationPlan(quick=tuple(quick_cmds), full=tuple(full))
+
+
+def verification_commands(project: ProjectInfo, explicit_pm: str | None = None) -> list[str]:
+    """Back-compat: return full-tier commands as flat list. Old callers unaffected."""
+    return verification_plan(project, explicit_pm).all_commands
+
+
+def init_script_content(plan: VerificationPlan) -> str:
+    """Generate two-tier init.sh with MODE flag (quick|full)."""
+    
+    def render_block(commands: tuple[str, ...]) -> str:
+        return "\n\n".join(
+            f'echo "=== {escape(cmd)} ==="\n{cmd}' for cmd in commands
+        )
+    
     def escape(value: str) -> str:
         return value.replace('"', '\\"')
-
-    body = "\n\n".join(
-        f'echo "=== {escape(cmd)} ==="\n{cmd}' for cmd in commands
-    )
+    
     return f"""#!/bin/bash
 set -e
 
-echo "=== Harness Initialization ==="
+# init.sh — two-tier verification
+# Usage:
+#   ./init.sh           # full verification (closeout, before marking feature done)
+#   ./init.sh quick     # quick verification (dev cycle, <10s target)
+#   MODE=quick ./init.sh
+#
+# Unix-only. See docs/init-sh.md for customization.
 
-{body}
+MODE="${{1:-full}}"
+cd "$(dirname "$0")"
 
-echo "=== Verification Complete ==="
+echo "=== Harness Initialization ($MODE) ==="
+
+case "$MODE" in
+  quick)
+{render_block(plan.quick)}
+    ;;
+  full)
+{render_block(plan.full)}
+    ;;
+  *)
+    echo "Usage: ./init.sh [quick|full]"
+    echo "  quick  — dev cycle (lint + smart test subset, <10s)"
+    echo "  full   — closeout (full tests + build, default)"
+    exit 1
+    ;;
+esac
+
+echo "=== Verification Complete ($MODE) ==="
 echo ""
 echo "Next steps:"
 echo "1. Read feature_list.json to see current feature state"
 echo "2. Pick ONE unfinished feature to work on"
 echo "3. Implement only that feature"
-echo "4. Re-run verification before claiming done"
+echo "4. Run ./init.sh (full) before claiming done"
 """

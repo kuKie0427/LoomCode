@@ -13,7 +13,14 @@ from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
 
-from loom.detect import ProjectInfo, detect_project, init_script_content, verification_commands
+from loom.detect import (
+    ProjectInfo,
+    VerificationPlan,
+    detect_project,
+    init_script_content,
+    verification_commands,
+    verification_plan,
+)
 
 TEMPLATES_DIR = files("loom").joinpath("templates")
 
@@ -44,8 +51,75 @@ def _write(path: Path, content: str, executable: bool) -> None:
 
 
 def _render_init_sh(project: ProjectInfo, custom_commands: list[str] | None) -> str:
-    commands = custom_commands if custom_commands else verification_commands(project)
-    return init_script_content(commands)
+    if custom_commands:
+        plan = VerificationPlan(quick=tuple(custom_commands), full=tuple(custom_commands))
+    else:
+        plan = verification_plan(project)
+    return init_script_content(plan)
+
+
+def _render_verify_quick_sh(project: ProjectInfo, custom_commands: list[str] | None) -> str:
+    if custom_commands:
+        static_commands = "\n".join(custom_commands)
+        pytest_cmd = custom_commands[0] if custom_commands else "python -m pytest"
+    else:
+        static_commands = ""
+        pytest_cmd = "python -m pytest"
+
+    return f"""#!/bin/bash
+# scripts/verify-quick.sh — fast dev-cycle verification.
+# Smart test subset from git diff. Skips slow/snapshot markers if configured.
+# Usage: scripts/verify-quick.sh [test_file...] [--no-skip-snapshot]
+set -e
+cd "$(dirname "$0")/.."
+
+SKIP_SNAPSHOT=1
+EXPLICIT_TESTS=()
+for arg in "$@"; do
+    case "$arg" in
+        --no-skip-snapshot) SKIP_SNAPSHOT=0 ;;
+        -*) ;;
+        *) EXPLICIT_TESTS+=("$arg") ;;
+    esac
+done
+
+echo "=== verify-quick: static checks ==="
+{static_commands}
+
+echo ""
+echo "=== verify-quick: pytest (smart subset) ==="
+MARKER_ARGS=()
+if [ "$SKIP_SNAPSHOT" = "1" ]; then
+    MARKER_ARGS=(-m "not snapshot")
+fi
+
+if [ ${{#EXPLICIT_TESTS[@]}} -gt 0 ]; then
+    {pytest_cmd} "${{EXPLICIT_TESTS[@]}}" -q "${{MARKER_ARGS[@]}}"
+else
+    changed=$(git diff --name-only HEAD 2>/dev/null | grep -E '\\.py$' | sort -u || true)
+    if [ -n "$changed" ]; then
+        test_files=()
+        for f in $changed; do
+            base=$(basename "$f" .py)
+            if [ -f "tests/test_${{base}}.py" ]; then
+                test_files+=("tests/test_${{base}}.py")
+            fi
+        done
+        if [ ${{#test_files[@]}} -gt 0 ]; then
+            echo "Scope: ${{test_files[*]}}"
+            {pytest_cmd} "${{test_files[@]}}" -q "${{MARKER_ARGS[@]}}"
+        else
+            echo "No test files inferred — running smoke"
+            {pytest_cmd} -q "${{MARKER_ARGS[@]}}"
+        fi
+    else
+        {pytest_cmd} -q "${{MARKER_ARGS[@]}}"
+    fi
+fi
+
+echo ""
+echo "=== verify-quick: done. For full verification run ./init.sh ==="
+"""
 
 
 def _agents_file_replacements(project: ProjectInfo, agent_file: str,
@@ -121,6 +195,14 @@ def init(
         content = _render_init_sh(project, custom_commands)
         _write(init_path, content, executable=True)
         results.append(FileResult(init_path, "written"))
+
+    quick_path = target / "scripts" / "verify-quick.sh"
+    if quick_path.exists() and not force:
+        results.append(FileResult(quick_path, "skipped", "exists"))
+    else:
+        quick_content = _render_verify_quick_sh(project, custom_commands)
+        _write(quick_path, quick_content, executable=True)
+        results.append(FileResult(quick_path, "written"))
 
     from loom.agent.config import write_default_config
     harness_path = target / "harness.toml"

@@ -1267,6 +1267,24 @@
       "status": "done",
       "verification": "uv run pytest tests/test_command_palette.py && uv run python -m loom.cli eval --filter command_palette_modal",
       "evidence": "uv run pytest tests/test_command_palette.py -v → 6/6 passed (3.48s); uv run python -m loom.cli eval --filter command_palette_modal → 1/1 PASS; ./init.sh → non-snapshot tests all green. Files: loom/tui/command_palette.py (123 lines, CommandPaletteModal), loom/tui/app.py (+16, ctrl+p binding + actions), tests/test_command_palette.py (160 lines, 6 tests), loom/eval/cases/command_palette_modal.py (96 lines, 1 eval case)."
+    },
+    {
+      "id": "f-review-tool",
+      "name": "Phase PR-1: review 工具 + 审查 agent subagent",
+      "description": "加 review 工具: spawn_subagent 用 REVIEW_SYSTEM 提示词,读 git diff 对照 feature 描述,返回结构化 ReviewVerdict(pass/fail/scope_creep/quality_issue)。REVIEW_TOOLS 白名单不含 write/edit/task/review(防递归 + 只读)。fail-closed: LLM 失败/JSON 解析失败 → verdict=unknown + warning。本 phase 不改状态机(PR-2)、不接 SessionEnd hook(PR-3)。",
+      "dependencies": [],
+      "status": "done",
+      "verification": "uv run pytest tests/test_review_tool.py -v && uv run python -m loom.cli eval --filter review-tool --fail-under 100",
+      "evidence": "uv run pytest tests/test_review_tool.py -v → 20/20 passed; uv run python -m loom.cli eval --filter review-tool --fail-under 100 → 5/5 passed; uv run mypy loom/agent/review.py → Success; uv run ruff check loom/agent/review.py loom/agent/tools.py tests/test_review_tool.py loom/eval/cases/review_tool.py → All checks passed; R1 (review not in SUB_TOOLS) verified; R2 (fail-closed) verified via mock; R3 (JSON parse failure → unknown) verified. Files: loom/agent/review.py (NEW, 157 lines — ReviewVerdict dataclass + REVIEW_SYSTEM + _parse_verdict + run_review), loom/agent/tools.py (modified — spawn_subagent now accepts system/tools/max_turns keyword-only params, REVIEW_TOOLS tuple, review tool registered in TOOL_REGISTRY with is_read_only=True), tests/test_review_tool.py (NEW, 237 lines, 20 tests in 5 classes), loom/eval/cases/review_tool.py (NEW, 130 lines, 5 EvalCases), loom/eval/cases/__init__.py (modified — registered review_tool)."
+    },
+    {
+      "id": "f-init-sh-two-tier-core",
+      "name": "Phase PI-1: init.sh 两档核心 — VerificationPlan + MODE flag",
+      "description": "detect.py 加 VerificationPlan(quick, full) dataclass + verification_plan() 函数。init_script_content() 改接受 VerificationPlan,生成带 `./init.sh quick|full` 分支的脚本。init_cmd.py 额外生成 scripts/verify-quick.sh 独立文件。verification_commands() 保留向后兼容(返回 plan.full)。本 phase 不做 Python ruff/mypy 自动检测(PI-2)、不做 marker 配置注入(PI-2)。",
+      "dependencies": [],
+      "status": "done",
+      "verification": "uv run pytest tests/test_detect.py tests/test_init_cmd.py tests/test_init_sh_two_tier.py -v && uv run python -m loom.cli eval --filter init-sh-two-tier --fail-under 100",
+      "evidence": "64/64 pytest pass, 4/4 eval cases pass, ruff+mypy clean. Smoke: loom init /tmp/pi1-test creates init.sh with MODE flag + scripts/verify-quick.sh executable. VerificationPlan(frozen) + verification_plan() + init_script_content(plan) two-tier bash script with quick|full case dispatch. Backward compat: verification_commands() still returns list[str]. init_cmd.py generates verify-quick.sh with git-diff auto-scope."
     }
   ]
 }

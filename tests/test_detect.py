@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from loom.detect import (
+    VerificationPlan,
     detect_package_manager,
     detect_project,
     init_script_content,
@@ -152,15 +153,17 @@ class TestVerificationCommands:
 
 class TestInitScriptContent:
     def test_basic(self) -> None:
-        out = init_script_content(["pytest -q"])
+        plan = VerificationPlan(quick=("pytest -q",), full=("pytest -q --full",))
+        out = init_script_content(plan)
         assert "set -e" in out
         assert "=== pytest -q ===" in out
         assert "pytest -q" in out
-        assert "./init.sh" not in out
+        assert "MODE" in out
         assert "Harness Initialization" in out
 
     def test_multiple_commands(self) -> None:
-        out = init_script_content(["first_cmd", "second_cmd", "third_cmd"])
+        plan = VerificationPlan(quick=("first_cmd",), full=("first_cmd", "second_cmd", "third_cmd"))
+        out = init_script_content(plan)
         assert "=== first_cmd ===" in out
         assert "=== second_cmd ===" in out
         assert "=== third_cmd ===" in out

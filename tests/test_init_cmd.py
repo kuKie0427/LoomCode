@@ -13,6 +13,7 @@ EXPECTED_FILES = (
     "progress.md",
     "session-handoff.md",
     "init.sh",
+    "scripts/verify-quick.sh",
     "harness.toml",
     ".github/workflows/loom-eval.yml",
 )
