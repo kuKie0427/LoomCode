@@ -66,10 +66,11 @@ class CompactOccurred(Message):
 class AssistantTurnEnd(Message):
     """The assistant has completed its turn."""
 
-    def __init__(self, tool_calls: int, total_messages: int) -> None:
+    def __init__(self, tool_calls: int, total_messages: int, duration: float) -> None:
         super().__init__()
         self.tool_calls = tool_calls
         self.total_messages = total_messages
+        self.duration = duration
 
 
 class TodoUpdate(Message):

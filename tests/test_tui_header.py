@@ -40,6 +40,7 @@ from loom.tui.header import (
     SECTION_TODO,
     VALID_SECTIONS,
     Header,
+    HeaderBrand,
     HeaderOverlay,
     HeaderSectionButton,
     HeaderState,
@@ -174,19 +175,24 @@ def test_header_expanded_subagent(snap_compare):
     assert snap_compare(app, run_before=run_before, terminal_size=(120, 24))
 
 
-def test_header_compose_yields_three_section_buttons():
-    """Header (Horizontal) yields 3 HeaderSectionButton children in spec order MCP → Todo → Subagent."""
+def test_header_compose_yields_section_buttons_plus_brand():
+    """Header (Horizontal) yields 3 HeaderSectionButton + 1 HeaderBrand."""
     header = Header()
     buttons = list(header.compose())
-    assert len(buttons) == 3, f"expected 3 section buttons, got {len(buttons)}"
-    for btn, expected_section in zip(buttons, VALID_SECTIONS, strict=True):
+    assert len(buttons) == 4, f"expected 4 children (3 section buttons + brand), got {len(buttons)}"
+    section_btns = buttons[:3]
+    assert isinstance(section_btns[0], HeaderSectionButton)
+    assert isinstance(section_btns[1], HeaderSectionButton)
+    assert isinstance(section_btns[2], HeaderSectionButton)
+    assert isinstance(buttons[3], HeaderBrand)
+    for btn, expected_section in zip(section_btns, VALID_SECTIONS, strict=True):
         assert isinstance(btn, HeaderSectionButton), (
             f"child must be HeaderSectionButton, got {type(btn)}"
         )
         assert btn.section == expected_section, (
             f"button section mismatch: expected {expected_section}, got {btn.section}"
         )
-    assert [b.section for b in buttons] == [SECTION_MCP, SECTION_TODO, SECTION_SUBAGENT]
+    assert [b.section for b in section_btns] == [SECTION_MCP, SECTION_TODO, SECTION_SUBAGENT]
 
 
 def test_section_button_renders_only_its_section():
@@ -607,35 +613,80 @@ def test_escape_is_noop_when_no_overlay():
 # ── Backend wiring tests (f-tui-header-backend-wiring) ────────────────────
 
 
-def test_app_initial_header_state_has_mcp_servers_from_tool_registry():
-    """App._build_initial_header_state snapshots MCP servers from TOOL_REGISTRY.
+def test_app_initial_header_state_empty_mcp_when_no_servers_configured():
+    """App._build_initial_header_state reads from mcp_manager, not TOOL_REGISTRY.
 
-    Each loom tool becomes one MCPServer (state='connected' by default;
-    'disabled' if the tool name is in harness.toml [policy].disabled_tools).
-
-    The Header starts with empty todo + subagent lists — those are
-    populated by agent_loop callbacks during a session.
+    When no MCP servers are configured (harness.toml has no [mcp.servers.*]
+    entries), the snapshot is empty.  The old behavior (listing every loom
+    native tool as an MCP server) is gone — the MCP section now shows only
+    user-configured MCP servers.
     """
 
     async def driver():
+        from loom.agent import mcp_manager as mm
+
+        # Ensure pristine state — no servers configured, none active.
+        mm._CONFIGURED_SERVER_NAMES.clear()
+        mm._ACTIVE_SERVERS.clear()
+
         app = AgentTUIApp()
         async with app.run_test() as pilot:
             await pilot.pause(0.05)
             state = app._header_state
-            assert len(state.mcps) > 0, (
-                "expected at least 1 MCP server from TOOL_REGISTRY, got 0"
+            assert state.mcps == [], (
+                f"expected empty MCP list when no servers configured, "
+                f"got {len(state.mcps)}: {[s.name for s in state.mcps]}"
             )
-            # Spot-check: every MCP server has a known tool name + 'connected' state
-            # (none of loom's built-in tools are disabled by default).
-            for server in state.mcps:
-                assert server.name, f"MCP server must have a non-empty name: {server}"
-                assert server.state in ("connected", "error", "disabled"), (
-                    f"unexpected state {server.state!r} for {server.name}"
-                )
             assert state.todos == [], f"todos must start empty, got {state.todos}"
             assert state.subagents == [], (
                 f"subagents must start empty, got {state.subagents}"
             )
+
+    asyncio.run(driver())
+
+
+def test_app_initial_header_state_reflects_configured_mcp_servers():
+    """When servers are configured, _build_initial_header_state reads real state.
+
+    We seed mcp_manager._CONFIGURED_SERVER_NAMES + _ACTIVE_SERVERS and verify
+    that the Header's MCP list reflects the real connection status:
+      - server in _ACTIVE_SERVERS → "connected"
+      - server configured but NOT in _ACTIVE_SERVERS → "error"
+    """
+
+    async def driver():
+        from loom.agent import mcp_manager as mm
+
+        # Clean up after ourselves so MCP state doesn't leak into
+        # subsequent snapshot tests (test_empty_layout, etc.).
+        try:
+            mm._CONFIGURED_SERVER_NAMES.clear()
+            mm._ACTIVE_SERVERS.clear()
+
+            # Seed one connected server and one that failed to connect.
+            mm._CONFIGURED_SERVER_NAMES.update({"healthy-server", "error-server"})
+            from loom.agent.mcp_client import MCPServer as MCPClientServer
+
+            mm._ACTIVE_SERVERS["healthy-server"] = MCPClientServer(
+                name="healthy-server",
+                command="echo",
+            )
+
+            app = AgentTUIApp()
+            async with app.run_test() as pilot:
+                await pilot.pause(0.05)
+                state = app._header_state
+                assert len(state.mcps) == 2, (
+                    f"expected 2 MCP servers, got {len(state.mcps)}"
+                )
+                servers_by_name = {s.name: s for s in state.mcps}
+                assert servers_by_name["healthy-server"].state == "connected"
+                assert servers_by_name["error-server"].state == "error"
+                assert state.todos == []
+                assert state.subagents == []
+        finally:
+            mm._CONFIGURED_SERVER_NAMES.clear()
+            mm._ACTIVE_SERVERS.clear()
 
     asyncio.run(driver())
 

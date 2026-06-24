@@ -1312,6 +1312,29 @@ SUB_SYSTEM = (
     "- 不要做 destructive 操作（rm -rf、force-push、删无关文件）— 即使任务看起来允许"
 )
 
+# Import review tool components (safe: review.py does NOT import from tools.py at module level)
+from loom.agent.review import (  # noqa: E402  — intentional mid-file import to avoid circular deps
+    REVIEW_SYSTEM,  # noqa: F401  — re-exported for external access
+    ReviewVerdict,  # noqa: F401  — re-exported for external access
+    run_review,
+)
+
+# Read-only tool schemas for the review subagent — excludes all write/mutation tools
+REVIEW_TOOLS: tuple[dict, ...] = (
+    {"name": "read_file",
+     "description": "Read file contents with 1-indexed pagination. Output lines are numbered (cat -n style) so any line number can be passed back as `offset` for the next read. A trailing '... (N more lines)' hint indicates further content past the window.",
+     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "limit": {"type": "integer"}, "offset": {"type": "integer", "minimum": 1, "description": "1-indexed start line; omit or 0 to read from the beginning"}}, "required": ["path"]}},
+    {"name": "grep",
+     "description": "Search files for a regex or literal pattern. Output is `path:line:content` per match, capped at 200 hits. Use grep BEFORE reading multiple files when looking for symbols or string usages — much cheaper than opening files one by one.",
+     "input_schema": {"type": "object", "properties": {"pattern": {"type": "string"}, "path": {"type": "string"}, "glob": {"type": "string"}, "case_insensitive": {"type": "boolean"}}, "required": ["pattern"]}},
+    {"name": "glob",
+     "description": "Find files matching a glob pattern.",
+     "input_schema": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}},
+    {"name": "bash",
+     "description": "Run a shell command in the workspace (120s timeout). Use only for read-only inspection commands: git status/diff/log, ls, cat -n, head, tail, and similar. Do NOT modify files or run destructive operations.",
+     "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
+)
+
 
 def extract_text(content) -> str:
     if not isinstance(content, list):
@@ -1340,7 +1363,7 @@ def _content_to_message_dict(content) -> list:
     return out
 
 
-def spawn_subagent(description: str, llm_client=None, hooks=None) -> str:
+def spawn_subagent(description: str, llm_client=None, hooks=None, *, system=None, tools=None, max_turns=30) -> str:
     # Inherit all current credentials into LOOM_AUTH_CONTENT for child subagents
     _creds = credentials.all()
     if _creds:
@@ -1364,12 +1387,12 @@ def spawn_subagent(description: str, llm_client=None, hooks=None) -> str:
 
     turn_count = 0
     tool_call_count = 0
-    for _ in range(30):
+    for _ in range(max_turns):
         turn_count += 1
         response = llm_client.invoke(
-            system=SUB_SYSTEM,
+            system=system or SUB_SYSTEM,
             messages=messages,
-            tools=SUB_TOOLS,
+            tools=tools or SUB_TOOLS,
             max_tokens=LLM_CONFIG.max_output_tokens,
         )
         messages.append({"role": "assistant", "content": _content_to_message_dict(response.content)})
@@ -1476,6 +1499,33 @@ TOOL_REGISTRY.register(Tool(
     is_read_only=False,
     is_concurrent_safe=False,
     enabled=True,
+))
+_resync_from_registry()
+
+# Deliberately NOT in SUB_TOOLS/SUB_HANDLERS — prevents R1 recursion
+TOOL_REGISTRY.register(Tool(
+    name="review",
+    description=(
+        "Launch a read-only reviewer subagent to inspect code and verify feature quality. "
+        "Returns a structured verdict (pass/fail/scope_creep/quality_issue/unknown) with "
+        "evidence and recommendations. The subagent can only read files, not modify them.\n"
+        "\n"
+        "Parameters:\n"
+        "- feature_id: short identifier (e.g. 'f-review-tool')\n"
+        "- feature_description: what was implemented (up to 2000 chars)\n"
+        "- scope_hint (optional): hint about the scope boundary for scope_creep detection"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "feature_id": {"type": "string", "description": "Short feature identifier (e.g. 'f-review-tool')."},
+            "feature_description": {"type": "string", "description": "Description of what was implemented (truncated to 2000 chars)."},
+            "scope_hint": {"type": "string", "description": "Optional hint about the scope boundary."},
+        },
+        "required": ["feature_id", "feature_description"],
+    },
+    handler=run_review,
+    is_read_only=True,
 ))
 _resync_from_registry()
 

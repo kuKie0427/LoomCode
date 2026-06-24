@@ -59,21 +59,36 @@ def _strip_provider_prefix(model: str) -> str:
 #  * Ollama: pricing is empty (local inference is free).
 #  * OpenRouter: pricing is empty (resale model — user should check
 #    openrouter.ai/models for current prices).
-#  * DeepSeek: deepseek-chat is the V3 chat model; deepseek-reasoner is
-#    the R1 reasoning model (much higher output cost).
 MODEL_PROFILES: dict[str, dict[str, Any]] = {
     "deepseek": {
         "display_name": "DeepSeek",
         "base_url": "https://api.deepseek.com/v1",
         "env_var": "DEEPSEEK_API_KEY",
-        "models": ["deepseek-chat", "deepseek-reasoner"],
+        "models": [
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+            "deepseek-chat",      # deprecated — maps to v4-flash non-thinking
+            "deepseek-reasoner",  # deprecated — maps to v4-flash thinking
+        ],
         "context_windows": {
+            "deepseek-v4-flash": 1_000_000,
+            "deepseek-v4-pro": 1_000_000,
             "deepseek-chat": 64_000,
             "deepseek-reasoner": 64_000,
         },
         "pricing": {
+            "deepseek-v4-flash": PricingInfo(0.14, 0.28, 0.0028, 0.14),
+            "deepseek-v4-pro": PricingInfo(0.435, 0.87, 0.003625, 0.435),
             "deepseek-chat": PricingInfo(0.27, 1.10, 0.07, 0.27),
             "deepseek-reasoner": PricingInfo(0.55, 2.19, 0.14, 0.55),
+        },
+        # DeepSeek V4 supports thinking mode (enabled by default).
+        # ``reasoning_effort`` controls thinking intensity; ``thinking``
+        # toggles the mode.  Both are top-level keys in the request body.
+        # See https://api-docs.deepseek.com/ for current docs.
+        "default_body": {
+            "reasoning_effort": "high",
+            "thinking": {"type": "enabled"},
         },
     },
     "ollama": {
@@ -140,6 +155,7 @@ def make_compatible_provider_class(
     _models = list(profile.get("models", []))
     _ctx = dict(profile.get("context_windows", {}))
     _pricing = dict(profile.get("pricing", {}))
+    _default_body = dict(profile.get("default_body", {}))
 
     class _BoundProvider(OpenAICompatibleProvider):
         provider_id: ClassVar[str] = _pid
@@ -149,6 +165,7 @@ def make_compatible_provider_class(
         supported_models: ClassVar[list[str]] = _models
         _CONTEXT_WINDOWS: ClassVar[dict[str, int]] = _ctx
         _PRICING: ClassVar[dict[str, PricingInfo]] = _pricing
+        _DEFAULT_BODY: ClassVar[dict[str, Any]] = _default_body
 
         def __init__(self, api_key: str = "", base_url: str | None = None) -> None:
             super().__init__(
@@ -248,11 +265,62 @@ def _map_status_error(
 # Tool + request body conversion
 # ---------------------------------------------------------------------------
 
+def _serialize_messages(
+    messages: list[dict],
+) -> list[dict]:
+    """Convert loom's internal message format to OpenAI Chat Completions format.
+
+    The agent loop stores content as ``list[TextBlock/ToolUseBlock]`` and
+    tool results as ``list[dict]`` inside user messages (Anthropic format).
+    The OpenAI-compatible API expects:
+    - ``tool_result`` blocks extracted to separate ``role: "tool"`` messages
+    - ``TextBlock`` objects serialized as ``{"type": "text", "text": "..."}``
+    - All other content passed through as plain dicts or strings.
+    """
+    from loom.agent.providers.types import TextBlock
+
+    result: list[dict] = []
+    for msg in messages:
+        msg = dict(msg)  # shallow copy
+        content = msg.get("content")
+        if not isinstance(content, list):
+            result.append(msg)
+            continue
+
+        serialized: list[dict | str] = []
+        for block in content:
+            if isinstance(block, TextBlock):
+                serialized.append({"type": "text", "text": block.text})
+            elif isinstance(block, dict) and block.get("type") == "tool_result":
+                # OpenAI format requires tool_result as a separate
+                # ``role: "tool"`` message, not embedded in user content.
+                tool_msg: dict[str, Any] = {"role": "tool"}
+                tool_msg["tool_call_id"] = block.get("tool_use_id", "")
+                # ''.join all content parts if it's a list.
+                raw_content = block.get("content", "")
+                if isinstance(raw_content, list):
+                    tool_msg["content"] = "\n".join(
+                        b.get("text", str(b)) if isinstance(b, dict) else str(b)
+                        for b in raw_content
+                    )
+                else:
+                    tool_msg["content"] = str(raw_content)
+                result.append(tool_msg)
+            elif isinstance(block, dict):
+                serialized.append(block)
+            else:
+                serialized.append(str(block))
+        msg["content"] = serialized
+        result.append(msg)
+    return result
+
+
 def build_request_body(
     request: ProviderRequest,
     *,
     model_id: str,
     stream: bool = True,
+    extra_body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Convert a ``ProviderRequest`` into the OpenAI Chat Completions
     body. System messages are prepended; the messages list is passed
@@ -260,6 +328,10 @@ def build_request_body(
 
     The body uses ``stream: true`` by default — call sites that want a
     non-streaming response can set ``stream=False``.
+
+    ``extra_body`` is merged into the top-level request body (used for
+    provider-specific parameters like ``reasoning_effort`` and ``thinking``
+    config for DeepSeek thinking models).
     """
     messages: list[dict[str, Any]] = []
 
@@ -276,7 +348,7 @@ def build_request_body(
         )
         if joined:
             messages.append({"role": "system", "content": joined})
-    messages.extend(request.messages)
+    messages.extend(_serialize_messages(request.messages))
 
     tools: list[dict[str, Any]] = []
     for t in request.tools:
@@ -301,6 +373,8 @@ def build_request_body(
         body["tool_choice"] = "auto"
     if request.max_tokens is not None:
         body["max_tokens"] = request.max_tokens
+    if extra_body:
+        body.update(extra_body)
     return body
 
 
@@ -391,6 +465,7 @@ def openai_chat_stream(
     provider: str,
     http_client: httpx.Client | None = None,
     timeout: float = 60.0,
+    extra_body: dict[str, Any] | None = None,
 ) -> Iterator[StreamEvent]:
     """Core SSE streaming generator. Yields ``StreamEvent``s and raises
     ``ProviderError`` on transport / HTTP failures.
@@ -398,9 +473,13 @@ def openai_chat_stream(
     ``http_client`` is the dependency-injection seam for tests. The
     production code path creates a fresh ``httpx.Client`` per call to
     avoid sharing connections across requests.
+
+    ``extra_body`` is provider-specific top-level keys merged into the
+    request body (e.g. ``reasoning_effort``, ``thinking`` for DeepSeek
+    thinking models).
     """
     url = base_url.rstrip("/") + "/chat/completions"
-    body = build_request_body(request, model_id=model_id, stream=True)
+    body = build_request_body(request, model_id=model_id, stream=True, extra_body=extra_body)
     headers = {
         "Content-Type": "application/json",
         "Accept": "text/event-stream",
@@ -469,6 +548,14 @@ def openai_chat_stream(
                     content = delta.get("content")
                     if content:
                         yield StreamEvent(kind="text", text=str(content))
+
+                    # DeepSeek V4 (and some other OpenAI-compatible models)
+                    # send thinking/reasoning content in a separate delta
+                    # field.  Surface it as a thinking event so the TUI can
+                    # display it inline (opencode-compatible pattern).
+                    reasoning = delta.get("reasoning_content")
+                    if reasoning:
+                        yield StreamEvent(kind="thinking", text=str(reasoning))
 
                     tcs = delta.get("tool_calls")
                     if tcs:

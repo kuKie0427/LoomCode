@@ -59,6 +59,7 @@ class LLMClient:
         self.async_client = getattr(self._provider, "_async_client", None)
         self._cancelled = False
         self._cancel_event = threading.Event()
+        self._provider_options: dict | None = None
 
     def _default_base_url_env(self, provider_id: str | None = None) -> str:
         pid = provider_id or self._provider_id
@@ -95,6 +96,32 @@ class LLMClient:
     @property
     def model_id(self) -> str:
         return self._model_id
+
+    def set_provider_options(self, options: dict | None) -> None:
+        """Set per-request provider options (e.g. reasoning_effort, thinking).
+
+        Passed through to ``ProviderRequest.provider_options`` and merged
+        into the request body by the provider's ``stream()`` method.  Set
+        to ``None`` to use the provider's default body.
+        """
+        self._provider_options = options
+
+    @property
+    def supports_extended_thinking(self) -> bool:
+        """Whether the current model emits thinking/reasoning stream events.
+
+        Only the Anthropic provider with specific thinking-capable models
+        (Claude Sonnet 4.5+, Opus 4.1+) produces ``StreamEvent(kind="thinking")``.
+        Other providers (OpenAI-compatible DeepSeek, etc.) send thinking
+        content through different channels (``reasoning_content`` in delta)
+        that are not currently surfaced as thinking events — for those
+        models the thinking spinner would spin without content until the
+        first text delta, which is visual noise.
+        """
+        if self._provider_id != "anthropic":
+            return False
+        thinking_capable = frozenset({"claude-sonnet-4-5", "claude-opus-4-1"})
+        return self._model_id in thinking_capable
 
     def change_model(self, new_model: str) -> None:
         provider_id, model_id = parse_model_id(new_model)
@@ -152,12 +179,33 @@ class LLMClient:
                     )
                 )
 
+        from loom.agent.providers.types import TextBlock
+
+        # Replace TextBlock objects with plain dicts so both the Anthropic
+        # and OpenAI-compatible paths can JSON-serialize without crashing.
+        clean_messages: list[dict] = []
+        for msg in messages:
+            msg = dict(msg)  # shallow copy
+            content = msg.get("content")
+            if isinstance(content, list):
+                cleaned: list[dict] = []
+                for block in content:
+                    if isinstance(block, TextBlock):
+                        cleaned.append({"type": "text", "text": block.text})
+                    elif isinstance(block, dict):
+                        cleaned.append(block)
+                    else:
+                        cleaned.append({"type": "text", "text": str(block)})
+                msg["content"] = cleaned
+            clean_messages.append(msg)
+
         request = ProviderRequest(
             system=system,
-            messages=list(messages),
+            messages=list(clean_messages),
             tools=tool_defs,
             max_tokens=max_tokens,
             model=self.model,
+            provider_options=self._provider_options,
         )
 
         yield from self._provider.stream(request)

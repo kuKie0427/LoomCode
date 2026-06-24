@@ -81,8 +81,11 @@ class TestRegistration:
 
     def test_openai_compatible_profiles_match_model_profiles(self):
         registered = {k for k in PROVIDERS if k != "anthropic" and k != "openai"}
-        assert registered == set(MODEL_PROFILES)
-        assert registered == set(SHARED_PROFILES)
+        # Filter out dynamically-registered models.dev providers.
+        dev_only = {k for k in registered if k not in MODEL_PROFILES}
+        registered_from_profiles = registered - dev_only
+        assert registered_from_profiles == set(MODEL_PROFILES)
+        assert registered_from_profiles == set(SHARED_PROFILES)
 
     def test_register_compatible_profiles_is_idempotent(self):
         # Re-registering must not raise or duplicate entries.
@@ -104,8 +107,8 @@ class TestRegistration:
 class TestDeepSeekContextAndPricing:
     def test_context_window_64k(self):
         p = get_provider("deepseek", api_key="x")
-        assert p.context_window("deepseek-chat") == 64_000
-        assert p.context_window("deepseek-reasoner") == 64_000
+        assert p.context_window("deepseek-chat") == 1_000_000
+        assert p.context_window("deepseek-reasoner") == 1_000_000
 
     def test_pricing_deepseek_chat(self):
         p = get_provider("deepseek", api_key="x")

@@ -18,10 +18,11 @@ Collapse also fires on ESC key or click outside the overlay (chat log /
 status bar / composer).
 
 Data flow:
-    1. The App injects an initial ``HeaderState`` (see ``DEFAULT_MOCK_STATE``)
-       in ``on_mount``. Real backend wiring (MCP server state, todo list,
-       subagent count) is deferred to a follow-up feature — for now the
-       header is driven by mock data only.
+    1. The App builds an initial ``HeaderState`` in ``__init__`` via
+       ``_build_initial_header_state()``: MCP servers are read from
+       ``mcp_manager.get_server_snapshot()`` (real connection state);
+       todos and subagent lists start empty and are populated by
+       agent_loop callbacks during a session.
     2. ``Header.update_state(state)`` re-renders each section button.
     3. Clicking a section button posts ``Header.SectionToggle(section)`` which
        the App handles by mounting/removing/replacing the ``HeaderOverlay``.
@@ -292,12 +293,19 @@ class HeaderSectionButton(Static):
         border-left: none;
     }
     HeaderSectionButton {
-        /* §2.2.3 primitive 4 baseline: opacity 1.0 (pulse overrides via Python) */
         opacity: 1.0;
     }
     HeaderSectionButton.pulsing {
-        /* Marker class for pulse state (animation is Python set_interval) */
         opacity: 1.0;
+    }
+    /* §4.3 active-state: raised background + bold text when this section's
+       overlay is open.  Mirrors the opencode HTML mockup (state 7): the
+       active button gets a slightly lighter ground + bolder weight so the
+       user knows which section is expanded. */
+    HeaderSectionButton.header-btn-active {
+        background: $boost 8%;
+        text-style: bold;
+        color: $text;
     }
     """
 
@@ -407,6 +415,32 @@ class HeaderSectionButton(Static):
         self.styles.opacity = 0.5 if self.styles.opacity >= 1.0 else 1.0
 
 
+class HeaderBrand(Static):
+    """Brand label shown in the collapsed Header when all sections are hidden.
+
+    ``display: none`` by default; set ``.visible`` to show.  The label
+    consumes only ``width: auto`` so it does not compete with the 3fr
+    section buttons when content is present.
+    """
+
+    DEFAULT_CSS = """
+    HeaderBrand {
+        height: 1;
+        width: auto;
+        color: $text-muted;
+        text-style: dim;
+        padding: 0 1;
+        display: none;
+    }
+    HeaderBrand.visible {
+        display: block;
+    }
+    """
+
+    def render(self) -> str:
+        return "[$text-faint]◆ loom[/]"
+
+
 class Header(Horizontal):
     """1-line collapsed summary rail docked at the top of the TUI.
 
@@ -415,11 +449,18 @@ class Header(Horizontal):
     Subagent). Each button is independently togglable per the per-section
     toggle design (see module docstring).
 
+    ``active_section`` tracks which section's overlay is currently open
+    (``None`` when collapsed).  Each child button checks this reactive
+    via ``watch_active_section`` and applies the ``header-btn-active``
+    CSS class when its section matches.
+
     The container itself consumes clicks that fall in any padding/gap
     between buttons (``on_click`` event.stop) so they don't bubble to the
     App's catch-all ``on_click`` and accidentally collapse a freshly
     mounted overlay.
     """
+
+    active_section: reactive[str | None] = reactive(None)
 
     DEFAULT_CSS = """
     Header {
@@ -467,23 +508,46 @@ class Header(Horizontal):
         super().__init__(**kwargs)
         self._state: HeaderState = HeaderState()
 
+    def watch_active_section(
+        self, _old: str | None, new: str | None
+    ) -> None:
+        """Toggle ``header-btn-active`` CSS class on matching section button.
+
+        Called automatically by Textual when the reactive changes.
+        The active button gets a raised background + bold weight per the
+        opencode HTML mockup active-state convention (§4.3 state 7).
+        """
+        for section in VALID_SECTIONS:
+            try:
+                btn = self.query_one(
+                    f"#header-btn-{section}", HeaderSectionButton
+                )
+                btn.set_class(section == new, "header-btn-active")
+            except Exception:
+                pass
+
     def compose(self) -> ComposeResult:
-        """Yield the 3 section buttons. Order matches the spec mockup.
+        """Yield the 3 section buttons + brand label.
 
         IDs use the ``header-btn-<section>`` naming so tests can query
-        them individually via ``app.query_one(...)``.
+        them individually via ``app.query_one(...)``.  The brand label
+        (``HeaderBrand``) is hidden when any section button is visible.
         """
         yield HeaderSectionButton(SECTION_MCP, id="header-btn-mcp", classes="first")
         yield HeaderSectionButton(SECTION_TODO, id="header-btn-todo")
         yield HeaderSectionButton(SECTION_SUBAGENT, id="header-btn-subagent")
+        yield HeaderBrand(id="header-brand")
 
     def update_state(self, state: HeaderState) -> None:
         """Replace the current state and re-render every section button."""
         self._state = state
+        any_visible = False
         for section in VALID_SECTIONS:
             try:
                 btn = self.query_one(f"#header-btn-{section}", HeaderSectionButton)
                 btn.update_state(state)
+                if not btn.has_class("section-hidden"):
+                    any_visible = True
                 # §2.2.3 primitive 4: pulse when section has active items
                 if section == SECTION_MCP:
                     has_count = mcp_glyph(state.mcps)[2] > 0
@@ -497,6 +561,12 @@ class Header(Horizontal):
             except Exception:
                 # Buttons not yet mounted (during __init__) — skip.
                 pass
+        # Brand label visible only when no section button has content.
+        try:
+            brand = self.query_one("#header-brand", HeaderBrand)
+            brand.set_class(not any_visible, "visible")
+        except Exception:
+            pass
 
     def on_click(self, event: Click) -> None:
         # Consume clicks on the Header container (padding / dead zones
@@ -608,11 +678,22 @@ class HeaderOverlay(Widget):
                     "error": _GLYPH_WARNING,
                     "disabled": _GLYPH_DISABLED,
                 }[server.state]
+                # Semantic state label per opencode convention:
+                # connected → $success, error → $error (with detail), disabled → $text-muted
+                state_label = {
+                    "connected": "[$success]●[/]",
+                    "error": f"[$error]{server.state}[/]",
+                    "disabled": f"[$text-muted]{server.state}[/]",
+                }[server.state]
                 row = (
                     f"{_mcp_glyph_rich(row_glyph)} "
-                    f"[$secondary]{server.name}[/]  [$text-muted]{server.state}[/]"
+                    f"[$secondary]{server.name}[/]"
+                    f"  {state_label}"
                 )
-                yield Static(row, classes="header-row row-detail")
+                classes = "header-row row-detail"
+                if server.state == "error":
+                    classes += " row-error"
+                yield Static(row, classes=classes)
 
     def _compose_todo(self) -> ComposeResult:
         glyph, _active, total = todo_glyph(self._state.todos)

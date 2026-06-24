@@ -133,7 +133,7 @@ class TestOpenAIContextWindow:
         assert openai_provider.context_window("gpt-4o-mini") == 128_000
 
     def test_gpt35_turbo_16k(self, openai_provider):
-        assert openai_provider.context_window("gpt-3.5-turbo") == 16_000
+        assert openai_provider.context_window("gpt-3.5-turbo") == 16_385
 
     def test_o1_200k(self, openai_provider):
         assert openai_provider.context_window("o1") == 200_000

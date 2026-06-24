@@ -13,6 +13,7 @@ Concrete providers (in this package):
     OpenRouter, dynamically bound from MODEL_PROFILES
 """
 
+from loom.agent.models_dev import CACHE_FILE, _ensure_populated
 from loom.agent.providers import (
     anthropic,  # noqa: F401  (registration side effect)
     openai,  # noqa: F401  (registration side effect)
@@ -49,6 +50,16 @@ from loom.agent.providers.types import (
 
 # Register DeepSeek / Ollama / OpenRouter from MODEL_PROFILES.
 register_compatible_profiles()
+
+# Register OpenAI-compatible providers from the models.dev catalog.
+# If a local cache exists, load it synchronously so providers are
+# available immediately.  Otherwise a background thread fetches.
+if CACHE_FILE.exists():
+    _ensure_populated()
+else:
+    import threading
+
+    threading.Thread(target=_ensure_populated, daemon=True).start()
 
 __all__ = [
     "LLMProvider",

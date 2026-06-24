@@ -7,15 +7,15 @@ calls, no real Textual app, no modal interactions.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from loom.tui.chat_log import ChatLog
 from loom.tui.slash_commands import SLASH_COMMANDS, find_command
 
 
-def test_registry_has_seven_commands() -> None:
-    """SLASH_COMMANDS has exactly 7 entries."""
-    assert len(SLASH_COMMANDS) == 7
+def test_registry_has_nine_commands() -> None:
+    """SLASH_COMMANDS has exactly 9 entries."""
+    assert len(SLASH_COMMANDS) == 9
 
 
 def test_quit_aliases() -> None:
@@ -74,4 +74,38 @@ def test_help_handler_emits_commands_note() -> None:
     note_text = mock_chat_log.append_system_note.call_args[0][0]
     assert "/help" in note_text
     assert "/model" in note_text
+    assert "/init" in note_text
     assert "/quit" in note_text
+
+
+def test_init_handler_calls_init_and_displays_results() -> None:
+    init_cmd = find_command("init")
+    assert init_cmd is not None
+
+    mock_app = MagicMock()
+    mock_chat_log = MagicMock()
+    mock_app.query_one.return_value = mock_chat_log
+
+    with (
+        patch("loom.init_cmd.init") as mock_init,
+        patch("loom.detect.detect_project") as mock_detect,
+        patch("loom.init_cmd.format_results") as mock_format,
+    ):
+        mock_init.return_value = []
+        mock_detect.return_value = MagicMock()
+        mock_format.return_value = "WRITTEN  AGENTS.md\nWRITTEN  init.sh"
+
+        async def run() -> None:
+            await init_cmd.handler(mock_app, "")
+
+        asyncio.run(run())
+
+        mock_app.query_one.assert_called_once_with(ChatLog)
+        mock_chat_log.append_system_note.assert_called_once()
+        note_text = mock_chat_log.append_system_note.call_args[0][0]
+        assert "/init" in note_text
+        assert "AGENTS.md" in note_text
+        assert "init.sh" in note_text
+        mock_init.assert_called_once()
+        mock_detect.assert_called_once()
+        mock_format.assert_called_once()

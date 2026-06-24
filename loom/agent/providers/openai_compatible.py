@@ -47,6 +47,7 @@ class OpenAICompatibleProvider(LLMProvider):
 
     _CONTEXT_WINDOWS: ClassVar[dict[str, int]] = {}
     _PRICING: ClassVar[dict[str, PricingInfo]] = {}
+    _DEFAULT_BODY: ClassVar[dict[str, Any]] = {}
 
     def __init__(
         self,
@@ -68,6 +69,18 @@ class OpenAICompatibleProvider(LLMProvider):
         self._canonical_provider_id = _provider_id or self.provider_id
 
     def context_window(self, model: str) -> int:
+        from loom.agent.models_dev import lookup_context_window
+
+        # Try the model ID as-is first (e.g. "deepseek-chat").
+        ctx = lookup_context_window(self.provider_id, model)
+        if ctx is not None:
+            return ctx
+        # Some callers pass "provider/model" — strip prefix and try again.
+        if "/" in model:
+            short = model.split("/", 1)[1]
+            ctx = lookup_context_window(self.provider_id, short)
+            if ctx is not None:
+                return ctx
         return self._CONTEXT_WINDOWS.get(model, DEFAULT_WINDOW)
 
     def pricing(self, model: str) -> PricingInfo | None:
@@ -90,12 +103,16 @@ class OpenAICompatibleProvider(LLMProvider):
             or self.default_base_url
             or "https://api.openai.com/v1"
         )
+        # Per-request provider_options override the default body.
+        # If set to None (or empty), use the profile's _DEFAULT_BODY.
+        extra_body = request.provider_options or self._DEFAULT_BODY or None
         return openai_chat_stream(
             request,
             base_url=base_url,
             api_key=self.api_key,
             model_id=model_id,
             provider=self._canonical_provider_id or self.provider_id or "openai_compatible",
+            extra_body=extra_body,
         )
 
     def cancel(self) -> None:  # pragma: no cover
@@ -123,3 +140,53 @@ def register_compatible_profiles() -> None:
             continue
         cls = make_compatible_provider_class(provider_id, profile)
         register(cls)
+
+
+def register_models_dev_providers() -> int:
+    """Register OpenAI-compatible providers from the models.dev catalog.
+
+    Iterates over the cached models.dev data and creates an
+    ``OpenAICompatibleProvider`` subclass for every provider that
+    exposes an ``api`` field (base URL).  Providers already registered
+    (e.g. the hand-written ``AnthropicProvider``, ``OpenAIProvider``,
+    or the ``MODEL_PROFILES`` entries) are **not** overwritten.
+
+    Returns the number of newly registered providers.
+    """
+    from loom.agent.models_dev import _get_provider_data
+
+    data = _get_provider_data()
+    if not data:
+        return 0
+
+    count = 0
+    for pid, entry in sorted(data.items()):
+        if pid in PROVIDERS:
+            continue  # existing provider takes priority
+        api_url = entry.get("api") or ""
+        if not api_url:
+            continue  # no OpenAI-compatible base URL
+        name = entry.get("name", pid)
+        env_list = entry.get("env") or []
+        env_var = env_list[0] if env_list else f"{pid.upper()}_API_KEY"
+
+        # Append /v1 if the URL doesn't already have a path.
+        base_url = api_url.rstrip("/")
+        if not base_url.endswith("/v1"):
+            base_url = f"{base_url}/v1"
+
+        models = sorted(entry.get("models", {}).keys())
+
+        profile = {
+            "display_name": name,
+            "base_url": base_url,
+            "env_var": env_var,
+            "models": models,
+            "context_windows": {},
+            "pricing": {},
+        }
+        cls = make_compatible_provider_class(pid, profile)
+        register(cls)
+        count += 1
+
+    return count

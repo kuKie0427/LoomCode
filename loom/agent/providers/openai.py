@@ -72,6 +72,11 @@ class OpenAIProvider(LLMProvider):
             self.api_key = os.getenv(self.env_var, "")
 
     def context_window(self, model: str) -> int:
+        from loom.agent.models_dev import lookup_context_window
+
+        ctx = lookup_context_window("openai", model)
+        if ctx is not None:
+            return ctx
         return self._CONTEXT_WINDOWS.get(model, DEFAULT_WINDOW)
 
     def pricing(self, model: str) -> PricingInfo | None:

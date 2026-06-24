@@ -42,7 +42,8 @@ class SlashCommand:
 async def handle_help(app: AgentTUIApp, args: str) -> None:
     chat_log = app.query_one(ChatLog)
     chat_log.append_system_note(
-        "**Commands:** /help, /clear, /model <name>, /connect, /quit, /resume, /status"
+        "**Commands:** /help, /clear, /init, /model <name>, /connect, "
+        "/thinking, /resume, /status, /quit"
     )
 
 
@@ -137,6 +138,57 @@ async def handle_quit(app: AgentTUIApp, args: str) -> None:
     await app.action_quit()
 
 
+async def handle_thinking(app: AgentTUIApp, args: str) -> None:
+    """Set thinking mode and effort for DeepSeek models.
+
+    Usage: /thinking on|off|high|max
+      on      — enable thinking with default effort (high)
+      off     — disable thinking
+      high    — high thinking effort (default)
+      max     — maximum thinking effort
+      (no arg) — cycle: off → on → off
+    """
+    arg = args.strip().lower()
+    chat_log = app.query_one(ChatLog)
+
+    if arg in ("", "toggle"):
+        # Cycle: detect current state
+        current = app.llm._provider_options
+        if current is None or current.get("thinking", {}).get("type") == "enabled":
+            # currently on or default → turn off
+            arg = "off"
+        else:
+            arg = "on"
+
+    configs: dict[str, dict[str, object]] = {
+        "on": {"reasoning_effort": "high", "thinking": {"type": "enabled"}},
+        "high": {"reasoning_effort": "high", "thinking": {"type": "enabled"}},
+        "max": {"reasoning_effort": "max", "thinking": {"type": "enabled"}},
+        "off": {"thinking": {"type": "disabled"}},
+    }
+    if arg not in configs:
+        chat_log.append_system_note(
+            "**Usage:** /thinking on|off|high|max  (or /thinking to toggle)"
+        )
+        return
+
+    app.llm.set_provider_options(configs[arg])
+    label = {"on": "on (high)", "high": "high", "max": "max", "off": "off"}
+    chat_log.append_system_note(f"Thinking mode: **{label[arg]}**")
+
+
+async def handle_init(app: AgentTUIApp, args: str) -> None:
+    from loom.detect import detect_project
+    from loom.init_cmd import format_results, init
+
+    chat_log = app.query_one(ChatLog)
+    force = args.strip().lower() in ("--force", "-f")
+    results = init(WORKDIR, force=force)
+    project = detect_project(WORKDIR)
+    output = format_results(project, results)
+    chat_log.append_system_note(f"**/init** — scaffold harness files\n\n{output}")
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -146,6 +198,11 @@ SLASH_COMMANDS: list[SlashCommand] = [
         name="help",
         description="Show available commands",
         handler=handle_help,
+    ),
+    SlashCommand(
+        name="init",
+        description="Scaffold or update harness files (--force to overwrite)",
+        handler=handle_init,
     ),
     SlashCommand(
         name="clear",
@@ -173,6 +230,12 @@ SLASH_COMMANDS: list[SlashCommand] = [
         handler=handle_status,
     ),
     SlashCommand(
+        name="thinking",
+        description="Set thinking mode/effort: on|off|high|max",
+        aliases=("think", "thing"),
+        handler=handle_thinking,
+    ),
+    SlashCommand(
         name="quit",
         description="Quit the application",
         aliases=("q", "exit"),
@@ -188,9 +251,23 @@ SLASH_COMMANDS: list[SlashCommand] = [
 
 def find_command(name: str) -> SlashCommand | None:
     lower = name.lower()
+    # 1) Exact match on name or alias (fast path)
     for cmd in SLASH_COMMANDS:
         if cmd.name == lower or lower in cmd.aliases:
             return cmd
+    # 2) Prefix match on name or alias — closes the gap between what the
+    #    completion popup shows (filter_commands uses prefix matching) and
+    #    what Enter dispatches.  E.g. /ex → quit (via "exit" alias).
+    matches: list[SlashCommand] = []
+    for cmd in SLASH_COMMANDS:
+        if cmd.name.startswith(lower) or any(
+            a.startswith(lower) for a in cmd.aliases
+        ):
+            matches.append(cmd)
+    if len(matches) == 1:
+        return matches[0]
+    # 3) Ambiguous or no match — the caller will show "Unknown command"
+    #    which is correct: the user should use the popup (Tab / ↑↓) to pick.
     return None
 
 

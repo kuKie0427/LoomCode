@@ -2,7 +2,7 @@
 
 Verifies:
   - File permissions (0o600 for file, 0o700 for directory)
-  - Priority chain: keyring > LOOM_AUTH_CONTENT > env > file
+  - 2-layer priority: LOOM_AUTH_CONTENT > auth.json
   - set/remove with atomic writes
   - Malformed/missing file tolerance
   - Provider ID normalization
@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import stat
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -22,25 +21,9 @@ from loom.agent.credential import CredentialInfo, CredentialManager
 
 
 @pytest.fixture(autouse=True)
-def _clear_provider_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Clear all provider env vars before each credential test.
+def _clear_loom_auth_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LOOM_AUTH_CONTENT", raising=False)
 
-    loom.agent.loop imports dotenv.load_dotenv() at module level, which
-    loads ANTHROPIC_API_KEY (and other provider env vars) from .env into
-    os.environ. This fixture ensures a clean slate for every credential
-    test so env-var and file tests don't accidentally pick up the real
-    key from the user's .env or shell.
-    """
-    for var in (
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "OPENAI_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "OLLAMA_API_KEY",
-        "OPENROUTER_API_KEY",
-        "LOOM_AUTH_CONTENT",
-    ):
-        monkeypatch.delenv(var, raising=False)
 
 # ---------------------------------------------------------------------------
 # File permission tests
@@ -52,8 +35,7 @@ def test_credential_manager_writes_file_0o600(tmp_path: Path) -> None:
     auth_path = tmp_path / "auth.json"
     m = CredentialManager(auth_path=auth_path)
     info = CredentialInfo(provider_id="test", kind="api", api_key="key")
-    with patch.object(m, "_try_keyring_set"):
-        m.set("test", info)
+    m.set("test", info)
     mode = stat.S_IMODE(auth_path.stat().st_mode)
     assert mode == 0o600, f"Expected 0o600, got {mode:o}"
 
@@ -63,37 +45,18 @@ def test_credential_manager_dir_chmod_0o700(tmp_path: Path) -> None:
     auth_path = tmp_path / ".loom" / "auth.json"
     m = CredentialManager(auth_path=auth_path)
     info = CredentialInfo(provider_id="test", kind="api", api_key="key")
-    with patch.object(m, "_try_keyring_set"):
-        m.set("test", info)
+    m.set("test", info)
     mode = stat.S_IMODE(auth_path.parent.stat().st_mode)
     assert mode == 0o700, f"Expected 0o700, got {mode:o}"
 
 
 # ---------------------------------------------------------------------------
-# Get from env var
+# Get from file (no env override)
 # ---------------------------------------------------------------------------
 
 
-def test_credential_manager_get_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Must read ANTHROPIC_API_KEY from env."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-env-key")
-    m = CredentialManager(auth_path=tmp_path / "auth.json", use_keyring=False)
-    cred = m.get("anthropic")
-    assert cred is not None
-    assert cred.api_key == "sk-env-key"
-    assert cred.source == "env"
-
-
-# ---------------------------------------------------------------------------
-# Get from file
-# ---------------------------------------------------------------------------
-
-
-def test_credential_manager_get_from_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Must read from auth.json when no env var."""
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+def test_credential_manager_get_from_file(tmp_path: Path) -> None:
+    """Must read from auth.json when no LOOM_AUTH_CONTENT."""
     auth_path = tmp_path / "auth.json"
     auth_path.write_text(
         json.dumps(
@@ -106,7 +69,7 @@ def test_credential_manager_get_from_file(
             }
         )
     )
-    m = CredentialManager(auth_path=auth_path, use_keyring=False)
+    m = CredentialManager(auth_path=auth_path)
     cred = m.get("anthropic")
     assert cred is not None
     assert cred.api_key == "sk-file-key"
@@ -114,15 +77,18 @@ def test_credential_manager_get_from_file(
 
 
 # ---------------------------------------------------------------------------
-# Priority: env over file
+# LOOM_AUTH_CONTENT over file
 # ---------------------------------------------------------------------------
 
 
-def test_credential_manager_priority_env_over_file(
+def test_credential_manager_loom_auth_content_overrides_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Env var must take priority over file."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-env-key")
+    """LOOM_AUTH_CONTENT must take priority over auth.json."""
+    monkeypatch.setenv(
+        "LOOM_AUTH_CONTENT",
+        json.dumps({"anthropic": {"api_key": "sk-lac-key"}}),
+    )
     auth_path = tmp_path / "auth.json"
     auth_path.write_text(
         json.dumps(
@@ -135,51 +101,11 @@ def test_credential_manager_priority_env_over_file(
             }
         )
     )
-    m = CredentialManager(auth_path=auth_path, use_keyring=False)
-    cred = m.get("anthropic")
-    assert cred is not None
-    assert cred.api_key == "sk-env-key"
-    assert cred.source == "env"
-
-
-# ---------------------------------------------------------------------------
-# LOOM_AUTH_CONTENT
-# ---------------------------------------------------------------------------
-
-
-def test_credential_manager_loom_auth_content_override(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """LOOM_AUTH_CONTENT must be checked before per-provider env var."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-env-key")
-    monkeypatch.setenv(
-        "LOOM_AUTH_CONTENT",
-        json.dumps({"anthropic": {"api_key": "sk-lac-key"}}),
-    )
-    m = CredentialManager(auth_path=tmp_path / "auth.json", use_keyring=False)
+    m = CredentialManager(auth_path=auth_path)
     cred = m.get("anthropic")
     assert cred is not None
     assert cred.api_key == "sk-lac-key"
     assert cred.source == "loom_auth_content"
-
-
-# ---------------------------------------------------------------------------
-# Keyring
-# ---------------------------------------------------------------------------
-
-
-def test_credential_manager_get_from_keyring(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Keyring must be checked before LOOM_AUTH_CONTENT."""
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    with patch("loom.agent.credential._HAS_KEYRING", True):
-        m = CredentialManager(auth_path=tmp_path / "auth.json")
-        with patch.object(m, "_try_keyring_get", return_value="sk-keyring-key"):
-            cred = m.get("anthropic")
-    assert cred is not None
-    assert cred.api_key == "sk-keyring-key"
-    assert cred.source == "keyring"
 
 
 # ---------------------------------------------------------------------------
@@ -191,9 +117,8 @@ def test_credential_manager_set_writes_atomic(tmp_path: Path) -> None:
     """set() must write file."""
     auth_path = tmp_path / "auth.json"
     m = CredentialManager(auth_path=auth_path)
-    with patch.object(m, "_try_keyring_set"):
-        info = CredentialInfo(provider_id="test", kind="api", api_key="sk-set-key")
-        m.set("test", info)
+    info = CredentialInfo(provider_id="test", kind="api", api_key="sk-set-key")
+    m.set("test", info)
     assert auth_path.exists()
     data = json.loads(auth_path.read_text())
     assert data["test"]["api_key"] == "sk-set-key"
@@ -208,10 +133,8 @@ def test_credential_manager_remove_cleans_file(tmp_path: Path) -> None:
     """remove() must delete entry from file."""
     auth_path = tmp_path / "auth.json"
     m = CredentialManager(auth_path=auth_path)
-    with patch.object(m, "_try_keyring_set"):
-        m.set("test", CredentialInfo(provider_id="test", kind="api", api_key="key"))
-    with patch.object(m, "_try_keyring_delete"):
-        m.remove("test")
+    m.set("test", CredentialInfo(provider_id="test", kind="api", api_key="key"))
+    m.remove("test")
     data = json.loads(auth_path.read_text())
     assert "test" not in data
 
@@ -254,7 +177,7 @@ def test_credential_manager_missing_file_returns_empty(tmp_path: Path) -> None:
 def test_credential_manager_provider_id_normalized(tmp_path: Path) -> None:
     """Provider IDs must be lowercased and stripped."""
     auth_path = tmp_path / "auth.json"
-    m = CredentialManager(auth_path=auth_path, use_keyring=False)
+    m = CredentialManager(auth_path=auth_path)
     info = CredentialInfo(provider_id="TestProvider", kind="api", api_key="key")
     m.set("  TestProvider  ", info)
     cred = m.get("testprovider")
@@ -270,22 +193,25 @@ def test_credential_manager_provider_id_normalized(tmp_path: Path) -> None:
 def test_credential_manager_all_merges_sources(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """all() must return merged view across all sources."""
+    """all() must overlay LOOM_AUTH_CONTENT on top of file."""
     auth_path = tmp_path / "auth.json"
     auth_path.write_text(
         json.dumps(
             {
-                "openai": {
-                    "provider_id": "openai",
+                "anthropic": {
+                    "provider_id": "anthropic",
                     "api_key": "sk-file",
                     "kind": "api",
                 }
             }
         )
     )
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
-    m = CredentialManager(auth_path=auth_path, use_keyring=False)
+    monkeypatch.setenv(
+        "LOOM_AUTH_CONTENT",
+        json.dumps({"anthropic": {"api_key": "sk-lac"}}),
+    )
+    m = CredentialManager(auth_path=auth_path)
     all_creds = m.all()
-    assert "openai" in all_creds
-    assert all_creds["openai"].api_key == "sk-env"  # env beats file
-    assert all_creds["openai"].source == "env"
+    assert "anthropic" in all_creds
+    assert all_creds["anthropic"].api_key == "sk-lac"  # env beats file
+    assert all_creds["anthropic"].source == "loom_auth_content"

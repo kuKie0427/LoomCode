@@ -40,6 +40,8 @@ def _isolate_manager_state():
     mm._ACTIVE_SERVERS.clear()
     mm._PER_SERVER_LOCKS.clear()
     mm._DISCOVERY_THREADS.clear()
+    mm._CONFIGURED_SERVER_NAMES.clear()
+    mm._DISCOVERY_STARTED = False
     # Sweep any stale mcp__* tools left by previous tests
     for n in list(TOOL_REGISTRY.names()):
         if n.startswith("mcp__"):
@@ -51,6 +53,8 @@ def _isolate_manager_state():
     mm._ACTIVE_SERVERS.clear()
     mm._PER_SERVER_LOCKS.clear()
     mm._DISCOVERY_THREADS.clear()
+    mm._CONFIGURED_SERVER_NAMES.clear()
+    mm._DISCOVERY_STARTED = False
     for n in list(TOOL_REGISTRY.names()):
         if n.startswith("mcp__"):
             try:
@@ -212,3 +216,36 @@ def test_shutdown_all_continues_on_individual_stop_failure() -> None:
     assert "bad" not in mm._ACTIVE_SERVERS
     assert "mcp__good__fake_tool" not in TOOL_REGISTRY.names()
     assert "mcp__bad__fake_tool" not in TOOL_REGISTRY.names()
+
+
+# ── get_server_snapshot ───────────────────────────────────────────────────
+
+
+def test_get_server_snapshot_empty_when_nothing_configured() -> None:
+    assert mm.get_server_snapshot() == []
+
+
+def test_get_server_snapshot_shows_configured_but_not_connected_as_error() -> None:
+    mm._CONFIGURED_SERVER_NAMES.add("gh")
+    snapshot = mm.get_server_snapshot()
+    assert snapshot == [{"name": "gh", "state": "error"}]
+
+
+def test_get_server_snapshot_shows_active_servers_as_connected() -> None:
+    mm._CONFIGURED_SERVER_NAMES.update({"gh", "fs"})
+    server = MCPServer(name="fs", command="echo")
+    mm._ACTIVE_SERVERS["fs"] = server
+    snapshot = mm.get_server_snapshot()
+    assert {"name": "fs", "state": "connected"} in snapshot
+    assert {"name": "gh", "state": "error"} in snapshot
+    assert len(snapshot) == 2
+
+
+def test_get_server_snapshot_includes_orphan_active_servers() -> None:
+    """A server in _ACTIVE_SERVERS but not in _CONFIGURED_SERVER_NAMES
+    (e.g. injected directly by a test) still appears as 'connected'.
+    """
+    server = MCPServer(name="orphan", command="echo")
+    mm._ACTIVE_SERVERS["orphan"] = server
+    snapshot = mm.get_server_snapshot()
+    assert snapshot == [{"name": "orphan", "state": "connected"}]

@@ -12,7 +12,7 @@ import os
 import subprocess
 import threading
 import time
-from typing import Literal
+from typing import Literal, cast
 
 from loguru import logger
 from textual import messages as textual_messages
@@ -24,10 +24,9 @@ from textual.reactive import reactive
 from textual.theme import Theme
 
 from loom.agent.llm import LLMClient
-from loom.agent.loop import WORKDIR, _active_config, agent_loop
+from loom.agent.loop import WORKDIR, agent_loop
 from loom.agent.model_resolver import resolve_model
 from loom.agent.model_state import ModelState, ProjectConfig
-from loom.agent.tools import TOOL_REGISTRY
 from loom.tui import kitty_patch  # noqa: F401  # side-effect: patches XTermParser
 from loom.tui.chat_log import ChatLog
 from loom.tui.completer import CommandCompleter
@@ -46,6 +45,7 @@ from loom.tui.messages import (
     ToolUseStarted,
 )
 from loom.tui.status_bar import EngineState, StatusBar
+from loom.tui.welcome import WelcomeModal
 
 # Mapping from agent_loop's todo status (string) to the TUI Header's
 # TodoItem.state (Literal["pending", "active", "done"]). The agent uses
@@ -180,6 +180,12 @@ class AgentTUIApp(App):
     def __init__(self, resume: bool = False, model: str | None = None):
         super().__init__()
         self.resume = resume
+        # Skip the welcome modal when running under pytest (detected by
+        # looking for the pytest module in sys.modules, which is set by
+        # pytest before any test module is imported).
+        import sys
+
+        self._skip_welcome: bool = "pytest" in sys.modules
         resolved = resolve_model(
             workdir=WORKDIR,
             cli_model=model,                                       # --model flag
@@ -192,7 +198,6 @@ class AgentTUIApp(App):
         self._cancelled = False
         self._main_loop = None
         self._init_sh_thread: threading.Thread | None = None
-        self._session_start: float = 0.0
 
         # Wire up harness.toml config (mirrors run_repl L193)
         from loom.agent.config import load_config
@@ -216,24 +221,29 @@ class AgentTUIApp(App):
         # Inject TUI asker (after apply_config so hooks instance is finalized)
         hooks._asker = self._make_tui_asker()
 
-        # f-tui-header-backend-wiring: build initial HeaderState from real
-        # backend sources. MCP servers = loom's tool registry (each loom
-        # tool is treated as an MCP-equivalent server for Header display
-        # since loom has no real MCP infra yet). Todo/subagent lists
-        # start empty — populated by callbacks during agent_loop runs.
+        # Build initial HeaderState from real backend sources.  MCP servers
+        # are read from mcp_manager (real MCP connections — empty list when
+        # no servers are configured).  Todo + subagent lists start empty and
+        # are populated by agent_loop callbacks during a session.
         self._header_state = self._build_initial_header_state()
 
     def _build_initial_header_state(self) -> HeaderState:
-        """Snapshot of MCP servers from TOOL_REGISTRY + empty todo/subagent lists.
+        """Snapshot of real MCP servers + empty todo/subagent lists.
 
-        MCP server state reflects harness.toml [policy].disabled_tools:
-        disabled tools show as 'disabled', others as 'connected'.
+        MCP server state comes from ``mcp_manager.get_server_snapshot()``:
+        each configured server shows as ``connected`` (handshake succeeded)
+        or ``error`` (handshake failed, evicted, or still discovering).
+        Native loom tools are not included — the MCP section shows only
+        user-configured MCP servers.
         """
-        disabled = set(_active_config.disabled_tools or [])
-        mcps = [
-            MCPServer(name=name, state="disabled" if name in disabled else "connected")
-            for name in TOOL_REGISTRY.names()
-        ]
+        mcps: list[MCPServer] = []
+        try:
+            from loom.agent.mcp_manager import get_server_snapshot
+
+            for s in get_server_snapshot():
+                mcps.append(MCPServer(name=s["name"], state=s["state"]))  # type: ignore[arg-type]
+        except Exception:
+            pass
         return HeaderState(mcps=mcps, todos=[], subagents=[])
 
     def _convert_agent_todos(self, todos: list) -> list[TodoItem]:
@@ -261,15 +271,70 @@ class AgentTUIApp(App):
         status_bar.ctx_window = self.llm.get_context_window()
         self._sync_status_bar()
         self.query_one(Header).update_state(self._header_state)
-        self.query_one(ChatLog).mount_welcome()
-        self._session_start = time.monotonic()
-        self.set_interval(60.0, self._tick_session_elapsed, name="elapsed-tick")
+        # Kick off MCP discovery early so the Header shows real server state
+        # (connected / error) before the first agent turn.  The discovery
+        # threads run in the background; our 3s _resync_mcp_state timer picks
+        # up results as they arrive.  Idempotent: agent_loop's SessionStart
+        # hook also calls start_discovery, but the module-level guard skips
+        # the second call.
+        try:
+            from loom.agent.loop import _active_config
+            from loom.agent.mcp_manager import start_discovery as _mcp_start_discovery
+
+            _mcp_start_discovery(_active_config)
+        except Exception:
+            pass
         self.set_interval(1.0, self._tick_shuttle, name="shuttle-tick")
+        self.set_interval(3.0, self._resync_mcp_state, name="mcp-sync")
         self._detect_git_branch()
         self._check_credentials_on_startup()
+        self._lock_focus_to_composer()
+        # Push the full-screen centered welcome page on top of the empty
+        # layout.  Dismissed when the user types Enter (or ESC to skip).
+        # Skipped when _skip_welcome is set (used by test harness).
+        if not self._skip_welcome:
+            self.push_screen(
+                WelcomeModal(model=self.llm.model),
+                self._on_welcome_dismissed,
+            )
+
+    def _on_welcome_dismissed(self, text: str | None) -> None:
+        """Callback when the WelcomeModal is dismissed.
+
+        If the user typed something and pressed Enter, submit it as the
+        first user message.  ESC or empty text just reveals the empty
+        layout underneath.
+        """
+        if text:
+            asyncio.create_task(self._submit_welcome_text(text))
+
+    async def _submit_welcome_text(self, text: str) -> None:
+        """Submit the welcome page input as the first user message."""
+        composer = self.query_one("#composer", Composer)
+        composer.text = ""
+        # Dispatch a Submitted event so run_agent_turn handles it
+        self.post_message(Composer.Submitted(text))
 
     def on_key(self, event) -> None:
-        pass
+        """Ensure printable keys always reach the Composer (input box)."""
+        if event.is_printable:
+            composer = self.query_one("#composer", Composer)
+            if not composer.has_focus:
+                composer.focus()
+
+    def _lock_focus_to_composer(self) -> None:
+        """Walk all widgets and disable ``can_focus`` except on the Composer.
+
+        Called once at startup so the input box is the only widget that
+        can receive keyboard focus.  Other widgets (ChatLog, Header
+        buttons, tool markers, etc.) declare ``can_focus = True`` to
+        support click-to-focus, but here we disable that to keep the
+        Composer permanently focused.
+        """
+        composer = self.query_one("#composer", Composer)
+        for widget in self.walk_children():
+            if widget is not composer and hasattr(widget, 'can_focus'):
+                widget.can_focus = False
 
     def on_mouse_scroll_up(self, event: MouseScrollUp) -> None:
         if self._forward_scroll_to_chatlog(event, direction=-1):
@@ -349,12 +414,34 @@ class AgentTUIApp(App):
         status_bar.ctx_tokens = self.ctx_tokens
         status_bar.ctx_window = self.llm.get_context_window()
 
-    def _tick_session_elapsed(self) -> None:
+    def _resync_mcp_state(self) -> None:
+        """3Hz poll: refresh MCP server state from mcp_manager into Header.
+
+        MCP discovery is async (background threads start during agent_loop).
+        Servers transition ``error → connected`` as discovery completes and
+        ``connected → error`` on eviction.  We poll because adding a
+        push-based callback hook into the existing mcp_manager event paths
+        (start_discovery, eviction handler in _make_mcp_handler) would be
+        more invasive than the 3s polling cost — MCP state changes at most
+        a few times per session, so the poll is almost always a no-op.
+        """
         try:
-            status_bar = self.query_one(StatusBar)
+            from loom.agent.mcp_manager import get_server_snapshot
+
+            snapshot = get_server_snapshot()
         except Exception:
             return
-        status_bar.elapsed_seconds = int(time.monotonic() - self._session_start)
+        new_mcps: list[MCPServer] = []
+        for s in snapshot:
+            state = cast(Literal["connected", "error"], s["state"])
+            new_mcps.append(MCPServer(name=s["name"], state=state))
+        if new_mcps == self._header_state.mcps:
+            return
+        self._header_state.mcps = new_mcps
+        try:
+            self.query_one(Header).update_state(self._header_state)
+        except Exception:
+            pass
 
     def _tick_shuttle(self) -> None:
         """§2.2.3 primitive 1: 1Hz gear-rack advance, ONLY when state != idle.
@@ -490,8 +577,8 @@ class AgentTUIApp(App):
         yield ChatLog(id="chat-log")
         with Vertical(id="chrome"):
             yield StatusBar(id="status-bar")
+            yield CommandCompleter(id="cmd-completer")
             yield Composer(id="composer")
-        yield CommandCompleter(id="cmd-completer")
 
     def on_header_section_toggle(self, message: Header.SectionToggle) -> None:
         """Per-section toggle: expand / switch / collapse the overlay.
@@ -510,15 +597,17 @@ class AgentTUIApp(App):
             existing = None
             current_section = None
 
+        header = self.query_one(Header)
+
         if existing is not None and current_section == new_section:
             existing.remove()
+            header.active_section = None
             message.stop()
             return
 
         if existing is not None:
             existing.remove()
 
-        header = self.query_one(Header)
         # Per-section ID avoids DuplicateIds when switching (old overlay may
         # still be in DOM pending async removal).
         overlay = HeaderOverlay(
@@ -526,6 +615,7 @@ class AgentTUIApp(App):
             state=header._state,
             id=f"header-overlay-{new_section}",
         )
+        header.active_section = new_section
         self.screen.mount(overlay, before=self.query_one(ChatLog))
         message.stop()
 
@@ -536,6 +626,7 @@ class AgentTUIApp(App):
         """
         try:
             self.query_one(HeaderOverlay).remove()
+            self.query_one(Header).active_section = None
         except Exception:
             pass
 
@@ -551,12 +642,16 @@ class AgentTUIApp(App):
         """
         try:
             self.query_one(HeaderOverlay).remove()
+            self.query_one(Header).active_section = None
         except Exception:
             pass
 
     def on_assistant_turn_start(self, _: AssistantTurnStart) -> None:
-        chat_log = self.query_one(ChatLog)
-        chat_log.show_thinking_spinner()
+        # Per opencode's pattern: don't pre-emptively show a thinking
+        # spinner.  Thinking content only appears when thinking events
+        # actually arrive from the provider (on_thinking_delta).  If the
+        # model doesn't emit thinking, nothing shows — no visual noise.
+        pass
 
     def on_text_delta(self, message: TextDelta) -> None:
         chat_log = self.query_one(ChatLog)
@@ -589,6 +684,7 @@ class AgentTUIApp(App):
         self.tool_call_count = self.tool_call_count + message.tool_calls
         chat_log = self.query_one(ChatLog)
         chat_log._finalize_streaming()
+        chat_log.append_assistant_summary(self.llm.model, message.duration)
         self._refresh_ctx_tokens()
 
     def _refresh_ctx_tokens(self) -> None:
@@ -650,16 +746,16 @@ class AgentTUIApp(App):
         except Exception:
             logger.warning("Failed to scroll to subagent marker {}", message.tool_use_id)
 
-    def on_completion_query(self, event: Composer.CompletionQuery) -> None:
+    def on_composer_completion_query(self, event: Composer.CompletionQuery) -> None:
         self.query_one(CommandCompleter).show_for(event.text)
 
-    def on_completion_move(self, event: Composer.CompletionMove) -> None:
+    def on_composer_completion_move(self, event: Composer.CompletionMove) -> None:
         self.query_one(CommandCompleter).move(event.direction)
 
-    def on_completion_hide(self, event: Composer.CompletionHide) -> None:
+    def on_composer_completion_hide(self, event: Composer.CompletionHide) -> None:
         self.query_one(CommandCompleter).hide()
 
-    def on_completion_tab(self, event: Composer.CompletionTab) -> None:
+    def on_composer_completion_tab(self, event: Composer.CompletionTab) -> None:
         completer = self.query_one(CommandCompleter)
         cmd = completer.current()
         if cmd:
@@ -707,6 +803,7 @@ class AgentTUIApp(App):
             "on_message_start": lambda: (
                 self.post_message(AssistantTurnStart()),
                 self._set_engine_state("thinking"),
+                setattr(self, "_turn_start", time.monotonic()),  # type: ignore[func-returns-value]
             ),
             "on_assistant_message_start": lambda: (
                 self.post_message(AssistantTurnStart()),
@@ -736,7 +833,10 @@ class AgentTUIApp(App):
                 self._sync_chat_engine_state("compacting"),
             ),
             "on_message_end": lambda calls, turns: (
-                self.post_message(AssistantTurnEnd(calls, turns)),
+                self.post_message(AssistantTurnEnd(
+                    calls, turns,
+                    time.monotonic() - getattr(self, "_turn_start", time.monotonic()),
+                )),
                 self._set_engine_state("idle"),
                 self._sync_chat_engine_state("idle"),
             ),
@@ -859,20 +959,16 @@ class AgentTUIApp(App):
         if result is None:
             return  # cancelled
         provider_id = result
-        # After successful auth, switch to this provider and push ModelPicker
+        # After successful auth, log the provider name and push ModelPicker.
+        # Do NOT auto-select a model — let the user pick from the dialog.
         from loom.agent.providers.registry import PROVIDERS
         try:
             inst = PROVIDERS[provider_id](api_key="", base_url=None)
-            if inst.supported_models:
-                default_model = inst.supported_models[0]
-                self.llm.change_model(f"{provider_id}/{default_model}")
-                self._sync_status_bar()
-                chat_log = self.query_one(ChatLog)
-                display = inst.display_name or provider_id
-                chat_log.append_system_note(f"Logged in to **{display}**. Model changed to **{self.llm.model}**")
+            display = inst.display_name or provider_id
+            chat_log = self.query_one(ChatLog)
+            chat_log.append_system_note(f"Logged in to **{display}**")
         except Exception:
             pass
-        # Push ModelPicker so user can pick a model
         from loom.tui.model_picker import ModelPicker
         self.push_screen(ModelPicker(), self._on_model_picked)
 

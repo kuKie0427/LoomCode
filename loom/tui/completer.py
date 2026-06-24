@@ -62,7 +62,6 @@ class CommandCompleter(Static):
 
     DEFAULT_CSS = """
     CommandCompleter {
-        dock: bottom;
         height: auto;
         max-height: 8;
         background: $panel 97%;

@@ -269,6 +269,22 @@ class SystemNote(Static):
     """
 
 
+class AssistantSummary(Static):
+    """Summary bar shown after each assistant turn, modeled after
+    opencode's ``assistant-summary`` component:
+
+      ▣ <model> · <duration>
+    """
+
+    DEFAULT_CSS = """
+    AssistantSummary {
+        height: auto;
+        padding: 0 0 0 2;
+        margin: 0 0 1 0;
+    }
+    """
+
+
 class WelcomeBanner(Static):
     """Static idle-state splash shown while the ChatLog is empty.
 
@@ -666,30 +682,15 @@ class ChatLog(VerticalScroll):
         self._tool_outputs: dict[str, CollapsibleToolOutput] = {}
         self._subagent_markers: dict[str, SubagentMarker] = {}
         self._last_todo_summary: str = ""
+        self._finalized_with_overlay: bool = False
+        self._pending_summary: AssistantSummary | None = None
         self._assistant_label_mounted: bool = False
         self._stream_full_text: str = ""
         self._stream_flush_timer: Any = None
         self._STREAM_FLUSH_INTERVAL = 0.05
-        self._welcome: WelcomeBanner | None = None
         return iter(())
 
-    def mount_welcome(self) -> None:
-        if self._welcome is not None or self.children:
-            return
-        banner = WelcomeBanner()
-        self._welcome = banner
-        asyncio.create_task(self._mount_async(banner))
-
-    def _dismiss_welcome(self) -> None:
-        if self._welcome is not None:
-            asyncio.create_task(self._remove_widget(self._welcome))
-            self._welcome = None
-
-    async def _remove_widget(self, widget: Any) -> None:
-        await widget.remove()
-
     async def append_user_message(self, text: str) -> None:
-        self._dismiss_welcome()
         self._current_body = None
         self._assistant_label_mounted = False
         self._stream_full_text = ""
@@ -775,7 +776,14 @@ class ChatLog(VerticalScroll):
             display = ThinkingDisplay()
             self._thinking_display = display
             if self._thinking_widget is not None:
+                # Pre-existing marker (from show_thinking_spinner) —
+                # marker controls visibility via toggle.
                 self._thinking_widget._display = display
+            else:
+                # No marker: thinking events arrived spontaneously
+                # (opencode pattern — reasoning events drive display).
+                # Make it visible immediately.
+                display.display = True
             asyncio.create_task(self._mount_thinking_display(display))
         else:
             # Markdown.update() returns AwaitComplete; schedule via async wrapper
@@ -833,6 +841,7 @@ class ChatLog(VerticalScroll):
         overlay = self._current_overlay
         self._current_overlay = None
         self._stream_full_text = ""
+        self._finalized_with_overlay = True  # signal for append_assistant_summary
         if self._stream_flush_timer is not None:
             self._stream_flush_timer.stop()
             self._stream_flush_timer = None
@@ -845,6 +854,12 @@ class ChatLog(VerticalScroll):
         await overlay.remove()
         await self.mount(final)
         self._current_body = final
+        # Mount any pending summary below the final message.
+        if self._pending_summary is not None:
+            await self.mount(self._pending_summary)
+            self._pending_summary = None
+            if self._sticky:
+                self.scroll_end()
 
     def add_tool_call_inline(self, name: str, inp: dict, tool_id: str) -> None:
         self._force_flush_stream_buffer()
@@ -921,6 +936,28 @@ class ChatLog(VerticalScroll):
         if self._sticky:
             self.scroll_end()
 
+    def append_assistant_summary(self, model: str, duration: float) -> None:
+        """Append a summary bar below the assistant's final message.
+
+        When the summary is created while a stream finalization is in
+        flight (``_finalized_with_overlay`` is set), it is handed to
+        ``_mount_final_message`` so that it mounts *after* the response
+        text.  Otherwise it is mounted directly.
+        """
+        secs = int(duration)
+        if secs < 60:
+            elapsed = f"{secs}s"
+        else:
+            elapsed = f"{secs // 60}m {secs % 60:02d}s"
+        widget = AssistantSummary(
+            f"[$accent]▣[/]  {model} · [$text-muted]{elapsed}[/]"
+        )
+        if self._finalized_with_overlay:
+            self._finalized_with_overlay = False
+            self._pending_summary = widget
+        else:
+            asyncio.create_task(self._mount_async(widget))
+
     async def clear_content(self) -> None:
         self._force_flush_stream_buffer()
         self._dismiss_thinking_widget()
@@ -935,5 +972,3 @@ class ChatLog(VerticalScroll):
         self._thinking_display = None
         self._thinking_reasoning = ""
         self._assistant_label_mounted = False
-        self._welcome = None
-        self.mount_welcome()

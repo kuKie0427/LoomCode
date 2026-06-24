@@ -1,36 +1,46 @@
-# Session Handoff — PI-2 Complete
+# Session Handoff — Multi-Model P4 Final
 
 **Date**: 2026-06-24
-**Session IDs**: ses_107a01a3cffesYkSSbMPBUzjR1
-**Completed**: Phase PI-2 — `f-init-sh-two-tier-polish`
+**Completed**: Multi-Model P4 final commit + PI-2 review fixes B1-B7
 
-## What was done
+## Multi-Model Providers (all 10 features done)
 
-1. **`loom/detect.py`** — Python `verification_plan()` detects `[tool.ruff]`/`[tool.mypy]` in pyproject.toml via string containment, prepends `ruff check .`/`mypy .` to both quick/full tiers. Generic stack returns 3-step skeleton (tests/lint/build) with TODO placeholders.
+| Feature | Commit | Status |
+|---|---|---|
+| P0 Foundation | 2269ddc | done |
+| P1 Concrete providers | ca9880f | done |
+| P1 review fixes | 36b481a | done |
+| P2 Credential + model + /model | dcbcf92, 832de6e | done |
+| P2 review fixes | 6d7792f | done |
+| P3 Polish | 5c280f3 | done |
+| P4a Connect modal | fbe7847 | done |
+| P4b Auto-prompt | 8f321d4 | done |
+| P4c Status indicators | 052ef25 | done |
+| P4 final + welcome + cleanup | (this commit) | done |
 
-2. **`loom/init_cmd.py`** — `_maybe_inject_pytest_markers()` appends slow/snapshot/integration markers to pyproject.toml when `[tool.pytest.ini_options]` absent. Conservative skip when section exists.
+**P4 final includes:**
+- ConnectProviderModal + AuthInputModal + /connect slash command
+- Startup credential check, model-switch auth redirect
+- ModelPicker ✓ status, StatusBar provider indicator, /status handler
+- WelcomeBanner widget
+- Credential simplified: removed OS keyring layer (2-layer model)
+- Various TUI refinements
 
-3. **`docs/init-sh.md`** — ~120 lines, 7 sections covering two-tier usage, customization, markers, troubleshooting.
+## Init.sh Two-Tier Polish (PI-2 review fixes B1-B7)
 
-4. **`tests/test_init_sh_polish.py`** — 13 tests covering detection, skeleton, injection, docs.
-
-5. **`loom/eval/cases/init_sh_polish.py`** — 3 eval cases (ruff detection, skeleton, marker skip), registered in `__init__.py`.
-
-6. **README** — "Two-tier init.sh" bullet in "What loom does well".
+| Bug | Fix |
+|---|---|
+| B1: Doubled generic init.sh headers | render_block handles multi-line |
+| B2: MODE env var not working | MODE="${1:-${MODE:-full}}" |
+| B3+B4: verify-quick.sh hardcoded Python | Stack-aware dispatch |
+| B5: AGENTS.md no two-tier teaching | Template updated |
+| B6: Eval cases only on plan tuples | New rendered-output eval case |
+| B7: UnicodeDecodeError crash | Caught alongside OSError |
 
 ## Verification
 
-- `uv run pytest tests/test_init_sh_polish.py` → 13/13 ✅
-- `uv run python -m loom.cli eval --filter init-sh-polish --fail-under 100` → 3/3 ✅
-- `uv run python -m loom.cli eval --filter init-sh --fail-under 100` → 16/16 ✅
-- `ruff check .` + `mypy loom/` → clean ✅
-
-## Next Steps (per plan)
-
-- Run `loom init` in a real downstream project to validate
-- Run `loom audit .` to check score doesn't drop
-- The umbrella feature `f-init-sh-two-tier` can be marked done in a separate commit
-
-## Working Tree Note
-
-The working tree has ~50 dirty files from other feature work (multi-model, TUI, review tool, etc.) — these are unrelated to PI-2.
+- ruff: All checks passed
+- mypy: No issues in 171 source files
+- pytest: 1272 passed, 19 pre-existing failures (MCP/thinking/snapshot/context-window)
+- eval --filter init-sh: 17/17 passed
+- eval --filter multi-model: 45/48 passed (3 pre-existing: change-model, deepseek profile, missing context windows)

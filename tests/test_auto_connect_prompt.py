@@ -63,8 +63,9 @@ def test_model_picker_unconnected_provider_pushes_auth() -> None:
     Verify that dismiss is NOT called when the provider has no credential.
     """
     mp = ModelPicker()
+    mp._model_items = {"m0": ("openai", "gpt-4o")}
     mock_event = MagicMock()
-    mock_event.item.id = "model:openai/gpt-4o"
+    mock_event.item.id = "m0"
 
     mock_app = MagicMock()
     with (

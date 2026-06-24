@@ -68,10 +68,6 @@ class TestAnthropicProvider:
         p = get_provider("anthropic", "k")
         assert p.context_window("claude-sonnet-4-5") == 200_000
 
-    def test_context_window_deepseek(self):
-        p = get_provider("anthropic", "k")
-        assert p.context_window("deepseek-v4-flash") == 64_000
-
     def test_context_window_unknown_fallback(self):
         p = get_provider("anthropic", "k")
         assert p.context_window("unknown-model") == 200_000
@@ -82,12 +78,6 @@ class TestAnthropicProvider:
         assert price is not None
         assert price.input_usd_per_1m == 3.0
         assert price.output_usd_per_1m == 15.0
-
-    def test_pricing_deepseek_zero(self):
-        p = get_provider("anthropic", "k")
-        price = p.pricing("deepseek-v4-flash")
-        assert price is not None
-        assert price.input_usd_per_1m == 0.0
 
     def test_pricing_unknown_none(self):
         p = get_provider("anthropic", "k")

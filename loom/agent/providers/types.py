@@ -122,6 +122,7 @@ class ProviderRequest:
     tools: list[ToolDefinition]
     max_tokens: int | None = None
     model: str = ""
+    provider_options: dict | None = None
 
 
 @dataclass(frozen=True)

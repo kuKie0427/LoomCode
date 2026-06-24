@@ -6963,3 +6963,30 @@ Feature: `f-init-sh-two-tier` umbrella + `f-init-sh-two-tier-polish` review fixe
 **Also cleaned up:** `force` dead param removed from `_maybe_inject_pytest_markers`, `.is_file()` vs `.exists()` inconsistency fixed, umbrella feature `f-init-sh-two-tier` created in feature_list.json.
 
 **Verification:** 77/77 pytest (detect + init_cmd + init_sh_two_tier + init_sh_polish), 17/17 eval (init-sh filter), ruff+mypy clean. Smoke: `MODE=quick` → `Harness Initialization (quick)`; generic init.sh no doubled headers; Python+ruff → ruff/mypy in both init.sh and verify-quick.sh; Node → `npm run lint` + `npm test` + `.js` auto-scope; Go → `go test` + `.go` ext.
+
+## Session: Multi-Model P4 Final + Welcome + Cleanup (2026-06-24)
+
+**Features:** `f-multi-model-providers-p4a-connect-modal`, `f-multi-model-providers-p4b-auto-prompt`, `f-multi-model-providers-p4c-status-indicators` (all done)
+
+**Credential simplifying:** Removed OS keyring layer (unreliable cross-platform, high maintenance). CredentialManager now has 2 layers: `LOOM_AUTH_CONTENT` env var → `~/.loom/auth.json` file. The `source` field tracks origin. Keyring imports and fallback logic deleted (~320 lines net removal).
+
+**TUI Connect/Provider/Auth:**
+- `loom/tui/connect_provider.py`: `ConnectProviderModal(ModalScreen)` — lists registered providers, triggers `AuthInputModal` on select, validates credentials, auto-pushes `ModelPicker` on success.
+- `loom/tui/auth_input.py`: Refined `AuthInputModal` — input API key, validates against provider, stores via `CredentialManager.set()`.
+- `loom/tui/welcome.py`: `WelcomeBanner` widget — 3D stencil wordmark for idle chat screen.
+- `loom/tui/app.py`: Enhanced startup with `_check_credentials_on_startup()` — if no credentials, auto-pushes `ConnectProviderModal`. `/status` handler shows provider health. `_on_model_picked` persists model changes.
+- `loom/tui/model_picker.py`: Shows `✓` (accent color) on models whose provider has credentials. Recent models handling refined.
+- `loom/tui/status_bar.py`: `_build_ctx_line_components()` shows current provider + model with `✓`/`✗` status indicator.
+- `loom/tui/header.py`: Provider status in collapsed header.
+- `loom/tui/slash_commands.py`: `/connect` command → `ConnectProviderModal`.
+
+**Other changes:**
+- `loom/agent/context.py`: Compaction refinements (continued from prior sessions).
+- `loom/agent/mcp_manager.py`: MCP tool registration fixes.
+- `loom/agent/tools.py`: Tool registry updates.
+- `loom/tui/completer.py`, `loom/tui/composer.py`: Command palette improvements.
+- `docs/tui-design-language.md`: Design language doc updates.
+- Snapshot updates for header tests.
+
+**Pre-existing test failures** (unchanged from prior sessions): MCP subagent tests (5), thinking display tests (2), header snapshot (1), model picker TUI (2), provider registry context window (1). Total 19 failing, 1272 passing.
+**Eval:** 45/48 multi-model filter pass. 3 pre-existing failures (change-model, deepseek profile, context-window missing providers).

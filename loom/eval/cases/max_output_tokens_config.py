@@ -70,7 +70,7 @@ class ConfigLlmMaxOutputTokensOverridableViaHarnessToml(EvalCase):
             import os
 
             from loom.agent.llm import LLMClient
-            client = LLMClient(model=os.getenv("MODEL", "deepseek-v4-flash"))
+            client = LLMClient(model=os.getenv("MODEL", "deepseek/deepseek-v4-flash"))
             if client.stream_iter.__defaults__ != (None,):
                 return EvalResult(
                     name=self.name, passed=False,

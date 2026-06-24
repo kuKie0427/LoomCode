@@ -67,7 +67,7 @@ def test_show_thinking_spinner_creates_new_display_each_call():
             await pilot.pause(0.1)
             app.post_message(TextDelta("First answer"))
             await pilot.pause(0.1)
-            app.post_message(AssistantTurnEnd(0, 0))
+            app.post_message(AssistantTurnEnd(0, 0, 0.0))
             await pilot.pause(0.1)
 
             first_display = chat_log._thinking_display
@@ -83,7 +83,7 @@ def test_show_thinking_spinner_creates_new_display_each_call():
             await pilot.pause(0.1)
             app.post_message(TextDelta("Second answer"))
             await pilot.pause(0.1)
-            app.post_message(AssistantTurnEnd(0, 0))
+            app.post_message(AssistantTurnEnd(0, 0, 0.0))
             await pilot.pause(0.1)
 
             second_display = chat_log._thinking_display
@@ -126,7 +126,7 @@ def test_thinking_display_widget_count_grows_with_llm_calls():
                 await pilot.pause(0.1)
                 app.post_message(TextDelta(answer))
                 await pilot.pause(0.1)
-                app.post_message(AssistantTurnEnd(0, 0))
+                app.post_message(AssistantTurnEnd(0, 0, 0.0))
                 await pilot.pause(0.1)
 
             await think_and_answer("thinking #1", "answer #1")

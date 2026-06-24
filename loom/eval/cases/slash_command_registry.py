@@ -15,19 +15,19 @@ from loom.eval.runner import EvalCase, EvalResult
 class SlashCommandRegistryCase(EvalCase):
     name = "slash_command_registry"
     description = (
-        "SLASH_COMMANDS has 7 entries, quit aliases resolve,"
+        "SLASH_COMMANDS has 9 entries, quit aliases resolve,"
         " all descriptions non-empty"
     )
 
     def run(self) -> EvalResult:
         from loom.tui.slash_commands import SLASH_COMMANDS, find_command
 
-        if len(SLASH_COMMANDS) != 7:
+        if len(SLASH_COMMANDS) != 9:
             return EvalResult(
                 name=self.name, passed=False,
                 detail=(
                     f"len(SLASH_COMMANDS) == {len(SLASH_COMMANDS)},"
-                    f" expected 7"
+                    f" expected 9"
                 ),
             )
 

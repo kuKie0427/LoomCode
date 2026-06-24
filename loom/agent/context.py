@@ -172,7 +172,7 @@ class Context:
                 )
             else:
                 logger.warning(
-                    f"压缩无可压缩内容（无 head），但 last_input_tokens 仍可能超阈值 — 强制清空计数器"
+                    "压缩无可压缩内容（无 head），但 last_input_tokens 仍可能超阈值 — 强制清空计数器"
                 )
             self._raw_truncate_fallback(messages, tail_messages, last_todo)
         except Exception as e:
@@ -293,9 +293,14 @@ class Context:
         return sum(len(self._extract_text(msg["content"])) for msg in messages) // 4
 
     def current_tokens(self, messages: list[MessageParam]) -> int:
-        new_messages = messages[self.checked_at_index:]
-        delta = self.estimate_tokens(new_messages)
-        return self.last_input_tokens + delta
+        if self.last_input_tokens > 0:
+            # Normal path: running total from last API usage + estimated delta.
+            new_messages = messages[self.checked_at_index:]
+            delta = self.estimate_tokens(new_messages)
+            return self.last_input_tokens + delta
+        # Fallback: provider didn't return usage data (e.g. deepseek)
+        # or no API call has been made yet — estimate from all messages.
+        return self.estimate_tokens(messages)
 
     def should_compact(self, messages: list[MessageParam], context_window: int, model: str | None = None) -> bool:
         cheap = self.current_tokens(messages)

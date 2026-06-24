@@ -101,12 +101,10 @@ def test_auth_input_modal_instantiation() -> None:
 
 
 def test_auth_input_modal_saves_credential() -> None:
-    """When Save is pressed with a valid API key, credentials.set() is called
+    """When Enter is pressed with a valid API key, credentials.set() is called
     and dismiss() with provider_id."""
     aim = AuthInputModal("anthropic")
 
-    # app is a Textual property backed by active_app ContextVar;
-    # patch the ContextVar so self.app resolves without error.
     mock_app = MagicMock()
     with patch("textual.message_pump.active_app") as mock_ctx:
         mock_ctx.get.return_value = mock_app
@@ -115,17 +113,8 @@ def test_auth_input_modal_saves_credential() -> None:
             with patch.object(aim, "query_one") as mock_query:
                 key_input = MagicMock()
                 key_input.value = "sk-valid-key"
-                url_input = MagicMock()
-                url_input.value = ""
 
-                def query_side_effect(id_str: str, widget_type: type | None = None) -> MagicMock:
-                    if id_str == "#auth-key-input":
-                        return key_input
-                    elif id_str == "#auth-url-input":
-                        return url_input
-                    return MagicMock()
-
-                mock_query.side_effect = query_side_effect
+                mock_query.return_value = key_input
 
                 with patch.object(aim, "dismiss") as mock_dismiss:
                     aim._do_save()
@@ -149,17 +138,8 @@ def test_auth_input_modal_requires_api_key() -> None:
         with patch.object(aim, "query_one") as mock_query:
             key_input = MagicMock()
             key_input.value = ""
-            url_input = MagicMock()
-            url_input.value = ""
 
-            def query_side_effect(id_str: str, widget_type: type | None = None) -> MagicMock:
-                if id_str == "#auth-key-input":
-                    return key_input
-                elif id_str == "#auth-url-input":
-                    return url_input
-                return MagicMock()
-
-            mock_query.side_effect = query_side_effect
+            mock_query.return_value = key_input
 
             with patch.object(aim, "dismiss") as mock_dismiss:
                 aim._do_save()
@@ -208,14 +188,3 @@ def test_app_has_connect_handler() -> None:
     assert hasattr(app_module.AgentTUIApp, "_on_connect_done")
     assert hasattr(app_module.AgentTUIApp, "_on_connect_auth_done")
 
-
-# ── Chat log hint test ─────────────────────────────────────────────────────
-
-
-def test_chat_log_includes_connect() -> None:
-    """The WelcomeBanner command hint includes /connect."""
-    from loom.tui.chat_log import WelcomeBanner
-
-    banner = WelcomeBanner()
-    body = banner.render()
-    assert "/connect" in str(body)

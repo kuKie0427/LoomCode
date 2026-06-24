@@ -77,6 +77,16 @@ class Composer(TextArea):
                 self.post_message(self.CompletionHide())
                 return
         await super()._on_key(event)
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        """Text changed — show/hide the completion popup.
+
+        Uses ``TextArea.Changed`` (instead of reading ``self.text``
+        inline in ``_on_key``) because ``TextArea._on_key`` does not
+        update ``self.text`` synchronously for non-printable keys such
+        as Backspace.  ``Changed`` always fires *after* the edit has
+        been applied, so ``self.text`` is guaranteed fresh.
+        """
         if self.text.startswith("/") and " " not in self.text:
             self.post_message(self.CompletionQuery(self.text))
         else:

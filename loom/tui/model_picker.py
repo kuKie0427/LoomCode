@@ -1,18 +1,37 @@
-"""Model picker modal for the loom TUI."""
+"""Model picker modal for the loom TUI.
+
+Layout (matching opencode's dialog-model design):
+
+  ┌─ Select a model ─────────────────────┐
+  │  🔍 Filter models…                    │
+  │                                       │
+  │  ── Recent ──                         │
+  │    anthropic/claude-sonnet-4-5        │
+  │                                       │
+  │  ● Provider Name  (✓ connected)       │  ← section header
+  │    model-name                         │  ← model entry
+  │    model-name                         │
+  │  ● Another Provider                   │  ← section header
+  │    model-name                         │
+  │                                       │
+  │  [c] Connect a new provider           │
+  └───────────────────────────────────────┘
+"""
 
 from __future__ import annotations
 
+from textual import events
 from textual.app import ComposeResult
-from textual.containers import Container, Vertical
+from textual.containers import Container
 from textual.screen import ModalScreen
-from textual.widgets import Label, ListItem, ListView, Static
+from textual.widgets import Input, Label, ListItem, ListView, Static
 
 from loom.agent.credential import credentials
 from loom.agent.model_state import ModelRef
 
 
 class ModelPicker(ModalScreen[tuple[str, str]]):
-    """Modal screen showing a list of providers and their models.
+    """Modal screen showing providers grouped by section with models underneath.
 
     Returns (provider_id, model_id) via dismiss() on Enter.
     ESC dismisses (returns None) — user cancelled.
@@ -38,6 +57,9 @@ class ModelPicker(ModalScreen[tuple[str, str]]):
         text-style: bold;
         padding: 0 0 1 0;
     }
+    #model-picker-input {
+        margin: 0 0 1 0;
+    }
     ListView {
         height: 1fr;
     }
@@ -45,9 +67,17 @@ class ModelPicker(ModalScreen[tuple[str, str]]):
         padding: 0 1;
     }
     .section-header {
-        text-style: bold underline;
         padding: 1 0 0 0;
         color: $accent;
+    }
+    .section-header Label {
+        text-style: bold underline;
+    }
+    .section-header.connected {
+        color: $text;
+    }
+    .model-entry {
+        padding: 0 0 0 2;
     }
     #connect-footer {
         padding: 1 1 0 1;
@@ -60,67 +90,145 @@ class ModelPicker(ModalScreen[tuple[str, str]]):
         self._recent = recent or []
         # Maps Textual-safe widget IDs to (provider_id, model_id) tuples.
         self._model_items: dict[str, tuple[str, str]] = {}
+        # (label_text, item_id_or_None, classes_str) tuples — built once,
+        # used to create fresh ListItems on each filter.
+        self._rows: list[tuple[str, str | None, str]] = []
 
     def compose(self) -> ComposeResult:
         with Container(id="model-picker-dialog"):
             yield Static("Select a model", id="model-picker-title")
-            with Vertical():
-                items: list[ListItem] = []
-                if self._recent:
-                    items.append(
-                        ListItem(Label("── Recent ──", classes="section-header"))
-                    )
-                    for ref in self._recent:
-                        safe_id = f"recent-{len(items)}"
-                        self._model_items[safe_id] = (ref.provider_id, ref.model_id)
-                        items.append(
-                            ListItem(
-                                Label(f"  {ref}"),
-                                id=safe_id,
-                            )
-                        )
-                items.append(
-                    ListItem(Label("── All Providers ──", classes="section-header"))
-                )
-                from loom.agent.providers import PROVIDERS  # lazy import
+            yield Input(id="model-picker-input", placeholder="Filter models\u2026")
+            yield ListView(id="model-picker-list")
 
-                for pid in sorted(PROVIDERS):
-                    try:
-                        inst = PROVIDERS[pid](api_key="", base_url=None)
-                        has_creds = credentials.get(pid) is not None
-                        for model in inst.supported_models:
-                            cw = inst.context_window(model)
-                            status_icon = " [$accent]✓[/]" if has_creds else ""
-                            safe_id = f"model-{len(items)}"
-                            self._model_items[safe_id] = (pid, model)
-                            items.append(
-                                ListItem(
-                                    Label(
-                                        f"  {pid}/{model} ({cw:,} ctx){status_icon}"
-                                    ),
-                                    id=safe_id,
-                                )
-                            )
-                    except Exception:
-                        items.append(ListItem(Label(f"  {pid}/?")))
-                yield ListView(*items)
-                yield Static("[dim]Press [b]c[/b] to connect a new provider[/]", id="connect-footer")
+    async def on_mount(self) -> None:
+        """Focus the model list by default. Typing switches to the filter."""
+        list_view = self.query_one("#model-picker-list", ListView)
+        self._build_rows()
+        await self._refresh_list("")
+        # Start on the first non-header item (headers are disabled).
+        first_enabled = next(
+            (i for i, c in enumerate(list_view.children) if not c.disabled),
+            0,
+        )
+        list_view.index = first_enabled
+        list_view.focus()
+
+    def on_key(self, event: events.Key) -> None:
+        """Printable keys auto-redirect to the filter Input.
+
+        Initial focus is on the model list (for ↑↓ navigation).  When the
+        user starts typing, this handler redirects the first printable key
+        to the ``Input`` widget, which then stays focused for subsequent
+        characters.
+        """
+        input_w = self.query_one("#model-picker-input", Input)
+        if event.is_printable and not input_w.has_focus:
+            event.stop()
+            input_w.focus()
+            if event.character is not None:
+                input_w.value = event.character
+
+    async def on_input_changed(self, event: Input.Changed) -> None:
+        await self._refresh_list(event.value)
+
+    def _build_rows(self) -> None:
+        from loom.agent.providers import PROVIDERS  # lazy import
+
+        self._rows = []
+        seq = 0
+
+        # Recent section (top)
+        if self._recent:
+            self._rows.append(("── Recent ──", None, "section-header"))
+            for ref in self._recent:
+                safe_id = f"r{seq}"
+                seq += 1
+                self._model_items[safe_id] = (ref.provider_id, ref.model_id)
+                display = f"{ref.provider_id}/{ref.model_id}"
+                self._rows.append((f"  {display}", safe_id, "model-entry"))
+
+        # Provider sections — only show providers with credentials connected.
+        for pid in sorted(PROVIDERS):
+            if credentials.get(pid) is None:
+                continue
+            try:
+                inst = PROVIDERS[pid](api_key="", base_url=None)
+                display_name = inst.display_name or pid
+
+                # Get models from models.dev catalog if available,
+                # falling back to the provider's hardcoded list.
+                from loom.agent.models_dev import list_models_sorted
+
+                dev_models = list_models_sorted(pid)
+                if dev_models is not None:
+                    model_ids_with_names = dev_models
+                else:
+                    model_ids_with_names = [(m, m) for m in inst.supported_models]
+
+                if not model_ids_with_names:
+                    continue
+
+                # Provider section header
+                cls = "section-header connected"
+                self._rows.append((f"● {display_name}", None, cls))
+
+                # Models under this provider (sorted by family → release_date)
+                for model, display_name in model_ids_with_names:
+                    safe_id = f"m{seq}"
+                    seq += 1
+                    self._model_items[safe_id] = (pid, model)
+                    self._rows.append((f"  {display_name}", safe_id, "model-entry"))
+            except Exception:
+                self._rows.append((f"  {pid}/?", None, ""))
+
+    async def _refresh_list(self, query: str) -> None:
+        """Rebuild the ListView with only items matching the query."""
+        list_view = self.query_one("#model-picker-list", ListView)
+        await list_view.clear()
+
+        query_lower = query.lower()
+        items: list[ListItem] = []
+        pending_header: tuple[str, str | None, str] | None = None
+
+        for label_text, item_id, classes in self._rows:
+            is_header = item_id is None  # section headers have no id
+
+            if is_header:
+                # Save header; show it only if any child matches below
+                pending_header = (label_text, item_id, classes)
+                continue
+
+            if query_lower and query_lower not in label_text.lower():
+                continue
+
+            # First matching child → emit the pending header
+            if pending_header is not None:
+                ht, hi, hc = pending_header
+                items.append(self._make_item(ht, hi, hc))
+                pending_header = None
+
+            items.append(self._make_item(label_text, item_id, classes))
+
+        for item in items:
+            await list_view.append(item)
+
+        if list_view.children:
+            list_view.index = 0
+
+    def _make_item(self, text: str, item_id: str | None, classes: str) -> ListItem:
+        # Section headers (id=None) should not be focusable via arrow keys.
+        item = ListItem(id=item_id, classes=classes, disabled=item_id is None)
+        item.compose_add_child(Label(text))
+        return item
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if not event.item.id:
             return
-        # Look up model info via _model_items dict (set by compose).
         pid_mid = self._model_items.get(event.item.id)
-        if pid_mid is not None:
-            pid, mid = pid_mid
-        elif event.item.id.startswith("model:"):
-            model_str = event.item.id[len("model:"):]
-            pid, _, mid = model_str.partition("/")
-        elif event.item.id.startswith("recent:"):
-            model_str = event.item.id[len("recent:"):]
-            pid, _, mid = model_str.partition("/")
-        else:
-            return
+        if pid_mid is None:
+            return  # section header — not selectable
+
+        pid, mid = pid_mid
 
         from loom.agent.credential import credentials  # lazy import
 

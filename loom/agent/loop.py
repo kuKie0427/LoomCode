@@ -221,7 +221,7 @@ def _on_session_start_mcp(event, *args):
         logger.warning("MCP discovery startup raised", exc_info=True)
 hooks.register_hook("SessionStart", _on_session_start_mcp)
 
-llm_client = LLMClient(model=os.getenv("MODEL", "deepseek-v4-flash"))
+llm_client = LLMClient(model=os.getenv("MODEL") or "deepseek/deepseek-v4-flash")
 
 
 def _run_tool_block(block, hooks) -> dict:

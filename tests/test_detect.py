@@ -121,8 +121,11 @@ class TestVerificationCommands:
     def test_generic_returns_placeholder(self, tmp_path: Path) -> None:
         info = detect_project(tmp_path)
         cmds = verification_commands(info)
-        assert len(cmds) == 1
-        assert "No package manifest detected" in cmds[0]
+        assert len(cmds) == 3
+        assert "STEP 1: tests" in cmds[0]
+        assert "STEP 2: lint" in cmds[1]
+        assert "STEP 3: build" in cmds[2]
+        assert "# TODO:" in cmds[0]
 
     def test_node_uses_detected_pm(self, tmp_path: Path) -> None:
         (tmp_path / "package.json").write_text(

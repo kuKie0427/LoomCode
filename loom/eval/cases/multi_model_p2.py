@@ -31,8 +31,6 @@ class MultiModelCredentialManagerWrites0600(EvalCase):
 
     def run(self) -> EvalResult:
         with tempfile.TemporaryDirectory() as tmp:
-            from unittest.mock import patch
-
             from loom.agent.credential import CredentialInfo, CredentialManager
 
             auth_path = Path(tmp) / "auth.json"
@@ -40,14 +38,13 @@ class MultiModelCredentialManagerWrites0600(EvalCase):
             info = CredentialInfo(
                 provider_id="evaltest", kind="api", api_key="sk-eval"
             )
-            with patch.object(m, "_try_keyring_set"):
-                m.set("evaltest", info)
+            m.set("evaltest", info)
             mode = stat.S_IMODE(auth_path.stat().st_mode)
             return _check(self.name, mode == 0o600, f"mode=0o{mode:o}")
 
 
-class MultiModelCredentialManagerPriorityEnvOverFile(EvalCase):
-    name = "multi-model-p2-credential-priority-env-over-file"
+class MultiModelCredentialManagerLoomAuthContentOverridesFile(EvalCase):
+    name = "multi-model-p2-credential-loom-auth-content-overrides-file"
 
     def run(self) -> EvalResult:
         with tempfile.TemporaryDirectory() as tmp:
@@ -65,15 +62,17 @@ class MultiModelCredentialManagerPriorityEnvOverFile(EvalCase):
                     }
                 )
             )
-            old = os.environ.get("ANTHROPIC_API_KEY")
-            os.environ["ANTHROPIC_API_KEY"] = "env-key"
+            old = os.environ.get("LOOM_AUTH_CONTENT")
+            os.environ["LOOM_AUTH_CONTENT"] = json.dumps(
+                {"anthropic": {"api_key": "lac-key"}}
+            )
             try:
-                m = CredentialManager(auth_path=auth_path, use_keyring=False)
+                m = CredentialManager(auth_path=auth_path)
                 cred = m.get("anthropic")
                 ok = (
                     cred is not None
-                    and cred.api_key == "env-key"
-                    and cred.source == "env"
+                    and cred.api_key == "lac-key"
+                    and cred.source == "loom_auth_content"
                 )
                 return _check(
                     self.name,
@@ -82,13 +81,13 @@ class MultiModelCredentialManagerPriorityEnvOverFile(EvalCase):
                 )
             finally:
                 if old is not None:
-                    os.environ["ANTHROPIC_API_KEY"] = old
+                    os.environ["LOOM_AUTH_CONTENT"] = old
                 else:
-                    del os.environ["ANTHROPIC_API_KEY"]
+                    del os.environ["LOOM_AUTH_CONTENT"]
 
 
-class MultiModelCredentialManagerLoomAuthContentOverride(EvalCase):
-    name = "multi-model-p2-credential-loom-auth-content-override"
+class MultiModelCredentialManagerLoomAuthContentRead(EvalCase):
+    name = "multi-model-p2-credential-loom-auth-content-read"
 
     def run(self) -> EvalResult:
         with tempfile.TemporaryDirectory() as tmp:
@@ -96,14 +95,12 @@ class MultiModelCredentialManagerLoomAuthContentOverride(EvalCase):
 
             auth_path = Path(tmp) / "auth.json"
             old = os.environ.get("LOOM_AUTH_CONTENT")
-            os.environ["OPENAI_API_KEY"] = "env-key"
             os.environ["LOOM_AUTH_CONTENT"] = json.dumps(
                 {"openai": {"api_key": "lac-key"}}
             )
             try:
-                m = CredentialManager(auth_path=auth_path, use_keyring=False)
+                m = CredentialManager(auth_path=auth_path)
                 cred = m.get("openai")
-                # LOOM_AUTH_CONTENT beats env var per priority chain
                 ok = (
                     cred is not None
                     and cred.api_key == "lac-key"
@@ -116,7 +113,6 @@ class MultiModelCredentialManagerLoomAuthContentOverride(EvalCase):
                 )
             finally:
                 del os.environ["LOOM_AUTH_CONTENT"]
-                del os.environ["OPENAI_API_KEY"]
                 if old is not None:
                     os.environ["LOOM_AUTH_CONTENT"] = old
 
@@ -126,7 +122,6 @@ class MultiModelCredentialManagerAtomicWrite(EvalCase):
 
     def run(self) -> EvalResult:
         with tempfile.TemporaryDirectory() as tmp:
-            from unittest.mock import patch
 
             from loom.agent.credential import CredentialInfo, CredentialManager
 
@@ -135,8 +130,7 @@ class MultiModelCredentialManagerAtomicWrite(EvalCase):
             info = CredentialInfo(
                 provider_id="test", kind="api", api_key="sk-key"
             )
-            with patch.object(m, "_try_keyring_set"):
-                m.set("test", info)
+            m.set("test", info)
             # Write must succeed (atomic = file exists with correct content)
             ok = auth_path.exists()
             if ok:

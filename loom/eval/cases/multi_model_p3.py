@@ -132,23 +132,24 @@ class MultiModelSubagentInheritsAuthContent(EvalCase):
     name = "multi-model-p3-subagent-inherits-auth-content"
 
     def run(self) -> EvalResult:
-        old_key = os.environ.get("ANTHROPIC_API_KEY")
-        os.environ["ANTHROPIC_API_KEY"] = "sk-test-subagent-inherit"
+        old_lac = os.environ.get("LOOM_AUTH_CONTENT")
+        os.environ["LOOM_AUTH_CONTENT"] = json.dumps(
+            {"anthropic": {"api_key": "sk-test-subagent-inherit"}}
+        )
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 from loom.agent.credential import CredentialManager
 
                 m = CredentialManager(
                     auth_path=Path(tmp) / "auth.json",
-                    use_keyring=False,
                 )
-                # Verify env var is picked up by credential manager
+                # Verify LOOM_AUTH_CONTENT is picked up by credential manager
                 cred = m.get("anthropic")
                 if cred is None or cred.api_key != "sk-test-subagent-inherit":
                     return _check(
                         self.name,
                         False,
-                        f"cred from env={cred}",
+                        f"cred from lac={cred}",
                     )
 
                 # Verify all() returns our credential
@@ -180,7 +181,6 @@ class MultiModelSubagentInheritsAuthContent(EvalCase):
 
                 # Test the propagation path directly: call the same logic
                 # that spawn_subagent uses to set LOOM_AUTH_CONTENT
-                old_lac = os.environ.get("LOOM_AUTH_CONTENT")
                 try:
                     import dataclasses
 
@@ -220,10 +220,10 @@ class MultiModelSubagentInheritsAuthContent(EvalCase):
                     else:
                         os.environ.pop("LOOM_AUTH_CONTENT", None)
         finally:
-            if old_key is not None:
-                os.environ["ANTHROPIC_API_KEY"] = old_key
+            if old_lac is not None:
+                os.environ["LOOM_AUTH_CONTENT"] = old_lac
             else:
-                os.environ.pop("ANTHROPIC_API_KEY", None)
+                os.environ.pop("LOOM_AUTH_CONTENT", None)
 
 
 # ---------------------------------------------------------------------------

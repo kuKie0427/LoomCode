@@ -1,10 +1,7 @@
 """Anthropic provider. Port of the existing loom/agent/llm.py stream logic,
 restructured to satisfy the LLMProvider ABC.
 
-Backward compatibility:
-  - claude-opus-4-1, claude-sonnet-4-5, claude-haiku-3-5, claude-haiku-4-5
-  - deepseek-v4-flash, deepseek-v4-pro (served via Anthropic-compatible API
-    at https://api.deepseek.com/anthropic — preserved as legacy defaults)
+Supported models: claude-opus-4-1, claude-sonnet-4-5, claude-haiku-3-5, claude-haiku-4-5.
 """
 
 from __future__ import annotations
@@ -110,8 +107,6 @@ class AnthropicProvider(LLMProvider):
         "claude-opus-4-1",
         "claude-haiku-3-5",
         "claude-haiku-4-5",
-        "deepseek-v4-flash",
-        "deepseek-v4-pro",
     ]
 
     _CONTEXT_WINDOWS: ClassVar[dict[str, int]] = {
@@ -119,8 +114,6 @@ class AnthropicProvider(LLMProvider):
         "claude-opus-4-1": 200_000,
         "claude-haiku-3-5": 200_000,
         "claude-haiku-4-5": 200_000,
-        "deepseek-v4-flash": 64_000,
-        "deepseek-v4-pro": 64_000,
     }
 
     _PRICING: ClassVar[dict[str, PricingInfo]] = {
@@ -128,8 +121,6 @@ class AnthropicProvider(LLMProvider):
         "claude-sonnet-4-5": PricingInfo(3.0, 15.0, 0.30, 3.75),
         "claude-haiku-3-5": PricingInfo(0.80, 4.0, 0.08, 1.0),
         "claude-haiku-4-5": PricingInfo(0.80, 4.0, 0.08, 1.0),
-        "deepseek-v4-flash": PricingInfo(0.0, 0.0, 0.0, 0.0),
-        "deepseek-v4-pro": PricingInfo(0.0, 0.0, 0.0, 0.0),
     }
 
     def __init__(self, api_key: str = "", base_url: str | None = None) -> None:
@@ -138,9 +129,8 @@ class AnthropicProvider(LLMProvider):
         effective_url = self.base_url or os.getenv(
             "ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic"
         )
-        # Built-in reasoning models (e.g. deepseek-v4-* via the Anthropic-
-        # compatible endpoint) can think silently for 60-90s before emitting
-        # the first stream event. The previous 60s default timed out mid-
+        # Some models can think silently for 60-90s before emitting the
+        # first stream event. The previous 60s default timed out mid-
         # think and the resulting APITimeoutError was NOT in the except list,
         # which crashed _consume() and yielded zero events — TUI showed a
         # frozen "thinking" spinner with no content forever. 600s is generous
@@ -170,6 +160,11 @@ class AnthropicProvider(LLMProvider):
         self._cancel_event.set()
 
     def context_window(self, model: str) -> int:
+        from loom.agent.models_dev import lookup_context_window
+
+        ctx = lookup_context_window("anthropic", model)
+        if ctx is not None:
+            return ctx
         return self._CONTEXT_WINDOWS.get(model, DEFAULT_WINDOW)
 
     def pricing(self, model: str) -> PricingInfo | None:

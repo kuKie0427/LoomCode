@@ -365,7 +365,9 @@ The original 2026-06-19 spec assumed a single overlay showing all 3 sections sim
 
 - **Initial implementation** (2026-06-19, commit `61cda27`): Header as a `Static` line with a single click-to-toggle overlay showing all 3 sections.
 - **Per-section redesign** (2026-06-20, commit `0fc00b0`): Header as a `Horizontal` container with 3 `HeaderSectionButton` children; each section has its own per-section overlay (mutual exclusion); ESC + click-outside + click-same-section collapse mechanisms.
-- **Mock data only** — `HeaderState` / `MCPServer` / `TodoItem` / `Subagent` are populated by `DEFAULT_MOCK_STATE` in `on_mount`. Real backend wiring of MCP server state, todo list results, and subagent count is **deferred** to a follow-up feature (the agent_loop must expose these signals to the TUI).
+- **MCP servers: real** — read from ``mcp_manager.get_server_snapshot()`` at ``App.__init__`` time, then polled every 3s by ``App._resync_mcp_state()``. Each configured server shows as ``connected`` (handshake succeeded, present in ``mcp_manager._ACTIVE_SERVERS``) or ``error`` (configured in ``harness.toml`` but not yet connected — handshake failed, evicted, or still being discovered). Servers with zero configured servers (no ``[mcp.servers.*]`` entries) are hidden per the zero-count rule (§4.3.1). Discovery starts early from TUI ``on_mount`` so the initial state is accurate; ``agent_loop``'s ``SessionStart`` hook is idempotent via ``_DISCOVERY_STARTED`` guard. Native loom tools (bash, read_file, etc.) are **not** listed — the MCP section is for user-configured MCP servers only.
+- **Todos: real** — driven by the agent's ``todo_write`` tool through ``App.on_todo_update`` (agent → ``TodoUpdate`` message → ``_header_state.todos``). Agent statuses ``in_progress``/``completed`` map to ``active``/``done`` in the Header's ``TodoItem`` schema.
+- **Subagents: real** — driven by the agent's ``task`` tool through ``App.on_subagent_start`` / ``App.on_subagent_end`` messages. Subagent lifecycle state (``running``/``done``/``error``) updated in ``_header_state.subagents`` and reflected in the Header line and overlay. Clicking a subagent row in the overlay dismisses it and scrolls the ChatLog to the corresponding ``ToolCallMarker``.
 - **Test coverage**: 35 pytest tests in `tests/test_tui_header.py` + 14 eval cases in `loom/eval/cases/tui_header.py`. Snapshot baselines in `tests/__snapshots__/test_tui_header/`.
 
 ---
@@ -496,17 +498,27 @@ Each item records the decision and its rationale. As of 2026-06-20 all items are
 | Header | 3 `width: 1fr` buttons split evenly; short labels (`● MCP:3/3`) fit down to 60 cols. No break. |
 | ChatLog | `1fr`, markdown soft-wraps; `overflow-x: hidden`. No horizontal break at any width. |
 | Composer | `TextArea`, soft-wraps. No break. |
-| StatusBar | **The only bottleneck.** Fixed-format, non-wrapping. Right-clips when content exceeds width. |
+| StatusBar | **Adaptive — prunes low-priority components as width shrinks.** See Table 2 below. |
 
-The StatusBar was the only region that broke. Its content length was:
+The StatusBar is the only region that needs width-dependent pruning. Its seven compact levels (implemented in ``loom/tui/status_bar.py``) progressively drop/compact components as available width decreases:
 
-- 85 cols at session start (0 turns/tools)
-- 93 cols mid-session (multi-digit turns/tools) — **re-verified by f-statusbar-revamp-sp2** (80 cols empty / 87 idle mid-session / 93 worst-case active)
-- **119 cols** once the chat log overflowed (the extra `| scroll with mouse wheel` hint)
+| Level | Min width | Model | Branch | Stats | Ctx rail | Ctx numbers | Badge |
+|-------|-----------|-------|--------|-------|----------|-------------|-------|
+| 0 full | 88 | full | ✓ | Nt·Mtl | gear‑rack | NNk/NNk (N%) | ● idle |
+| 1 nobranch | 78 | full | — | Nt·Mtl | gear‑rack | NNk/NNk (N%) | ● idle |
+| 2 cmodel | 68 | short | — | Nt·Mtl | gear‑rack | NNk/NNk (N%) | ● idle |
+| 3 cstats | 55 | short | — | Nt | gear‑rack | NNk/NNk (N%) | ● idle |
+| 4 norail | 42 | short | — | Nt | — | NNk/NNk (N%) | ● idle |
+| 5 pct | 32 | short | — | Nt | — | (N%) | ● idle |
+| 6 badge | any | — | — | — | — | — | ● idle |
 
-**Fix applied (`f-tui-statusbar-drop-scroll-hint`):** dropped the scroll hint. Mouse-wheel scrolling is the default, intuitive behavior; the hint mostly added width. Max StatusBar width is now **93 cols** (was 119). Below 93 the bar right-clips (loses the ctx token count first, then the percentage) — non-fatal, the chat log + composer stay fully usable.
+**Pruning order (least → most important):** git branch → model name (shortened) → tool count → gear‑rack rail → ctx fraction → ctx numbers → badge.
 
-**Status:** Closed. No responsive/multi-tier StatusBar planned unless a < 80-col use case emerges.
+**At 93 cols (the §7 budget):** all 7 components fit at level 0 with margin — the StatusBar no longer clips before the engine badge.
+
+**Previously:** the StatusBar clipped on the right (losing the engine badge first — the worst possible choice for a long-loop surface). Now it drops the model/branch from the left, preserving the engine badge and context percentage at all widths.
+
+**Status:** Closed (replaces the pre-adaptive right-clip decision).
 
 ### Header default-on vs default-off
 
@@ -783,3 +795,5 @@ If a future change wants a new decoration, it must pick from this envelope (pale
 
 - **2026-06-21** — **§2 paradigm shift implemented in code: 5 motion primitives wired + idle freeze enforced (P2a + P2b).** §2.2.3 motion contract locked: 5 primitives (shuttle pass on ctx rail, ToolCallMarker `⊙⊚◎` cycle, ThinkingMarker 5fps spinner, HeaderSectionButton 1Hz pulse, Composer cursor blink) each have a defined rate + amplitude + idle-freeze invariant. Idle (= `engine_state == "idle"`) freezes ALL motion: shuttle stays at phase 0, tool markers stay at base glyph `⊙`, section buttons stay at opacity 1.0, thinking marker doesn't tick. P2a: `ToolCallMarker` gets `_RUNNING_GLYPHS = ("⊙", "⊚", "◎")` + `engine_state: reactive[str]` + `_start_cycle_timer`/`_stop_cycle_timer` (1Hz `set_interval(1.0, name="tool-cycle")`); `ChatLog.engine_state` reactive fans out to all live `_tool_markers.values()`; `App._sync_chat_engine_state(state)` wired into 4 callbacks (`on_tool_use`, `on_tool_result`, `on_compact`, `on_message_end`). P2b: `HeaderSectionButton` gets `pulse_phase: reactive[int]` + `update_pulse(has_count)` toggling a Python `set_interval(0.5, name="header-pulse")` that flips `self.styles.opacity` between 1.0 and 0.5 (1Hz square wave). **DEVIATION (accepted):** original P2b plan specified CSS `animation: pulse 1s steps(2, end) infinite` + `@keyframes pulse`. Textual CSS parser v8.2.7 does NOT support `@keyframes` (TokenError on `@`) or `animation: ... steps(...) ...` (TokenError on `(`). Python `set_interval(0.5)` is the Textual-native equivalent — same 1Hz square wave at 50% amplitude, identical observable behavior. Pattern mirrors `ToolCallMarker._cycle_timer` from P2a. **tick-above-shuttle deferred to P3** (independent follow-up). Verified: `./init.sh` green (491 pytest, 0 ruff, 0 mypy), eval 243/243 + 6 new motion_primitives cases = 249/249.
 - **2026-06-21** — **§9.3 StatusBar char-count backfilled + §7 budget re-verified (SP2 close).** Measured rendered widths at default model `deepseek-v4-flash`: 80 cols empty state, 87 cols idle mid-session, 93 cols worst-case active (`compacting` badge + 99+ turns). All scenarios fit §7 93-col budget. Achieved via 3 cosmetic trims (leading/trailing space in `prefix`, 3-space gap before elapsed → 1-space). Total net -14 cols vs pre-revamp. Gear-rack WIDTH=14 + 6-state badge (longest: `◌ compacting` = 12 chars) verified within budget. Empty-state placeholder (`待 SP2 实测填入`) replaced with measured values. Tests: `uv run pytest tests/test_ctx_rail.py tests/test_status_bar.py -q` → 32/32 passed. Static: ruff/mypy clean. 7 TUI snapshot baselines re-recorded (expected diffs: removed `loom` prefix, removed `esc ^l` hint, replaced shuttle `●─────` with gear `❋┄┄┄┄┄┄┄┄┄┄┄┄┄`, deleted ShuttleTickOverlay row → `#chrome` 3→2 rows; text content matches §9.3 contract). Eval: `uv run python -m loom.cli eval --fail-under 100` → 252/253 (1 pre-existing `cli-help-is-fast-no-agent-import` flake unrelated to SP2; all 5 gear cases PASS). Single source of change: `loom/tui/status_bar.py` (`prefix` leading/trailing space trimmed, render gap 3→1).
+- **2026-06-24** — **§4.3.4 "Mock data only" replaced with real backend wiring description.** The MCP section now reads from ``mcp_manager.get_server_snapshot()`` (real ``_ACTIVE_SERVERS`` state), not ``DEFAULT_MOCK_STATE``. Todos driven by agent ``todo_write`` via ``TodoUpdate`` messages. Subagents driven by ``task`` tool via ``SubagentStart``/``SubagentEnd`` messages. Discovery starts early from TUI ``on_mount`` (idempotent guard prevents ``agent_loop``'s ``SessionStart`` hook from duplicating threads). ``loom/tui/header.py`` module docstring data-flow paragraph updated to match.
+- **2026-06-24** — **§7 StatusBar adaptive narrowing implemented.** Replaced the old right-clip behavior with 7-level adaptive compact rendering. When terminal width is narrow, the StatusBar drops/compacts low-priority components from the left (git branch → model name → tool count → gear-rack rail → ctx fraction), preserving the engine badge and ctx percentage at all widths. Levels defined in ``_COMPACT_LEVELS`` table in ``loom/tui/status_bar.py``. ``_build_ctx_line_components`` merged into ``_render_line`` + ``_build_line``. Added ``_strip_markup`` / ``_visible_width`` for width measurement, ``_abbrev_model`` for model name shortening. §7 narrow-terminal decision updated with compact level table; old "right-clip" decision marked as superseded. Verified: ``uv run ruff check .`` → clean; ``uv run mypy loom/tui/status_bar.py`` → clean; ``uv run pytest tests/test_status_bar.py tests/test_ctx_rail.py -q`` → 32/32 passed; 7 TUI snapshot baselines re-recorded (diff confirmed expected layout changes).

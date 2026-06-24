@@ -9,6 +9,8 @@ ESC dismisses (returns None) — user cancelled.
 
 from __future__ import annotations
 
+import re
+
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
 from textual.screen import ModalScreen
@@ -28,6 +30,20 @@ class ConnectProviderModal(ModalScreen[tuple[str, str | None] | None]):
     BINDINGS = [
         ("escape", "cancel", "Cancel"),
     ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._safe_id_map: dict[str, str] = {}  # safe_id → original_pid
+
+    @staticmethod
+    def _safe_id(pid: str) -> str:
+        """Sanitize a provider ID for use as a Textual widget ID.
+
+        Textual IDs may only contain letters, numbers, underscores, or
+        hyphens.  Replace disallowed characters (dots, colons, etc.)
+        with hyphens.
+        """
+        return f"connect-{re.sub(r'[^a-zA-Z0-9_-]', '-', pid)}"
 
     DEFAULT_CSS = """
     ConnectProviderModal {
@@ -71,33 +87,26 @@ class ConnectProviderModal(ModalScreen[tuple[str, str | None] | None]):
             try:
                 inst = PROVIDERS[pid](api_key="", base_url=None)
                 display = inst.display_name or pid
-                # Show context window of first model as representative metadata.
-                cw_str = ""
-                if inst.supported_models:
-                    try:
-                        cw = inst.context_window(inst.supported_models[0])
-                        cw_str = f" ({cw:,} ctx)"
-                    except Exception:
-                        cw_str = ""
             except Exception:
                 display = pid
-                cw_str = ""
 
             cred = credentials.get(pid)
             if cred is not None:
                 connected_items.append(
                     ListItem(
-                        Label(f"✓ {display}{cw_str}", classes="connected"),
-                        id=f"connect:{pid}",
+                        Label(f"✓ {display}", classes="connected"),
+                        id=self._safe_id(pid),
                     )
                 )
+                self._safe_id_map[self._safe_id(pid)] = pid
             else:
                 unconnected_items.append(
                     ListItem(
-                        Label(f"  {display}{cw_str} (not connected)"),
-                        id=f"connect:{pid}",
+                        Label(f"  {display} (not connected)"),
+                        id=self._safe_id(pid),
                     )
                 )
+                self._safe_id_map[self._safe_id(pid)] = pid
 
         with Container(id="connect-dialog"):
             yield Static("Connect a Provider", id="connect-title")
@@ -106,33 +115,48 @@ class ConnectProviderModal(ModalScreen[tuple[str, str | None] | None]):
                 if connected_items:
                     all_items.append(
                         ListItem(
-                            Label("── Connected ──", classes="section-header")
+                            Label("── Connected ──", classes="section-header"),
+                            disabled=True,
                         )
                     )
                     all_items.extend(connected_items)
                 if unconnected_items:
                     all_items.append(
                         ListItem(
-                            Label("── Not Connected ──", classes="section-header")
+                            Label("── Not Connected ──", classes="section-header"),
+                            disabled=True,
                         )
                     )
                     all_items.extend(unconnected_items)
-                yield ListView(*all_items)
+                yield ListView(*all_items, id="provider-list")
+
+    def on_mount(self) -> None:
+        """Skip disabled section headers — start on the first real provider."""
+        lv = self.query_one("#provider-list", ListView)
+        for i, child in enumerate(lv.children):
+            if not child.disabled:
+                lv.index = i
+                break
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if not event.item.id:
             return
-        if event.item.id.startswith("connect:"):
+        pid = self._safe_id_map.get(event.item.id)
+        if pid is None and event.item.id.startswith("connect-"):
+            pid = event.item.id[len("connect-"):]
+        if pid is None and event.item.id.startswith("connect:"):
             pid = event.item.id[len("connect:"):]
-            from loom.agent.credential import credentials  # lazy import
+        if pid is None:
+            return
+        from loom.agent.credential import credentials  # lazy import
 
-            cred = credentials.get(pid)
-            if cred is not None:
-                # Connected → return (pid, "") to signal "show model picker"
-                self.dismiss((pid, ""))
-            else:
-                # Unconnected → return (pid, None) to signal "show auth input"
-                self.dismiss((pid, None))
+        cred = credentials.get(pid)
+        if cred is not None:
+            # Connected → return (pid, "") to signal "show model picker"
+            self.dismiss((pid, ""))
+        else:
+            # Unconnected → return (pid, None) to signal "show auth input"
+            self.dismiss((pid, None))
 
     def action_cancel(self) -> None:
         self.dismiss(None)

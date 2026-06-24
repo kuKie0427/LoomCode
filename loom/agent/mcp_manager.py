@@ -50,7 +50,11 @@ from loom.agent.config import HarnessConfig, MCPServerConfig
 from loom.agent.mcp_client import (
     MCPServer,
     mcp_tool_to_loom_tool,
+)
+from loom.agent.mcp_client import (
     start as mcp_start,
+)
+from loom.agent.mcp_client import (
     stop as mcp_stop,
 )
 from loom.agent.tool_registry import Tool
@@ -59,6 +63,35 @@ _LOCK = threading.Lock()
 _ACTIVE_SERVERS: dict[str, MCPServer] = {}
 _PER_SERVER_LOCKS: dict[str, threading.Lock] = {}
 _DISCOVERY_THREADS: list[threading.Thread] = []
+
+# Names of every server that appears in [mcp.servers.*] in harness.toml.
+# Populated by start_discovery, read by get_server_snapshot() to identify
+# configured-but-not-connected servers (handshake failure / eviction).
+_CONFIGURED_SERVER_NAMES: set[str] = set()
+
+# Guards start_discovery so the TUI can fire it early (on_mount) without
+# the SessionStart hook (agent_loop) duplicating threads.  Reset in
+# shutdown_all so a fresh session can restart discovery.
+_DISCOVERY_STARTED: bool = False
+
+
+def get_server_snapshot() -> list[dict[str, str]]:
+    """Thread-safe snapshot of all configured MCP servers and their state.
+
+    Returns ``{"name": str, "state": "connected"|"error"}`` for every
+    server in ``_CONFIGURED_SERVER_NAMES``: ``"connected"`` means the
+    server is alive in ``_ACTIVE_SERVERS``; ``"error"`` means it was
+    configured but not connected (handshake failed, evicted, or not yet
+    discovered).  Empty list when no MCP servers are configured.
+    """
+    with _LOCK:
+        active = set(_ACTIVE_SERVERS.keys())
+    configured = set(_CONFIGURED_SERVER_NAMES)
+    all_names = configured | active
+    result: list[dict[str, str]] = []
+    for name in sorted(all_names):
+        result.append({"name": name, "state": "connected" if name in active else "error"})
+    return result
 
 
 def start_discovery(config: HarnessConfig) -> None:
@@ -69,8 +102,18 @@ def start_discovery(config: HarnessConfig) -> None:
     ``TOOL_REGISTRY``. Non-blocking: the agent loop starts immediately, and
     tools appear in the live ``get_tools()`` / ``get_tool_handlers()``
     resolution as each server responds.
+
+    Idempotent: the second call (e.g. from TUI ``on_mount`` + again from
+    ``SessionStart`` hook in ``agent_loop``) is a no-op guarded by
+    ``_DISCOVERY_STARTED``.
     """
+    global _DISCOVERY_STARTED
+    if _DISCOVERY_STARTED:
+        return
+    _DISCOVERY_STARTED = True
+    _CONFIGURED_SERVER_NAMES.clear()
     for spec in config.mcp.servers:
+        _CONFIGURED_SERVER_NAMES.add(spec.name)
         t = threading.Thread(
             target=_discover_server,
             args=(spec,),
@@ -329,8 +372,9 @@ def _add_to_sub_tools(tool_dict: dict, handler) -> None:
     called for the common case. A server that wants its tools available
     to ``spawn_subagent`` must explicitly opt in.
     """
-    from loom.agent import tools as tools_mod  # late import: avoid cycles
     from anthropic.types import ToolParam
+
+    from loom.agent import tools as tools_mod  # late import: avoid cycles
     sub_tool: ToolParam = {
         "name": tool_dict["name"],
         "description": tool_dict["description"],
@@ -382,6 +426,7 @@ def shutdown_all() -> None:
                 if hname.startswith(f"mcp__{name}__"):
                     del tools_mod.SUB_HANDLERS[hname]
         _PER_SERVER_LOCKS.clear()
+    _DISCOVERY_STARTED = False
     # Refresh the live aliases after bulk unregistration.
     try:
         tools_mod._resync_from_registry()
