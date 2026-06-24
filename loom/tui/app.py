@@ -647,11 +647,14 @@ class AgentTUIApp(App):
             pass
 
     def on_assistant_turn_start(self, _: AssistantTurnStart) -> None:
-        # Per opencode's pattern: don't pre-emptively show a thinking
-        # spinner.  Thinking content only appears when thinking events
-        # actually arrive from the provider (on_thinking_delta).  If the
-        # model doesn't emit thinking, nothing shows — no visual noise.
-        pass
+        # Reset thinking accumulation between LLM calls within a turn.
+        # Without this, thinking from the first LLM call leaks into the
+        # second (tool_use round), causing \"randomly placed\" content.
+        # A ThinkingDisplay is still NOT shown until thinking delta
+        # events actually arrive — the marker only creates a visual
+        # indicator when thinking content is present.
+        chat_log = self.query_one(ChatLog)
+        chat_log._reset_thinking_state()
 
     def on_text_delta(self, message: TextDelta) -> None:
         chat_log = self.query_one(ChatLog)

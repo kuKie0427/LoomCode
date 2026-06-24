@@ -707,6 +707,18 @@ class ChatLog(VerticalScroll):
         await self.mount(body)
         self.scroll_end()
 
+    def _reset_thinking_state(self) -> None:
+        """Reset thinking accumulation between LLM calls within a turn.
+
+        Called from ``on_assistant_message_start`` before each LLM call.
+        Hides the previous thinking display and clears the accumulation
+        buffer so the new call's thinking starts fresh.
+        """
+        if self._thinking_display is not None:
+            self._thinking_display.display = False
+        self._thinking_reasoning = ""
+        self._thinking_display = None
+
     def show_thinking_spinner(self) -> None:
         if self._thinking_widget is not None and not self._thinking_widget._complete:
             return
@@ -780,10 +792,11 @@ class ChatLog(VerticalScroll):
                 # marker controls visibility via toggle.
                 self._thinking_widget._display = display
             else:
-                # No marker: thinking events arrived spontaneously
-                # (opencode pattern — reasoning events drive display).
-                # Make it visible immediately.
-                display.display = True
+                # No pre-existing marker — create one so the thinking
+                # content has a clickable toggle ("◦ thought · Xs").
+                self._mount_thinking_widget()
+                self._thinking_widget._display = display
+                # display stays False (default) — marker toggles it.
             asyncio.create_task(self._mount_thinking_display(display))
         else:
             # Markdown.update() returns AwaitComplete; schedule via async wrapper
