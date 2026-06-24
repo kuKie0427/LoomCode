@@ -7203,3 +7203,56 @@ None
 - `uv run mypy loom/agent/tools.py loom/agent/review.py loom/agent/loop.py` → Success: no issues found
 
 **Files changed**: 3 core files (tools.py +70, review.py +79, loop.py +84), 2 test files (14 new test files/sections), 3 eval case files
+
+---
+
+## Session: TP-2 follow-up cleanup (2026-06-24)
+
+**Context**: After third-party review of TP-2 delivery, the summary's claim of "79/79 passed / ruff clean" was incorrect. Found 3 test failures + 1 pre-existing ruff error + 13 uncommitted files in working tree.
+
+### What was broken
+
+1. **3 failing tests in `test_review_pre_compact.py`** (test_pre_compact_review_true_calls_review, test_verdict_message_has_system_reminder_label, test_same_feature_not_reviewed_twice). Mocks returned plain `str` but `run_review` now returns `tuple[str, FeedbackDirective | None]`. `run_review_legacy_str` does `verdict_str, _ = run_review(...)` — unpacking failed, exception caught, no verdict appended, `_LAST_REVIEWED_FEATURE_ID` never set, dedup never triggered.
+
+2. **Ruff B007** at `loop.py:314` (`for turn in range` unused). Pre-existing from TP-1, missed by TP-2 verification.
+
+3. **13 uncommitted files** in working tree: 4 TP-2 completion (llm.py, _openai_shared.py, __init__.py, README.md) + 3 TUI thinking fix (chat_log.py, app.py, tui_thought_no_double_marker.py) + 3 untracked docs (review.md, triangle-protocol.md, triangle-protocol-examples.md) + 3 debug logs + 1 stale handoff.
+
+### Fixes applied
+
+**Commit `be5779a`** — `fix(triangle): TP-2 completion — ToolUseBlock serialization + eval registration + test fixes`
+- `tests/test_review_pre_compact.py`: 4 mock `return_value=("[review: pass] OK", None)` (was plain str)
+- `loom/agent/llm.py` + `loom/agent/providers/_openai_shared.py`: ToolUseBlock serialization + tool_use → tool_calls extraction
+- `loom/eval/cases/__init__.py`: register `review_pre_compact` (TP-2 created the file but forgot the import)
+- `README.md`: document "Reviewer agent (triangular orchestration)" feature
+- `loom/agent/loop.py:314`: `for turn` → `for _turn` (ruff B007)
+
+**Commit `341e83d`** — `fix(tui): reset thinking state per LLM call, not just per turn`
+- Working Rule #14: thinking display only updated for first LLM call; 2nd+ LLM calls silently appended to hidden display
+- `_reset_thinking_state()` method in chat_log
+- `on_assistant_turn_start` wires the reset
+- Eval case rewritten to assert new behavior
+- Also removed 3 debug log files (`loom.2026-06-24_16-56-*.log`)
+
+**Commit `716bcbf`** — `docs(triangle): add Triangle Protocol spec + examples + Review Agent design`
+- `docs/triangle-protocol.md` (515 lines) — v1 spec, 4 message formats, 12 invariants
+- `docs/triangle-protocol-examples.md` (576 lines) — 5 walkthroughs
+- `docs/review.md` (205 lines) — Review Agent architecture
+
+**Reverted** — `session-handoff.md` was modified to PR-2 era content (stale). `git checkout` restored to TP-1/TP-2-era state (Multi-Model P4 Final handoff).
+
+### Verification
+
+- `uv run pytest tests/test_triangle_protocol.py tests/test_triangle_integration.py tests/test_review_pre_compact.py tests/test_review_tool.py tests/test_tools.py` → 110/110 passed
+- `uv run python -m loom.cli eval --filter review --fail-under 100` → 15/15 passed
+- `uv run ruff check loom/` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in 175 source files
+- `bash scripts/verify-quick.sh` → 40/40 smoke set + ruff + mypy clean
+
+### Outstanding concerns (deferred, not blocking)
+
+- `_run_review_tool_handler` in `tools.py:1327` accepts `delta_report`/`scope`/`workdir` in input schema but never deserializes/uses them. Forward-compat stubs awaiting a later phase.
+- `_run_pre_compact_review` + `_run_session_end_review` use `run_review_legacy_str` (no pre-validation). I7/I8 bypass doesn't apply to auto-reviews. Migration deferred.
+- `_KNOWN_OLDER_VERSIONS` is empty set — deprecation warning path is dead code until older versions are added.
+
+**Files changed this session**: 11 files (10 modified, 3 docs added, 3 logs removed, 1 handoff reverted), 3 commits (be5779a, 341e83d, 716bcbf)
