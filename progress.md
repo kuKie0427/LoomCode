@@ -7284,4 +7284,29 @@ None
 
 ---
 
+## Session: TP-4 orchestrator prompt (2026-06-24)
+
+**Feature**: `f-triangle-orchestrator-prompt`
+
+**Changes**:
+- `loom/agent/system_prompt.py` — appended Triangle Protocol static section (1157 chars, ≤ 1500 budget). 4 sub-sections: orchestrator identity (Orchestrator/Generator/Reviewer), delegation decision rules, feedback loop table (6 action types), PreCompact system-reminder recognition. I9 retry safety bound (≥3 attempts → escalate). Dual-mode: original 8 static rules preserved unchanged.
+- `loom/agent/loop.py` — `_run_pre_compact_review` upgraded to use new `run_review` tuple return. C10 fix: system-reminder now includes serialized `<feedback_directive>` block alongside verdict_str. New `_increment_review_attempts(feat_id)` helper persists I9 counter to `feature_list.json` (survives autocompact + cross-session). If `fd.action` contains non-`none`, calls `_execute_feedback_directive(feat_id, fd)` to record `triangle.feedback` trace event. `_run_session_end_review` upgraded similarly: pass verdict → `_reset_review_attempts(feat_id)`, non-pass → `_increment_review_attempts(feat_id)`.
+- `tests/test_orchestrator_prompt.py` — 7 new tests covering triangle roles, delegation decision, feedback loop, PreCompact recognition, retry safety bound, dual-mode legacy preservation, length budget.
+- `tests/test_review_pre_compact.py` — 3 new TP-4 tests: C10 fix (feedback_directive block in reminder), I9 persistence (counter incremented in JSON), cross-session accumulation (counter persists across "sessions" — guards against regression to in-memory counter).
+
+**Dual-mode verification**: 10/10 prompt-rewrite eval cases pass without modification. The legacy prompt tests don't assert Triangle Protocol keywords, so the new section coexists with the original 8 rules.
+
+**Verification**:
+- `uv run pytest tests/test_orchestrator_prompt.py tests/test_session_mutable_prompt.py -v` → 13/13 passed (7 new + 6 legacy)
+- `uv run pytest tests/test_orchestrator_prompt.py tests/test_session_mutable_prompt.py tests/test_triangle_protocol.py tests/test_triangle_integration.py tests/test_triangle_trace.py tests/test_trace.py tests/test_review_pre_compact.py tests/test_review_tool.py tests/test_tools.py -q` → 150/150 passed
+- `uv run python -m loom.cli eval --filter review --fail-under 100` → 15/15 passed (TP-2 zero regression)
+- `uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100` → 10/10 passed (dual-mode confirmed)
+- `uv run ruff check loom/` → All checks passed
+- `uv run mypy loom/` → Success: no issues found in 175 source files
+
+**Files changed this session**: 4 files modified, 1 file added, 1 commit pending
+
+---
+
+
 

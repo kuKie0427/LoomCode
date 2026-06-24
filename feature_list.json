@@ -1173,7 +1173,9 @@
       "id": "f-multi-model-providers-p1-concrete-providers",
       "name": "Multi-model P1: Concrete providers (OpenAI + OpenAI-compatible)",
       "description": "Second of 4 phases for f-multi-model-providers. Implement OpenAIProvider (gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-3.5-turbo, o1, o1-mini, o3-mini) and OpenAICompatibleProvider profiles (deepseek, ollama, openrouter). Extract shared OpenAI stream/parse logic to _openai_shared.py. Register profiles via register_compatible_profiles() so PROVIDERS dict has 7 entries (anthropic + openai + deepseek + ollama + openrouter + google + custom). Mirror P0 AnthropicProvider test structure. See .sisyphus/plans/multi-model-providers-p1.md.",
-      "dependencies": ["f-multi-model-providers-p0-foundation"],
+      "dependencies": [
+        "f-multi-model-providers-p0-foundation"
+      ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --filter multi-model-p1 --fail-under 100",
       "evidence": "uv run pytest -q -m 'not snapshot' → 1118 passed (was 1037, +81 new: 32 in test_provider_openai.py + 24 in test_provider_openai_compatible.py + 25 in test_provider_registry.py). uv run python -m loom.cli eval --filter multi-model-p1 --fail-under 100 → 11/11 passed (OpenAI provider registered, gpt-4o pricing 2.5/10, context_window 128k, error mapping 401→auth/429→rate_limit/400+context_length_exceeded→context_overflow, deepseek/ollama/openrouter profiles resolved, registry has 5 providers, parse_model_id works for all 5). uv run python -m loom.cli eval --filter multi-model-p0 --fail-under 100 → 11/11 passed (no regression). uv run ruff check . → All checks passed. uv run mypy loom/ → Success: 0 issues in 151 source files. New: loom/agent/providers/_openai_shared.py (527 LOC) — shared SSE streaming + _ToolCallAccumulator + MODEL_PROFILES dict + make_compatible_provider_class factory. loom/agent/providers/openai.py (122 LOC) — OpenAIProvider for api.openai.com: 7 models (gpt-4o/mini/turbo/3.5-turbo/o1/o1-mini/o3-mini), pricing table, context windows, count_tokens heuristic with 50% safety margin. loom/agent/providers/openai_compatible.py (131 LOC) — OpenAICompatibleProvider base + register_compatible_profiles() factory. LLMClient.change_model verified end-to-end across all 5 providers (anthropic/openai/deepseek/ollama/openrouter). Smoke: get_provider(*parse_model_id('deepseek/deepseek-chat'), api_key='fake') → deepseek https://api.deepseek.com/v1 64000. Minor: get_provider signature extended with *extra for ergonomic unpacking (backward-compatible, documented). Deviation: registry contains 5 providers (not 6) — 'custom' provider deferred to P2 per the roadmap credential phase."
@@ -1182,7 +1184,9 @@
       "id": "f-multi-model-providers-p1-review-fixes",
       "name": "Multi-model P1 review fixes (env-var + cross-provider + provider-agnostic invoke)",
       "description": "Post-review fixes for f-multi-model-providers-p1. (1) Provider-aware env-var fallback so OPENAI_API_KEY / DEEPSEEK_API_KEY / OLLAMA_API_KEY / OPENROUTER_API_KEY are honored at LLMClient init AND cross-provider change_model (review B1+B2+B3 — was silently ignored). (2) Provider-agnostic LLMClient.invoke() helper replaces Anthropic-only llm_client.client.messages.create in spawn_subagent (tools.py:1336), _generate_summary (context.py), autocompact, and the agent-loop sync path (loop.py:389) — so non-Anthropic providers actually work end-to-end (review M7). (3) Dead-code removal in OpenAIProvider (self._http, _http_client, estimate_tokens, build_body_for_test — review M1-M4). (4) Test hygiene: BaseException → Exception (M5), class-level monkey-patch → instance-level (M6). (5) S1: error message sanitization parses payload['error']['message'] instead of leaking raw body. See .sisyphus/plans/multi-model-providers-p1.md and the post-implementation review.",
-      "dependencies": ["f-multi-model-providers-p1-concrete-providers"],
+      "dependencies": [
+        "f-multi-model-providers-p1-concrete-providers"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_models.py tests/test_agent_loop.py tests/test_context.py tests/test_max_turns_guard.py tests/test_autocompact_fallback.py tests/test_provider_openai.py tests/test_provider_openai_compatible.py tests/test_provider_registry.py tests/test_providers.py tests/test_spawn_subagent_structured.py tests/test_prompt_caching.py tests/test_mcp_subagent.py -q",
       "evidence": "uv run pytest [12 affected test files] → 191 passed in ~6s (added 6 new cross-provider change_model tests + env-var tests in tests/test_models.py; migrated 11 mock_client.client.messages.create → mock_client.invoke / MagicMock patterns across test_agent_loop.py, test_max_turns_guard.py, test_spawn_subagent_structured.py, test_mcp_subagent.py, test_context.py, test_autocompact_fallback.py; updated 2 mock setup sites in test_prompt_caching.py and eval/cases/{failure_modes,pre_compact_hook}.py for new context.autocompact signature). uv run python -m loom.cli eval --filter multi-model-p1 → 11/11 passed. uv run python -m loom.cli eval --filter multi-model-p0 → 11/11 passed. uv run python -m loom.cli eval --filter autocompact → 5/5 passed. uv run python -m loom.cli eval --filter subagent → 15/15 passed. uv run python -m loom.cli eval --filter prompt → 15/15 passed. uv run python -m loom.cli eval --filter max-turns → 3/3 passed. uv run python -m loom.cli eval --filter mcp → 10/10 passed. uv run python -m loom.cli eval --filter cost → 4/4 passed. uv run python -m loom.cli eval --filter context → 3/3 passed. uv run python -m loom.cli eval --filter permission → 3/3 passed. uv run python -m loom.cli eval --filter lsp → 3/3 passed. uv run ruff check loom/ tests/ → All checks passed. uv run mypy loom/ → Success: 0 issues in 151 source files. End-to-end env-var smoke (LOOM_LIVE_TEST=1 + 5 LLMClient model= invocations): openai picks up OPENAI_API_KEY, deepseek picks up DEEPSEEK_API_KEY, ollama works without key, anthropic picks up ANTHROPIC_API_KEY, cross-provider change_model('openai/gpt-4o') from anthropic re-resolves OPENAI_API_KEY. Code changes: loom/agent/llm.py (provider-aware env-var fallback in __init__ + cross-provider-safe change_model + new invoke() method returning ProviderResponse), loom/agent/loop.py (autocompact + sync path call llm_client.invoke instead of llm_client.client.messages.create), loom/agent/context.py (autocompact + _generate_summary ... (line truncated to 2000 chars)"
@@ -1191,7 +1195,9 @@
       "id": "f-multi-model-providers-p2-ux",
       "name": "Multi-model P2: Credential storage + model persistence + /model UX",
       "description": "Third of 4 phases for f-multi-model-providers. User-facing surfaces: (1) CredentialManager with OS keyring > LOOM_AUTH_CONTENT > per-provider env > ~/.loom/auth.json priority chain + chmod 600 + atomic write. (2) LLMClient auto-injects credentials (no manual export needed). (3) ModelState for .minicode/state/model.json (recent + default). (4) ProjectConfig reads .minicode/config.json model field with upward walk to ~/.loom/config.json. (5) loom CLI: auth login/logout/list + models subcommands. (6) TUI /model slash command upgrade with ModelPicker ModalScreen. (7) Unified model_resolver with --model flag > env > config > default precedence. See .sisyphus/plans/multi-model-providers-p2.md.",
-      "dependencies": ["f-multi-model-providers-p1-concrete-providers"],
+      "dependencies": [
+        "f-multi-model-providers-p1-concrete-providers"
+      ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --filter multi-model-p2 --fail-under 100",
       "evidence": "uv run python -m loom.cli eval --filter multi-model-p2 --fail-under 100 → 13/13 passed. uv run python -m loom.cli eval --filter multi-model-p0 --fail-under 100 → 11/11 passed (no regression). uv run python -m loom.cli eval --filter multi-model-p1 --fail-under 100 → 11/11 passed (no regression). uv run ruff check . → All checks passed. uv run mypy loom/ → Success: 0 issues in 156 source files. uv run pytest -q -m 'not snapshot' → 1165 passed (8 snapshot-only failures pre-existing). loom models → lists all 5 providers × 24+ models. loom auth login/logout/list → all work with auth.json chmod 600. New files: loom/agent/credential.py (+524), loom/agent/model_state.py (+400), loom/agent/model_resolver.py (+64), loom/tui/model_picker.py (+103), tests/test_credential.py (+266), tests/test_model_state.py (+104), tests/test_cli_models_auth.py (+165), tests/test_model_picker_tui.py (+78), loom/eval/cases/multi_model_p2.py (+377). Modified: loom/agent/llm.py (credential auto-injection), loom/cli.py (auth + models subcommands), loom/tui/app.py (/model opens ModelPicker modal), pyproject.toml (keyring>=24.0 optional dep). P2 entry marked as done — gate verification complete."
@@ -1200,7 +1206,9 @@
       "id": "f-multi-model-providers-p2-review-fixes",
       "name": "Multi-model P2 review fixes (wire resolver + ProjectConfig + cleanup)",
       "description": "Post-review fixes for f-multi-model-providers-p2-ux. (1) P0: wire resolve_model() into AgentTUIApp.__init__ so --model flag > env > .minicode/config.json > state/model.json > default priority chain is actually used (was dead code). (2) P0: wire ProjectConfig(WORKDIR).model into resolver; the class existed but had 0 callers. (3) P0: persist model changes via ModelState.set_default after TUI /model picker (was only add_recent). (4) P1: replace 3 hardcoded 'claude-sonnet-4-5' fallbacks in model_resolver with get_provider(id).supported_models[0]. (5) P1: Literal['api'] -> str (only one literal value). (6) P1: unify backup filename generation across credential.py + model_state.py via _backup_path() helper. (7) P2: 5 small cleanups (model_picker.py trailing whitespace + list[ModelRef] annotation; model_state.py 'max' param shadowing; llm.py extract _resolve_credential to dedupe; test_cli_models_auth unify in-process pattern). (8) Lock wiring with 2 new eval cases. See .sisyphus/plans/multi-model-providers-p2-review-fixes.md.",
-      "dependencies": ["f-multi-model-providers-p2-ux"],
+      "dependencies": [
+        "f-multi-model-providers-p2-ux"
+      ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --filter multi-model-p2 --fail-under 100 && uv run pytest tests/test_credential.py tests/test_model_state.py tests/test_cli_models_auth.py tests/test_model_picker_tui.py -q && ./init.sh",
       "evidence": "uv run python -m loom.cli eval --filter multi-model-p2 --fail-under 100 → 15/15 passed (was 13/13, +2 new wiring cases). uv run python -m loom.cli eval --filter multi-model-p0 --fail-under 100 → 11/11 passed (no regression). uv run python -m loom.cli eval --filter multi-model-p1 --fail-under 100 → 11/11 passed (no regression). uv run ruff check . → All checks passed. uv run mypy loom/ → Success, 0 issues in 156 source files. Changes: loom/tui/app.py (resolve_model wiring + ProjectConfig consumption + set_default in _on_model_picked + /model command), loom/agent/model_resolver.py (3 hardcoded fallbacks replaced with _first_model_of + _first_provider_id), loom/agent/credential.py (Literal[\"api\"]→str + _backup_path helper), loom/agent/model_state.py (_backup_path import + max→limit + removed import time), loom/agent/llm.py (_resolve_credential deduplication), loom/tui/model_picker.py (type annotation + whitespace), tests/test_cli_models_auth.py (in-process pattern), loom/eval/cases/multi_model_p2.py (+2 eval cases)."
@@ -1209,7 +1217,9 @@
       "id": "f-multi-model-providers-p3-polish",
       "name": "Multi-model P3: Polish (pricing + eval cases + docs + MockProvider)",
       "description": "Fourth and final phase for f-multi-model-providers. Close out remaining debt: (1) pricing plugin-ification in cost.py using provider.pricing() API; (2) LOOM_AUTH_CONTENT subagent inheritance; (3) MagicMock → MockProvider migration across 13+ test/eval files; (4) docs/providers.md user documentation; (5) README update; (6) 11 new eval cases in multi_model_p3.py. See .sisyphus/plans/multi-model-providers-p3.md.",
-      "dependencies": ["f-multi-model-providers-p2-review-fixes"],
+      "dependencies": [
+        "f-multi-model-providers-p2-review-fixes"
+      ],
       "status": "done",
       "verification": "uv run python -m loom.cli eval --filter multi-model-p3 --fail-under 100 && ./init.sh",
       "evidence": "uv run python -m loom.cli eval --filter multi-model --fail-under 100 → 37/37 passed (P0: 11, P1: 11, P2: 15, P3: 11). cost.py refactored to provider-agnostic pricing. LOOM_AUTH_CONTENT subagent inheritance implemented. docs/providers.md (262 lines, 8 sections) published. README.md updated with 6 providers + auth/models. 11 new multi_model_p3.py eval cases. 13 test/eval files migrated from MagicMock to MockProvider. 24/24 pytest tests pass (test_models, test_cost_telemetry). ruff clean. mypy clean."
@@ -1218,7 +1228,10 @@
       "id": "f-multi-model-providers-p4a-connect-modal",
       "name": "TUI Connect/Provider modal + /connect slash command",
       "description": "ConnectProviderModal 列出所有已注册 provider，AuthInputModal 输入 API key 并存入 CredentialManager。验证后自动弹 ModelPicker。/connect slash command 路由到 ConnectProviderModal。",
-      "dependencies": ["f-multi-model-providers-p3-polish", "f-multi-model-providers-p2-ux"],
+      "dependencies": [
+        "f-multi-model-providers-p3-polish",
+        "f-multi-model-providers-p2-ux"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_connect_provider_modal.py -v",
       "evidence": "15/15 connect_provider tests pass (ConnectProviderModal + AuthInputModal + slash command). Manual verification: TUI /connect opens ConnectProviderModal, connected provider shows ✓, unconnected shows (not connected). /connect anthropic jumps directly to AuthInputModal. AuthInputModal saves credential to CredentialManager, shows toast 'Logged in to Anthropic', then pushes ModelPicker. ModelPicker 'c' binding jumps to ConnectProvider. ruff+mypy clean across all new/modified files. 4 new files (connect_provider.py, auth_input.py, test_connect_provider_modal.py, model_picker.py updated with 'c' binding). 2 modified files (app.py +43 /chat command + handlers, chat_log.py +1 /connect in hint)."
@@ -1227,7 +1240,9 @@
       "id": "f-multi-model-providers-p4b-auto-prompt",
       "name": "TUI 启动 + 切换 + 错误 时自动引导",
       "description": "TUI 启动时若 CredentialManager 全空 → 自动弹 ConnectProviderModal。/model 或 ModelPicker 切到未登录 provider → 自动跳 AuthInputModal。Stream error event error_code='auth' → chat 在错误文本后追加 `/connect` 提示行（非交互按钮）。",
-      "dependencies": ["f-multi-model-providers-p4a-connect-modal"],
+      "dependencies": [
+        "f-multi-model-providers-p4a-connect-modal"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_auto_connect_prompt.py -v",
       "evidence": "uv run pytest tests/test_auto_connect_prompt.py -v → 4/4 passed. Tasks 1-3 implemented: (1) _check_credentials_on_startup added to AgentTUIApp.on_mount — empty credentials → pushes ConnectProviderModal; (2) ModelPicker.on_list_view_selected checks credentials.get(pid) before dismiss — unconnected provider pushes AuthInputModal; (3) loop.py stream error handler appends `/connect` hint when error_code==\"auth\". All 4 tests pass: startup-no-creds-pushes, startup-with-creds-skip, picker-unconnected-pushes-auth, auth-error-appends-hint. Updated: loom/tui/app.py (+41), loom/tui/model_picker.py (+22), loom/agent/loop.py (+2), tests/test_auto_connect_prompt.py (NEW +102), tests/test_model_picker_tui.py (+4)."
@@ -1236,7 +1251,9 @@
       "id": "f-multi-model-providers-p4c-status-indicators",
       "name": "Status bar provider indicator + picker status",
       "description": "ModelPicker 给已连接 provider 加 ✓ 标记。status_bar 显示当前 provider|model 和连接状态。/status 列出所有 provider 的 auth 状态。",
-      "dependencies": ["f-multi-model-providers-p4b-auto-prompt"],
+      "dependencies": [
+        "f-multi-model-providers-p4b-auto-prompt"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_provider_status_indicator.py -v",
       "evidence": "uv run pytest tests/test_provider_status_indicator.py -v → 4/4 passed. 1216/1217 tests pass in full init.sh (1 pre-existing flake: mouse_wheel_bubbles). ModelPicker shows ✓ for connected providers. StatusBar shows ✓/✗ after model name. /status lists all providers with ✓/no-key. Bug fix: ModelPicker IDs were invalid Textual DOM IDs (containing /) — fixed with safe counter-based IDs + _model_items lookup dict."
@@ -1254,7 +1271,9 @@
       "id": "f-tui-cmd-completion-p1",
       "name": "TUI 命令补全 P1: Tab 触发 / 补全弹窗",
       "description": "借鉴 opencode autocomplete.tsx 的 /-mode —— Composer 输入 / 后 Tab 弹出补全、↑↓ 导航、Enter/Tab 选择、Esc 关闭。difflib 模糊匹配。",
-      "dependencies": ["f-tui-cmd-completion-p0"],
+      "dependencies": [
+        "f-tui-cmd-completion-p0"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_command_completer.py && uv run python -m loom.cli eval --filter slash_completion_popup",
       "evidence": "uv run pytest tests/test_command_completer.py -v → 8/8 passed (0.25s); uv run python -m loom.cli eval --filter slash_completion_popup → 1/1 PASS; ./init.sh → 1232 passed, 8 snapshots, 'Verification Complete (all green)'; manual TUI smoke: /mo shows model in popup, ↑↓ navigates, Tab selects with trailing space, Esc hides, /xyz shows 'No match', /help+Enter hides completer. Files: loom/tui/completer.py (130 lines, CommandCompleter + filter_commands), loom/tui/composer.py (+45 lines, 4 Message classes + _on_key completion branches), loom/tui/app.py (+26 lines, CommandCompleter in compose + 4 handlers + on_composer_submitted fix), tests/test_command_completer.py (8 tests), loom/eval/cases/slash_completion_popup.py (65 lines, 3 assertions)."
@@ -1263,7 +1282,10 @@
       "id": "f-tui-cmd-completion-p2",
       "name": "TUI 命令补全 P2: Ctrl+P 命令面板",
       "description": "借鉴 opencode command-palette.tsx —— ctrl+p 弹 ModalScreen，filter 输入 + ListView 模糊搜索所有命令，Enter dispatch。复用 P0 注册表 + P1 filter_commands。",
-      "dependencies": ["f-tui-cmd-completion-p0", "f-tui-cmd-completion-p1"],
+      "dependencies": [
+        "f-tui-cmd-completion-p0",
+        "f-tui-cmd-completion-p1"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_command_palette.py && uv run python -m loom.cli eval --filter command_palette_modal",
       "evidence": "uv run pytest tests/test_command_palette.py -v → 6/6 passed (3.48s); uv run python -m loom.cli eval --filter command_palette_modal → 1/1 PASS; ./init.sh → non-snapshot tests all green. Files: loom/tui/command_palette.py (123 lines, CommandPaletteModal), loom/tui/app.py (+16, ctrl+p binding + actions), tests/test_command_palette.py (160 lines, 6 tests), loom/eval/cases/command_palette_modal.py (96 lines, 1 eval case)."
@@ -1281,7 +1303,9 @@
       "id": "f-review-state-machine",
       "name": "Phase PR-2: review-pending 状态机 + audit 同步",
       "description": "feature_list.schema.json 加 review-pending 到 status enum。scope.py check_wip1 把 review-pending 算 active。audit_cmd.py 5 维评分识别 review-pending。SystemPrompt 加 '标 done 前必须 review' 规则。本 phase 不做 gate 强制(PR-3 做),只做状态识别。",
-      "dependencies": ["f-review-tool"],
+      "dependencies": [
+        "f-review-tool"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_review_state_machine.py -v && uv run python -m loom.cli eval --filter review-state-machine --fail-under 100",
       "evidence": "uv run pytest tests/test_review_state_machine.py -v → 11/11 passed; uv run python -m loom.cli eval --filter review-state-machine --fail-under 100 → 3/3 passed; uv run ruff check . → All checks passed; uv run mypy loom/ → Success, 0 issues in 172 source files; audit state dimension 6/6 (review-pending check passes); grep -rn \"review-pending\" loom/ → 25 references covering schema, scope, audit, system_prompt. Files: feature_list.schema.json (modified — status enum + \"review-pending\"), loom/templates/feature-list.schema.json (modified — same), loom/agent/scope.py (modified — check_wip1 counts review-pending as active), loom/audit_cmd.py (modified — state check recognizes review-pending), loom/agent/system_prompt.py (modified — static rule about review before done), tests/test_review_state_machine.py (NEW, 170 lines, 11 tests in 4 classes), loom/eval/cases/review_state_machine.py (NEW, 91 lines, 3 eval cases), loom/eval/cases/__init__.py (modified — registered review_state_machine)."
@@ -1290,7 +1314,10 @@
       "id": "f-review-session-end-hook",
       "name": "Phase PR-3: SessionEnd 自动审查 hook + progress.md verdict 段",
       "description": "run_repl / TUI action_quit 退出时自动调 review,verdict 写 progress.md '## Final Review' 段。harness.toml [review] session_end_review = true 默认开。走 schedule_init_sh_on_session_end daemon thread 模式(R5: 不阻塞退出)。fail-closed: review 失败只 warn。本 phase 不做 PreCompact review(PR-4)。",
-      "dependencies": ["f-review-tool", "f-review-state-machine"],
+      "dependencies": [
+        "f-review-tool",
+        "f-review-state-machine"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_review_session_end.py -v && uv run python -m loom.cli eval --filter review-session-end --fail-under 100",
       "evidence": "uv run pytest tests/test_review_session_end.py -v → 15/15 passed; uv run python -m loom.cli eval --filter review-session-end --fail-under 100 → 4/4 passed; uv run ruff check . → All checks passed; uv run mypy loom/ → Success, 0 issues in 173 source files. Files: loom/agent/config.py (modified — +ReviewConfig dataclass + _parse_review_section + skeleton), loom/agent/loop.py (modified — +_run_session_end_review + _write_verdict_to_progress_md + run_repl integration), loom/tui/app.py (modified — action_quit integration), tests/test_review_session_end.py (NEW, 428 lines, 15 tests in 4 classes), loom/eval/cases/review_session_end.py (NEW, 217 lines, 4 eval cases), loom/eval/cases/__init__.py (modified — registered review_session_end)."
@@ -1299,7 +1326,11 @@
       "id": "f-review-pre-compact-and-docs",
       "name": "Phase PR-4: PreCompact review opt-in + docs/review.md + README + umbrella close",
       "description": "PreCompact hook 触发 review(默认关,harness.toml [review] pre_compact_review = true 开)。verdict 注入 messages 作为 system-reminder(autocompact 保留)。docs/review.md 含使用模式 + opt-out + 故障排查。README 'does well' 加 reviewer agent。umbrella f-review-triangle 标 done。",
-      "dependencies": ["f-review-tool", "f-review-state-machine", "f-review-session-end-hook"],
+      "dependencies": [
+        "f-review-tool",
+        "f-review-state-machine",
+        "f-review-session-end-hook"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_review_pre_compact.py -v && uv run python -m loom.cli eval --filter review-pre-compact --fail-under 100 && ./init.sh",
       "evidence": "7/7 pytest pass, 3/3 eval pass (review-pre-compact filter), ruff+mypy clean. PreCompact hook: _run_pre_compact_review + _find_active_feature_for_review + _LAST_REVIEWED_FEATURE_ID dedup in loom/agent/loop.py. docs/review.md: 206 lines, 9 sections. README: 'Reviewer agent' bullet added. Files: loom/agent/loop.py (+67 lines), tests/test_review_pre_compact.py (+181, 7 tests), loom/eval/cases/review_pre_compact.py (NEW, 143 lines, 3 cases), docs/review.md (NEW, 206 lines)."
@@ -1317,7 +1348,9 @@
       "id": "f-init-sh-two-tier-polish",
       "name": "Phase PI-2: Python ruff/mypy 检测 + generic 骨架 + marker 注入 + docs",
       "description": "verification_plan() 检测 pyproject.toml [tool.ruff]/[tool.mypy] 自动加进 full 档(R4)。generic stack 返回骨架式 placeholder(tests/lint/build TODO 段)替代单行 echo。loom init 检测 pyproject.toml 已有 markers 配置时跳过注入,无则追加 slow/snapshot marker(R5)。docs/init-sh.md 含两档使用 + 自定义 + 故障排查。",
-      "dependencies": ["f-init-sh-two-tier-core"],
+      "dependencies": [
+        "f-init-sh-two-tier-core"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_init_sh_polish.py -v && uv run python -m loom.cli eval --filter init-sh-polish --fail-under 100",
       "evidence": "13/13 pytest pass, 3/3 eval cases pass, ruff+mypy clean. Smoke: loom init /tmp/pi2-test with pyproject.toml [tool.ruff] generates init.sh with 'ruff check .' in both tiers. Generic stack returns 3-step skeleton (tests/lint/build). Marker injection appends slow/snapshot markers to pyproject.toml. docs/init-sh.md created with 7 sections. README updated with two-tier bullet."
@@ -1326,7 +1359,10 @@
       "id": "f-init-sh-two-tier",
       "name": "Umbrella: init.sh 两档优化 (PI-1 + PI-2)",
       "description": "Umbrella feature covering both PI-1 (VerificationPlan + MODE flag + verify-quick.sh) and PI-2 (Python ruff/mypy detection + generic skeleton + marker injection + docs/init-sh.md). Review fixes B1-B7: no doubled echo headers in generic init.sh, MODE env var works, verify-quick.sh is stack-aware with auto-detected tools flowing in, UnicodeDecodeError handled, AGENTS.md template teaches two-tier. 77/77 pytest, 17/17 eval, ruff+mypy clean.",
-      "dependencies": ["f-init-sh-two-tier-core", "f-init-sh-two-tier-polish"],
+      "dependencies": [
+        "f-init-sh-two-tier-core",
+        "f-init-sh-two-tier-polish"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_detect.py tests/test_init_cmd.py tests/test_init_sh_two_tier.py tests/test_init_sh_polish.py -v && uv run python -m loom.cli eval --filter init-sh --fail-under 100",
       "evidence": "77/77 pytest pass, 17/17 eval pass (init-sh filter), ruff+mypy clean. Smoke: MODE=quick → Harness Initialization (quick); generic init.sh no doubled headers; Python+ruff → ruff/mypy in both init.sh and verify-quick.sh; Node → npm run lint + npm test + .js ext; Go → go test + .go ext; marker injection idempotent across --force. B1: render_block handles multi-line commands. B2: MODE=\"${1:-${MODE:-full}}\". B3+B4: verify-quick.sh stack-aware with VQ_STACK_EXT mapping. B5: agents.md template shows two-tier in Quick Start + Working Rules + Verification Commands. B6: new eval case asserts rendered init.sh has no doubled headers. B7: catch (OSError, UnicodeDecodeError) in both pyproject readers."
@@ -1335,7 +1371,12 @@
       "id": "f-review-triangle",
       "name": "Reviewer agent: triangular orchestration + generation + review",
       "description": "Umbrella feature. 三角形模式落地: 编排(主 agent) → 生成(task subagent) → 审查(review subagent)。4 个 sub-phase: PR-1 review tool / PR-2 state machine / PR-3 SessionEnd hook / PR-4 PreCompact + docs。",
-      "dependencies": ["f-review-tool", "f-review-state-machine", "f-review-session-end-hook", "f-review-pre-compact-and-docs"],
+      "dependencies": [
+        "f-review-tool",
+        "f-review-state-machine",
+        "f-review-session-end-hook",
+        "f-review-pre-compact-and-docs"
+      ],
       "status": "done",
       "verification": "./init.sh && uv run python -m loom.cli eval --filter review --fail-under 100 && uv run python -m loom.cli audit .",
       "evidence": "All 4 sub-phases done: PR-1 review tool (f-review-tool), PR-2 state machine (f-review-state-machine), PR-3 SessionEnd hook (f-review-session-end-hook), PR-4 PreCompact + docs (f-review-pre-compact-and-docs). See individual feature evidence for details."
@@ -1353,7 +1394,9 @@
       "id": "f-triangle-protocol-integration",
       "name": "Phase TP-2: Triangle Protocol integration (spawn_subagent + run_review + PostToolUse hook)",
       "description": "spawn_subagent 加 feature_card/scope 可选参数（保留 description 参数名 C7），自动序列化注入 description 头部。run_review 加 delta_report/scope/workdir 可选参数，自动序列化注入 Reviewer prompt + 预校验 validator（I7/I8 B2 fix——违规直接返回 unknown bypass LLM）。task 工具描述更新提到 <feature_card>+<scope_envelope> 格式。review 工具描述更新提到 <delta_report>。spawn_subagent 返回前 inline 检查 delta_report（B1 fix——不是 PostToolUse hook，因为 tools.py:1412 丢弃 hook 返回值），失败注入 <system-reminder> 软约束。run_review 返回值从 str 改为 tuple[str, FeedbackDirective | None]，parse_feedback_directive 校验 action list 组合规则（硬约束）。",
-      "dependencies": ["f-triangle-protocol-parser"],
+      "dependencies": [
+        "f-triangle-protocol-parser"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_triangle_integration.py tests/test_triangle_protocol.py tests/test_review_tool.py tests/test_spawn_subagent_structured.py -v && uv run python -m loom.cli eval --filter review --fail-under 100",
       "evidence": "uv run pytest tests/test_triangle_integration.py tests/test_triangle_protocol.py tests/test_review_tool.py tests/test_spawn_subagent_structured.py -v → 79/79 passed; uv run python -m loom.cli eval --filter review --fail-under 100 → 15/15 passed; uv run ruff check loom/agent/tools.py loom/agent/review.py loom/agent/loop.py → All checks passed (1 pre-existing B007); uv run mypy loom/agent/tools.py loom/agent/review.py loom/agent/loop.py → Success: no issues found"
@@ -1362,10 +1405,25 @@
       "id": "f-triangle-protocol-trace",
       "name": "Phase TP-3: Triangle Protocol trace events",
       "description": "loom/agent/trace.py 加 4 个新事件类型：triangle.delegate（run_task 入口）/ triangle.delta（run_task 返回且 parse_delta_report 成功时）/ triangle.review（run_review 返回时）/ triangle.feedback（Orchestrator 执行 feedback_directive 时）。每个事件 payload 见 docs/triangle-protocol.md §5d。trace 事件 record 失败不抛异常（trace 是 best-effort）。C8 fix：trace 事件在 run_task handler 而非 spawn_subagent 内部 record，避免 run_review 调 spawn_subagent 触发 triangle.delegate 事件。",
-      "dependencies": ["f-triangle-protocol-integration"],
+      "dependencies": [
+        "f-triangle-protocol-integration"
+      ],
       "status": "done",
       "verification": "uv run pytest tests/test_triangle_trace.py tests/test_trace.py -v && uv run ruff check loom/agent/trace.py",
       "evidence": "uv run pytest tests/test_triangle_trace.py tests/test_trace.py -v → 10/10 triangle_trace + 10/10 trace = 20/20 passed; uv run pytest tests/test_triangle_protocol.py tests/test_triangle_integration.py tests/test_triangle_trace.py tests/test_trace.py tests/test_review_pre_compact.py tests/test_review_tool.py tests/test_tools.py -q → 130/130 passed (zero regression); uv run ruff check loom/ → All checks passed; uv run mypy loom/ → Success: no issues found in 175 source files"
+    },
+    {
+      "id": "f-triangle-orchestrator-prompt",
+      "name": "Phase TP-4: Orchestrator system prompt 升级（双跑模式）",
+      "description": "loom/agent/system_prompt.py::build_fresh() 静态规则段升级：身份从'编程助手'改为'LoomCode 编排者'，明确三角角色；加委派决策规则（何时 task / 何时自己做 / 何时 review）；加委派 prompt 写法（必须 <feature_card>+<scope_envelope>+指令三段）；加反馈回路处理表（按 feedback_directive.action 执行）；加 PreCompact system-reminder 识别规则；加 3 次连续非-pass 强制 escalate 规则（invariant I9）。双跑模式：保留老规则，新规则作为追加段，老 eval case 不断言新规则关键词。同时升级 _run_pre_compact_review + _run_session_end_review 用新 run_review 返回值（tuple），system-reminder 包含 verdict + feedback_directive 两块（C10 fix），review_attempts 持久化到 feature_list.json（I9）。",
+      "dependencies": [
+        "f-triangle-protocol-parser",
+        "f-triangle-protocol-integration",
+        "f-triangle-protocol-trace"
+      ],
+      "status": "done",
+      "verification": "uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100 && uv run python -m loom.cli eval --filter review --fail-under 100 && uv run pytest tests/test_orchestrator_prompt.py tests/test_session_mutable_prompt.py -v",
+      "evidence": "uv run pytest tests/test_orchestrator_prompt.py tests/test_session_mutable_prompt.py -v → 7/7 + 6/6 = 13/13 passed; uv run pytest tests/test_orchestrator_prompt.py tests/test_session_mutable_prompt.py tests/test_triangle_protocol.py tests/test_triangle_integration.py tests/test_triangle_trace.py tests/test_trace.py tests/test_review_pre_compact.py tests/test_review_tool.py tests/test_tools.py -q → 150/150 passed (zero regression); uv run python -m loom.cli eval --filter review --fail-under 100 → 15/15 passed (TP-2 zero regression); uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100 → 10/10 passed (dual-mode confirmed: legacy prompt tests don't assert Triangle Protocol keywords, new section coexists); uv run ruff check loom/ → All checks passed; uv run mypy loom/ → Success: no issues found in 175 source files; Triangle Protocol new section = 1157 chars (≤1500 plan budget)"
     }
   ]
 }

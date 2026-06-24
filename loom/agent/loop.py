@@ -700,8 +700,69 @@ def _find_active_feature_for_review(workdir: Path | None = None) -> dict | None:
         return None
 
 
+def _increment_review_attempts(feat_id: str) -> None:
+    """I9 persistence: increment review_attempts in feature_list.json.
+
+    Counter survives autocompact and cross-session (stored in JSON, not prompt).
+    Reset by ``_reset_review_attempts`` on pass verdict.
+    """
+    import json
+    fl_path = WORKDIR / "feature_list.json"
+    if not fl_path.exists():
+        return
+    try:
+        fl = json.loads(fl_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("_increment_review_attempts: read failed: %s", exc)
+        return
+    for f in fl.get("features", []):
+        if f.get("id") == feat_id:
+            f["review_attempts"] = f.get("review_attempts", 0) + 1
+            break
+    try:
+        fl_path.write_text(json.dumps(fl, indent=2, ensure_ascii=False), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("_increment_review_attempts: write failed: %s", exc)
+
+
+def _reset_review_attempts(feat_id: str) -> None:
+    """I9: reset counter to 0 on pass verdict (called from _run_session_end_review)."""
+    import json
+    fl_path = WORKDIR / "feature_list.json"
+    if not fl_path.exists():
+        return
+    try:
+        fl = json.loads(fl_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("_reset_review_attempts: read failed: %s", exc)
+        return
+    for f in fl.get("features", []):
+        if f.get("id") == feat_id:
+            f["review_attempts"] = 0
+            break
+    try:
+        fl_path.write_text(json.dumps(fl, indent=2, ensure_ascii=False), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("_reset_review_attempts: write failed: %s", exc)
+
+
+def _parse_pre_compact_verdict_status(verdict_str: str) -> str:
+    """Extract status from "[review: <status>]" prefix in verdict_str.
+
+    Returns "unknown" if no match (defensive default).
+    """
+    import re
+    m = re.search(r"\[review:\s*(\w+)", verdict_str)
+    return m.group(1) if m else "unknown"
+
+
 def _run_pre_compact_review(messages: list, config: HarnessConfig) -> None:
     """Run a code review before autocompact, if a new active feature is found.
+
+    TP-4 upgrade: use new ``run_review`` return value (verdict_str + FeedbackDirective).
+    C10 fix: system-reminder now includes the serialized <feedback_directive> block
+    in addition to verdict_str, so the Orchestrator LLM sees both the verdict and
+    the action directive it must execute.
 
     Fail-closed: exceptions are caught and logged; autocompact proceeds.
     Uses ``_LAST_REVIEWED_FEATURE_ID`` to avoid re-reviewing the same feature
@@ -717,21 +778,37 @@ def _run_pre_compact_review(messages: list, config: HarnessConfig) -> None:
         feat_id = feat.get("id")
         if not feat_id or feat_id == _LAST_REVIEWED_FEATURE_ID:
             return
-        from loom.agent.review import run_review_legacy_str
+        from loom.agent.review import run_review
 
-        verdict_str = run_review_legacy_str(
+        verdict_str, fd = run_review(
             feat_id,
             feat.get("description", ""),
             feat.get("name", ""),
         )
+
+        # I9 persistence: bump review_attempts in feature_list.json
+        _increment_review_attempts(feat_id)
+
+        # C10 fix: include <feedback_directive> block in addition to verdict_str
+        reminder_content = (
+            f"[system-reminder] PreCompact review verdict for {feat_id}:\n"
+            f"{verdict_str}\n"
+        )
+        if fd is not None:
+            from loom.agent.triangle_protocol import serialize_feedback_directive
+            reminder_content += "\n" + serialize_feedback_directive(fd) + "\n"
+        reminder_content += "保留此 verdict 作为下次 session 的上下文。"
+
         messages.append({
             "role": "user",
-            "content": (
-                f"[system-reminder] PreCompact review verdict for {feat_id}:\n"
-                f"{verdict_str}\n"
-                f"保留此 verdict 作为下次 session 的上下文。"
-            ),
+            "content": reminder_content,
         })
+
+        # TP-4: if feedback_directive has a non-none action, trace triangle.feedback
+        # and (in future phases) execute the action. action is now a list (TP-1 design).
+        if fd is not None and "none" not in fd.action:
+            _execute_feedback_directive(feat_id, fd)
+
         _LAST_REVIEWED_FEATURE_ID = feat_id
     except Exception as exc:
         logger.warning("_run_pre_compact_review: failed: %s", exc)
@@ -741,7 +818,8 @@ def _run_session_end_review(workdir: Path, config: HarnessConfig, history: list)
     """Fire-and-forget code review at session end.
 
     Spawns a daemon thread that reads ``feature_list.json``, finds the active
-    feature, calls ``run_review()``, and writes the verdict to progress.md.
+    feature, calls ``run_review()``, writes the verdict to progress.md, and
+    updates I9 ``review_attempts`` counter (reset on pass, increment on non-pass).
     Never blocks process exit — the daemon thread dies when the process exits.
     """
     def _runner() -> None:
@@ -751,11 +829,18 @@ def _run_session_end_review(workdir: Path, config: HarnessConfig, history: list)
             feat = _find_active_feature_for_review(workdir)
             if feat is None:
                 return
-            from loom.agent.review import run_review_legacy_str
+            from loom.agent.review import run_review
 
             feat_id = feat["id"]
-            verdict_str = run_review_legacy_str(feat_id, feat.get("description", ""), feat.get("name", ""))
+            verdict_str, fd = run_review(feat_id, feat.get("description", ""), feat.get("name", ""))
             _write_verdict_to_progress_md(workdir, feat_id, verdict_str)
+
+            # I9: reset on pass, increment on non-pass (mirror _run_pre_compact_review)
+            status = _parse_pre_compact_verdict_status(verdict_str)
+            if status == "pass":
+                _reset_review_attempts(feat_id)
+            else:
+                _increment_review_attempts(feat_id)
         except Exception as exc:
             logger.warning("SessionEnd review failed: %s", exc)
 

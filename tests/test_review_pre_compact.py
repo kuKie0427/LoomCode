@@ -108,6 +108,96 @@ class TestPreCompactReview:
         assert messages[0]["content"].startswith("[system-reminder]")
 
 
+class TestPreCompactReviewTP4:
+    """TP-4 upgrades: C10 fix (verdict + feedback_directive in reminder) and I9 persistence."""
+
+    def setup_method(self) -> None:
+        loop_mod._LAST_REVIEWED_FEATURE_ID = None
+
+    def test_system_reminder_includes_feedback_directive_block(self, tmp_path, monkeypatch):
+        """C10 fix: when run_review returns a FeedbackDirective, the system-reminder
+        must include the serialized <feedback_directive>...</feedback_directive> block
+        alongside verdict_str. This is what lets the Orchestrator LLM see the action
+        it must execute (scope_trim / fix_bug / etc.).
+        """
+        from loom.agent.triangle_protocol import FeedbackDirective
+
+        monkeypatch.setattr("loom.agent.loop.WORKDIR", tmp_path)
+        fl = tmp_path / "feature_list.json"
+        fl.write_text(
+            json.dumps({"features": [
+                {"id": "f-c10", "name": "T", "description": "d", "status": "in-progress", "verification": "echo"},
+            ]}),
+            encoding="utf-8",
+        )
+        config = _make_config(pre_compact_review=True)
+        messages: list = []
+        fd = FeedbackDirective(
+            action=("fix_bug",),
+            target_files=("src/x.py",),
+            target_lines=("10-20",),
+            retry_review=False,
+            notes="fix the bug",
+        )
+        with patch("loom.agent.review.run_review", return_value=("[review: fail] bug found", fd)):
+            _run_pre_compact_review(messages, config)
+        content = messages[0]["content"]
+        assert "[system-reminder]" in content
+        assert "[review: fail] bug found" in content
+        # C10 fix: feedback_directive block must be present
+        assert "<feedback_directive>" in content
+        assert "fix_bug" in content
+        assert "src/x.py" in content
+
+    def test_increments_review_attempts_in_feature_list(self, tmp_path, monkeypatch):
+        """I9 persistence: review_attempts counter in feature_list.json is incremented
+        after each PreCompact review (TP-4 upgrade — counter survives autocompact).
+        """
+        monkeypatch.setattr("loom.agent.loop.WORKDIR", tmp_path)
+        fl = tmp_path / "feature_list.json"
+        fl.write_text(
+            json.dumps({"features": [
+                {"id": "f-i9", "name": "T", "description": "d", "status": "in-progress",
+                 "verification": "echo", "review_attempts": 0},
+            ]}),
+            encoding="utf-8",
+        )
+        config = _make_config(pre_compact_review=True)
+        messages: list = []
+        with patch("loom.agent.review.run_review", return_value=("[review: pass] OK", None)):
+            _run_pre_compact_review(messages, config)
+        # Read feature_list.json back, verify review_attempts was bumped to 1
+        updated = json.loads(fl.read_text(encoding="utf-8"))
+        assert updated["features"][0]["review_attempts"] == 1
+
+    def test_increments_review_attempts_accumulates_across_sessions(self, tmp_path, monkeypatch):
+        """I9: two reviews for the same feature → review_attempts = 2, not reset to 1.
+
+        Guard against regression where someone re-implements counter as in-memory
+        and resets per-session (losing the cross-session safety bound).
+        """
+        monkeypatch.setattr("loom.agent.loop.WORKDIR", tmp_path)
+        fl = tmp_path / "feature_list.json"
+        fl.write_text(
+            json.dumps({"features": [
+                {"id": "f-i9-2", "name": "T", "description": "d", "status": "in-progress",
+                 "verification": "echo", "review_attempts": 5},
+            ]}),
+            encoding="utf-8",
+        )
+        config = _make_config(pre_compact_review=True)
+        with patch("loom.agent.review.run_review", return_value=("[review: fail] still bad", None)):
+            # First "session" — increment to 6
+            _run_pre_compact_review([], config)
+        # Simulate a new session by clearing the in-memory dedup cache
+        loop_mod._LAST_REVIEWED_FEATURE_ID = None
+        with patch("loom.agent.review.run_review", return_value=("[review: fail] again", None)):
+            # Second "session" — should be 7 (persisted from JSON, not reset to 0)
+            _run_pre_compact_review([], config)
+        updated = json.loads(fl.read_text(encoding="utf-8"))
+        assert updated["features"][0]["review_attempts"] == 7
+
+
 class TestPreCompactNotDoubleReview:
     """_LAST_REVIEWED_FEATURE_ID prevents re-reviewing the same feature."""
 
