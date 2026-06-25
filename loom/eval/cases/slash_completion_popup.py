@@ -4,7 +4,7 @@ Locks ``filter_commands`` from ``loom/tui/completer.py``:
 
   * Prefix ``"mo"`` returns ``model`` in the first 3 results.
   * Prefix ``"q"`` returns ``quit`` as the first result (alias match).
-  * Empty query returns all 7 commands.
+  * Empty query returns all commands.
 """
 
 from __future__ import annotations
@@ -45,13 +45,17 @@ class SlashCompletionPopupCase(EvalCase):
                 ),
             )
 
-        # 3) Empty query → all 7 commands
-        r3 = filter_commands("")
-        if len(r3) != 7:
+        # 3) Empty query → all commands (use explicit limit to avoid
+        #    the default 8-item cap in filter_commands)
+        from loom.tui.slash_commands import all_commands
+
+        expected_count = len(all_commands())
+        r3 = filter_commands("", limit=20)
+        if len(r3) != expected_count:
             return EvalResult(
                 name=self.name, passed=False,
                 detail=(
-                    f"Expected 7 results for '',"
+                    f"Expected {expected_count} results for '',"
                     f" got {len(r3)}"
                 ),
             )

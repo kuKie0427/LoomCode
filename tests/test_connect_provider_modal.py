@@ -110,11 +110,14 @@ def test_auth_input_modal_saves_credential() -> None:
         mock_ctx.get.return_value = mock_app
 
         with patch("loom.agent.credential.credentials") as mock_creds:
-            with patch.object(aim, "query_one") as mock_query:
-                key_input = MagicMock()
-                key_input.value = "sk-valid-key"
+            key_input = MagicMock()
+            key_input.value = "sk-valid-key"
+            error_label = MagicMock()
 
-                mock_query.return_value = key_input
+            with patch.object(aim, "query_one") as mock_query:
+                mock_query.side_effect = lambda selector, widget_type=None: (
+                    error_label if "auth-error" in str(selector) else key_input
+                )
 
                 with patch.object(aim, "dismiss") as mock_dismiss:
                     aim._do_save()
@@ -124,27 +127,31 @@ def test_auth_input_modal_saves_credential() -> None:
     assert args[0] == "anthropic"  # provider_id
     assert args[1].api_key == "sk-valid-key"  # CredentialInfo.api_key
     assert args[1].provider_id == "anthropic"
+    mock_app.show_notification.assert_called_once()
     mock_dismiss.assert_called_once_with("anthropic")
 
 
 def test_auth_input_modal_requires_api_key() -> None:
-    """Empty API key shows error and does not dismiss."""
+    """Empty API key shows inline error and does not dismiss."""
     aim = AuthInputModal("anthropic")
 
     mock_app = MagicMock()
     with patch("textual.message_pump.active_app") as mock_ctx:
         mock_ctx.get.return_value = mock_app
 
-        with patch.object(aim, "query_one") as mock_query:
-            key_input = MagicMock()
-            key_input.value = ""
+        key_input = MagicMock()
+        key_input.value = ""
+        error_label = MagicMock()
 
-            mock_query.return_value = key_input
+        with patch.object(aim, "query_one") as mock_query:
+            mock_query.side_effect = lambda selector, widget_type=None: (
+                error_label if "auth-error" in str(selector) else key_input
+            )
 
             with patch.object(aim, "dismiss") as mock_dismiss:
                 aim._do_save()
 
-    mock_app.notify.assert_called_once()
+    error_label.update.assert_called_once_with("API key is required")
     mock_dismiss.assert_not_called()
 
 

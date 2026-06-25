@@ -51,10 +51,30 @@ class PermissionScreen(ModalScreen[str]):
             yield Static(f"⚠  [b]{self.reason}[/b]", id="perm-reason")
             yield Static(f"Tool: [$secondary]{self.tool_name}[/]")
             yield Static(f"Args: {json.dumps(self.args, indent=2)[:300]}")
+            scope = self._scope_text()
+            yield Static(scope, id="perm-scope")
             with Horizontal(id="perm-buttons"):
                 yield Button("Allow once (a)", id="btn-allow", variant="success")
                 yield Button("Allow always (A)", id="btn-allow-always")
                 yield Button("Deny (d/Esc)", id="btn-deny", variant="error")
+
+    def _scope_text(self) -> str:
+        """Return a concise explanation of what "Allow always" means.
+
+        Workspace-write tools are never persisted; everything else is stored
+        in ``.minicode/permissions.json`` for 30 days keyed by tool + pattern.
+        """
+        from loom.agent.permission_store import WORKSPACE_WRITE_TOOLS
+
+        if self.tool_name in WORKSPACE_WRITE_TOOLS:
+            return (
+                "[$text-muted]Allow always is not available for write/edit tools; "
+                "you will be re-prompted each time.[/]"
+            )
+        return (
+            "[$text-muted]Allow always remembers this tool + pattern in "
+            "``.minicode/permissions.json`` for 30 days.[/]"
+        )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-allow":

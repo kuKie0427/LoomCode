@@ -69,6 +69,11 @@ _DISCOVERY_THREADS: list[threading.Thread] = []
 # configured-but-not-connected servers (handshake failure / eviction).
 _CONFIGURED_SERVER_NAMES: set[str] = set()
 
+# Last recorded error message per configured MCP server. Updated on discovery
+# failure or runtime call eviction so the TUI overlay can show why a server
+# is in the ``error`` state. Cleared on successful connection.
+_SERVER_ERRORS: dict[str, str] = {}
+
 # Guards start_discovery so the TUI can fire it early (on_mount) without
 # the SessionStart hook (agent_loop) duplicating threads.  Reset in
 # shutdown_all so a fresh session can restart discovery.
@@ -78,11 +83,12 @@ _DISCOVERY_STARTED: bool = False
 def get_server_snapshot() -> list[dict[str, str]]:
     """Thread-safe snapshot of all configured MCP servers and their state.
 
-    Returns ``{"name": str, "state": "connected"|"error"}`` for every
-    server in ``_CONFIGURED_SERVER_NAMES``: ``"connected"`` means the
-    server is alive in ``_ACTIVE_SERVERS``; ``"error"`` means it was
+    Returns ``{"name": str, "state": "connected"|"error", "error": str|""}``
+    for every server in ``_CONFIGURED_SERVER_NAMES``: ``"connected"`` means
+    the server is alive in ``_ACTIVE_SERVERS``; ``"error"`` means it was
     configured but not connected (handshake failed, evicted, or not yet
-    discovered).  Empty list when no MCP servers are configured.
+    discovered). The ``"error"`` field carries the last recorded detail
+    when state is ``"error"``. Empty list when no MCP servers are configured.
     """
     with _LOCK:
         active = set(_ACTIVE_SERVERS.keys())
@@ -90,7 +96,14 @@ def get_server_snapshot() -> list[dict[str, str]]:
     all_names = configured | active
     result: list[dict[str, str]] = []
     for name in sorted(all_names):
-        result.append({"name": name, "state": "connected" if name in active else "error"})
+        state = "connected" if name in active else "error"
+        result.append(
+            {
+                "name": name,
+                "state": state,
+                "error": _SERVER_ERRORS.get(name, ""),
+            }
+        )
     return result
 
 
@@ -128,8 +141,9 @@ def _discover_server(spec: MCPServerConfig) -> None:
     """Run start() for one server, then register all its tools.
 
     Catches every exception so a background thread can never crash the main
-    process. On any failure, logs a warning and returns; the server is not
-    cached, no tools are registered.
+    process. On any failure, logs a warning, records the error for the TUI
+    overlay, and returns; the server is not cached, no tools are registered.
+    On success, any prior error for this server is cleared.
     """
     try:
         server = MCPServer(
@@ -141,12 +155,16 @@ def _discover_server(spec: MCPServerConfig) -> None:
         )
         mcp_start(server)  # raises MCPError on handshake fail
     except Exception as exc:
-        logger.warning("MCP server '%s' discovery failed: %s", spec.name, exc)
+        error_msg = str(exc) or exc.__class__.__name__
+        logger.warning("MCP server '%s' discovery failed: %s", spec.name, error_msg)
+        with _LOCK:
+            _SERVER_ERRORS[spec.name] = error_msg
         return
 
     with _LOCK:
         _ACTIVE_SERVERS[spec.name] = server
         _PER_SERVER_LOCKS[spec.name] = threading.Lock()
+        _SERVER_ERRORS.pop(spec.name, None)
 
     # Register every tool the server reported. Each registration is
     # independent: a malformed-schema tool or a duplicate-name tool is
@@ -259,14 +277,16 @@ def _make_mcp_handler(server_name: str, tool_name: str):
                 # cache, unregister all mcp__<server>__* tools so the
                 # next tool_use block fails fast with "Unknown tool"
                 # instead of hanging on a dead stdio pipe.
+                error_msg = str(exc) or exc.__class__.__name__
                 logger.warning(
                     "MCP server '%s' call failed (tool='%s'), evicted. "
                     "Tools from this server unavailable until restart. Error: %s",
-                    server_name, tool_name, exc,
+                    server_name, tool_name, error_msg,
                 )
                 with _LOCK:
                     _ACTIVE_SERVERS.pop(server_name, None)
                     _PER_SERVER_LOCKS.pop(server_name, None)
+                    _SERVER_ERRORS[server_name] = error_msg
                     for n in list(tools_mod.TOOL_REGISTRY.names()):
                         if n.startswith(f"mcp__{server_name}__"):
                             try:
@@ -426,6 +446,7 @@ def shutdown_all() -> None:
                 if hname.startswith(f"mcp__{name}__"):
                     del tools_mod.SUB_HANDLERS[hname]
         _PER_SERVER_LOCKS.clear()
+        _SERVER_ERRORS.clear()
     _DISCOVERY_STARTED = False
     # Refresh the live aliases after bulk unregistration.
     try:

@@ -105,6 +105,46 @@ class TestCheckRules:
         assert result is None
 
 
+class TestPermissionStoreIntegration:
+    def test_existing_grant_skips_prompt(self, hooks, monkeypatch, temp_workdir):
+        """A stored grant for the exact tool + pattern bypasses the prompt."""
+        from loom.agent import permission_store
+
+        monkeypatch.setattr(hook_module, "WORKDIR", temp_workdir)
+        monkeypatch.setattr(hooks, "_ask_user", lambda *args: pytest.fail("should not prompt"))
+        permission_store.grant(temp_workdir, "bash", {"command": "ls -la"})
+
+        block = MockBlock("bash", {"command": "ls -la"})
+        result = hooks.check_permission_hook("PreToolUse", block)
+        assert result is None
+
+    def test_allow_always_persists_grant(self, hooks, monkeypatch, temp_workdir):
+        """Choosing allow_always records a grant for the tool + pattern."""
+        from loom.agent import permission_store
+
+        monkeypatch.setattr(hook_module, "WORKDIR", temp_workdir)
+        monkeypatch.setattr(hooks, "_ask_user", lambda *args: "allow_always")
+        # Use a command that matches the destructive-bash rule so the user
+        # is prompted and allow_always can be recorded.
+        block = MockBlock("bash", {"command": "rm foo.txt"})
+
+        result = hooks.check_permission_hook("PreToolUse", block)
+        assert result is None
+        assert permission_store.is_granted(temp_workdir, "bash", {"command": "rm foo.txt"})
+
+    def test_allow_always_does_not_persist_write_tools(self, hooks, monkeypatch, temp_workdir):
+        """Workspace-write tools are never persisted even on allow_always."""
+        from loom.agent import permission_store
+
+        monkeypatch.setattr(hook_module, "WORKDIR", temp_workdir)
+        monkeypatch.setattr(hooks, "_ask_user", lambda *args: "allow_always")
+        block = MockBlock("write_file", {"path": str(temp_workdir / "out.txt")})
+
+        result = hooks.check_permission_hook("PreToolUse", block)
+        assert result is None
+        assert not permission_store.is_granted(temp_workdir, "write_file", {"path": str(temp_workdir / "out.txt")})
+
+
 class TestLogHook:
     def test_log_hook_returns_none(self):
         """log_hook always returns None for every event type."""

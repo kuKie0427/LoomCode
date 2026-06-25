@@ -145,12 +145,15 @@ class TestToolCallMarkerClickBehavior:
         mock_output.toggle.assert_called_once()
         assert not hasattr(marker, "_open_modal")
 
-    def test_on_press_calls_output_widget_toggle(self):
+    def test_enter_key_calls_output_widget_toggle(self):
+        """Keyboard Enter/Space toggles the tool output like a click."""
+        from textual.events import Key
+
         marker = ToolCallMarker("bash", "{}")
         mock_output = MagicMock()
         marker.set_output_widget(mock_output)
 
-        marker.on_press()
+        marker.on_key(Key("enter", None))
         mock_output.toggle.assert_called_once()
 
     def test_single_click_without_output_widget_does_not_raise(self):

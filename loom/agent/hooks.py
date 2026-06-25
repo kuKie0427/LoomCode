@@ -87,9 +87,15 @@ class Hooks:
                 return reason
         reason = self._check_rules(block.name, block.input)
         if reason:
+            from loom.agent import permission_store
+
+            if permission_store.is_granted(WORKDIR, block.name, block.input):
+                return None
             decision = self._ask_user(block.name, block.input, reason)
             if decision == "deny":
                 return "Permission denied."
+            if decision == "allow_always":
+                permission_store.grant(WORKDIR, block.name, block.input)
         return None
 
     def log_hook(self, event, *args):

@@ -660,7 +660,7 @@
   <header class="doc-header">
     <h1>loom TUI — Layout Design Language</h1>
     <p class="subtitle">A static design reference for the spatial structure, hierarchy, and motion intent of loom's terminal user interface. Each mockup visualizes a rule from the source document.</p>
-    <p class="meta">source: docs/tui-design-language.md &nbsp;·&nbsp; 8 states &nbsp;·&nbsp; self-contained reference artifact</p>
+    <p class="meta">source: docs/tui-design-language.md &nbsp;·&nbsp; 7 states &nbsp;·&nbsp; self-contained reference artifact</p>
   </header>
 
   <!-- ═══════════════════════════════════════════════════════════════
@@ -685,18 +685,14 @@
     </div>
     <div class="index-item">
       <span class="num">05</span>
-      <span class="label">ToolCallModal Overlay</span>
-    </div>
-    <div class="index-item">
-      <span class="num">06</span>
       <span class="label">Header — 3 Buttons</span>
     </div>
     <div class="index-item">
-      <span class="num">07</span>
+      <span class="num">06</span>
       <span class="label">Header — MCP Expanded</span>
     </div>
     <div class="index-item">
-      <span class="num">08</span>
+      <span class="num">07</span>
       <span class="label">Header — Switched to Todos</span>
     </div>
   </nav>
@@ -1055,7 +1051,7 @@ test_context.py::test_microcompact_todo_unchanged SKIPPED
       <div class="annotations">
         <div class="annotation">
           <span class="cite">§1 — Lifecycle: full-screen overlays</span>
-          <p>PermissionScreen and ToolCallModal are the Lifecycle subsystem's screen region. Hard-interrupt moments: consent and deep-dive. The rest of the layout yields.</p>
+          <p>PermissionScreen is the Lifecycle subsystem's screen region. Hard-interrupt moment: consent. The rest of the layout yields.</p>
           <span class="rule-tag">Lifecycle region</span>
         </div>
         <div class="annotation">
@@ -1083,100 +1079,14 @@ test_context.py::test_microcompact_todo_unchanged SKIPPED
   </section>
 
   <!-- ═══════════════════════════════════════════════════════════════
-       STATE 5 — TOOL CALL MODAL OVERLAY
+       STATE 5 — HEADER COLLAPSED
        ═══════════════════════════════════════════════════════════════ -->
   <section class="section" id="state-5">
     <div class="section-head">
       <span class="section-num">05</span>
-      <h2 class="section-title">ToolCallModal Overlay</h2>
-    </div>
-    <p class="section-desc">A view-only deep dive: double-click a completed ToolCallMarker to see the full args and result markdown. 80% × 80% of the viewport, centered, with a Close button.</p>
-
-    <div class="mockup-row wide">
-      <div>
-        <div class="terminal">
-          <div class="terminal-titlebar">
-            <span class="terminal-dot"></span>
-            <span class="terminal-dot"></span>
-            <span class="terminal-dot"></span>
-            <span class="title">loom — tool call detail</span>
-          </div>
-          <div class="terminal-body" style="height: 420px; position: relative;">
-
-            <!-- dimmed background -->
-            <div class="overlay-dim"></div>
-
-            <!-- faint chat behind -->
-            <div style="position: absolute; top: 10px; left: 32px; right: 32px; opacity: 0.2; pointer-events: none;">
-              <div class="m-turn-label assistant" style="font-size: 0.7rem;">▎ assistant</div>
-              <div class="m-msg assistant-msg" style="font-size: 0.68rem; padding: 4px 8px;">I'll fix the microcompact preservation…</div>
-              <div class="m-tool-marker done" style="font-size: 0.68rem;">⊙ bash · done</div>
-            </div>
-
-            <!-- modal -->
-            <div class="overlay-content modal-box">
-              <div class="modal-title">🔧 bash</div>
-              <div class="modal-body">
-                <div style="margin-bottom: 10px;">
-                  <span style="color: var(--white); font-weight: 500; font-size: 0.72rem;">Args:</span>
-                </div>
-                <div class="m-code-block" style="margin-bottom: 12px; font-size: 0.68rem;">{
-  "command": "uv run pytest tests/test_context.py -v -k todo"
-}</div>
-                <div style="margin-bottom: 10px;">
-                  <span style="color: var(--white); font-weight: 500; font-size: 0.72rem;">📄 Result:</span>
-                </div>
-                <div class="m-code-block" style="font-size: 0.68rem; line-height: 1.6;"><span style="color: var(--green);">test_context.py::test_microcompact_preserves_todo_write PASSED</span>
-<span style="color: var(--text-muted);">test_context.py::test_microcompact_todo_unchanged SKIPPED</span>
-
-<span style="color: var(--white);">2 passed, 1 skipped in 0.42s</span></div>
-              </div>
-              <div class="modal-close">Close (Esc)</div>
-            </div>
-
-          </div>
-        </div>
-      </div>
-
-      <div class="annotations">
-        <div class="annotation">
-          <span class="cite">§4 — ToolCallModal: 80% × 80%</span>
-          <p>Center, full-screen overlay. 80% width, 80% height. Modal — view-only deep dive. Double-click a ToolCallMarker to open; Escape or Close button to dismiss.</p>
-          <span class="rule-tag">80% × 80%</span>
-        </div>
-        <div class="annotation">
-          <span class="cite">§2 rule 6 — Hard interrupts fill the screen</span>
-          <p>Like PermissionScreen, ToolCallModal replaces the layout entirely. The loop is paused during viewing. This is the "deep-dive" lifecycle interrupt.</p>
-          <span class="rule-tag">full-screen replace</span>
-        </div>
-        <div class="annotation">
-          <span class="cite">§6 — Appears instantly</span>
-          <p>Triggered by double-click on marker. No slide, no fade, no easing. Appears instantly — the same instant-replace pattern as PermissionScreen.</p>
-          <span class="rule-tag">instant replace</span>
-        </div>
-        <div class="annotation">
-          <span class="cite">§5 — Progressive disclosure: Tier 3</span>
-          <p>Tier 1: StatusBar (always). Tier 2: marker line (visible). Tier 3: modal body (click to load). This modal is the deepest tier — full args + result markdown.</p>
-          <span class="rule-tag">Tier 3 deep-dive</span>
-        </div>
-        <div class="annotation">
-          <span class="cite">§5 — On-demand detail, not always-on</span>
-          <p>Full detail (per-tool call, full message history) is on-demand behind click-to-expand. The 1-line StatusBar cap is not negotiable — it keeps Tier 1 glanceable.</p>
-          <span class="rule-tag">on-demand</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ═══════════════════════════════════════════════════════════════
-       STATE 6 — HEADER COLLAPSED
-       ═══════════════════════════════════════════════════════════════ -->
-  <section class="section" id="state-6">
-    <div class="section-head">
-      <span class="section-num">06</span>
       <h2 class="section-title">Header — 3 Buttons (Collapsed)</h2>
     </div>
-    <p class="section-desc">The default 1-line summary rail docked at the top. Each section (MCP / Todos / Subagent) is its own independently clickable button. Clicking a button toggles only that section's overlay (mutual exclusion — see State 7 & 8). The MCP button is shown with hover styling (text accent + bold) to demonstrate click affordance.</p>
+    <p class="section-desc">The default 1-line summary rail docked at the top. Each section (MCP / Todos / Subagent) is its own independently clickable button. Clicking a button toggles only that section's overlay (mutual exclusion — see State 6 & 7). The MCP button is shown with hover styling (text accent + bold) to demonstrate click affordance.</p>
 
     <div class="mockup-row wide">
       <div>
@@ -1288,7 +1198,7 @@ test_context.py::test_microcompact_todo_unchanged SKIPPED
         </div>
         <div class="annotation">
           <span class="cite">§4.3 — Per-section buttons (3 click targets)</span>
-          <p>Each of the 3 buttons is an independent click target. The collapsed line is NOT a single click target — clicking the MCP button only expands MCP (see State 7). Buttons have hover styling (text accent + font-weight: 500) to signal clickability.</p>
+          <p>Each of the 3 buttons is an independent click target. The collapsed line is NOT a single click target — clicking the MCP button only expands MCP (see State 6). Buttons have hover styling (text accent + font-weight: 500) to signal clickability.</p>
           <span class="rule-tag">3 buttons · independent</span>
         </div>
         <div class="annotation">
@@ -1301,11 +1211,11 @@ test_context.py::test_microcompact_todo_unchanged SKIPPED
   </section>
 
   <!-- ═══════════════════════════════════════════════════════════════
-       STATE 7 — HEADER EXPANDED (MCP overlay)
+       STATE 6 — HEADER EXPANDED (MCP overlay)
        ═══════════════════════════════════════════════════════════════ -->
-  <section class="section" id="state-7">
+  <section class="section" id="state-6">
     <div class="section-head">
-      <span class="section-num">07</span>
+      <span class="section-num">06</span>
       <h2 class="section-title">Header — MCP Expanded</h2>
     </div>
     <p class="section-desc">After clicking the MCP button in the collapsed Header, only the MCP section's overlay panel expands. The Todo and Subagent buttons stay in collapsed state — mutual exclusion (only ONE overlay visible at a time). The MCP button shows an "active" state (accent border-bottom + background highlight) to signal which section is open.</p>
@@ -1414,11 +1324,11 @@ test_context.py::test_microcompact_todo_unchanged SKIPPED
   </section>
 
   <!-- ═══════════════════════════════════════════════════════════════
-       STATE 8 — HEADER SWITCHED TO TODOS (mutual exclusion demo)
+       STATE 7 — HEADER SWITCHED TO TODOS (mutual exclusion demo)
        ═══════════════════════════════════════════════════════════════ -->
-  <section class="section" id="state-8">
+  <section class="section" id="state-7">
     <div class="section-head">
-      <span class="section-num">08</span>
+      <span class="section-num">07</span>
       <h2 class="section-title">Header — Switched to Todos</h2>
     </div>
     <p class="section-desc">After clicking the Todo button while the MCP overlay is open, the MCP overlay is removed and the Todo overlay is mounted (mutual exclusion). The Todo button is now in the active state; the MCP and Subagent buttons are back to collapsed. This demonstrates the "switch" case of the 3-way toggle state machine: click different → switch.</p>
@@ -1436,7 +1346,7 @@ test_context.py::test_microcompact_todo_unchanged SKIPPED
 
             <!-- Header (1 line, Todo button in active state) -->
             <div style="position: absolute; top: 0; left: 0; right: 0; height: 1.55em; line-height: 1.55em; padding: 0; background: var(--bg-panel); border-bottom: 1px solid var(--border); font-size: 0.75rem; color: var(--text-dim); z-index: 12; display: flex;">
-              <!-- MCP button (collapsed — was active in State 7) -->
+              <!-- MCP button (collapsed — was active in State 6) -->
               <div style="flex: 1; padding: 0 12px; cursor: pointer; border-right: 1px solid var(--border);">
                 <span style="color: var(--yellow);">◌</span> MCP:3/3
               </div>

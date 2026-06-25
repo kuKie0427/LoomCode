@@ -33,7 +33,7 @@ The harness model has five subsystems. The TUI gives each one a **fixed on-scree
 | **State** | ChatLog scroll area (`1fr`, scrolls) | `ChatLog(VerticalScroll)` in `loom/tui/chat_log.py:432-644` | Mouse wheel + scroll bar; sticky-at-bottom while streaming |
 | **Verification** | StatusBar (1 line, fixed) | `StatusBar` in `loom/tui/status_bar.py:38-79` | Read-only glance (model / turns / tools / ctx ratio) |
 | **Scope** | Composer (3–8 lines, soft-wrap, focused input) | `Composer(TextArea)` in `loom/tui/composer.py:6-46` | User typing; Enter submits |
-| **Lifecycle** | Full-screen overlays | `PermissionScreen` in `loom/tui/screens.py`, `ToolCallModal` in `loom/tui/chat_log.py:307-363` | Modal gate; replaces, not floats |
+| **Lifecycle** | Full-screen overlays | `PermissionScreen` in `loom/tui/screens.py` | Modal gate; replaces, not floats |
 
 | Aggregate rail | Region | Implementation | Interaction |
 |---|---|---|---|
@@ -97,11 +97,11 @@ These are the rules the design enforces. Every component decision must be checka
 
 ### §2 rule 6 — Hard interrupts fill the screen
 
-> Modal screens replace the entire viewport (PermissionScreen, ToolCallModal). They are not floats, not side-panels, not toasts.
+> Modal screens replace the entire viewport (`PermissionScreen`). They are not floats, not side-panels, not toasts.
 
 **Why:** A consent gate that occupies 30% of the screen invites the user to "look around it." A full-screen replacement with a thick red border forces a decision. This is the **only** time the layout should hard-interrupt (see §5 anti-pattern: "hard interrupts for consent only").
 
-**Enforcement:** `PermissionScreen` and `ToolCallModal` use `ModalScreen` (full-screen), with a thick red border (`PermissionScreen`) or thick primary border (`ToolCallModal`). No floating dialogs, no banner notifications.
+**Enforcement:** `PermissionScreen` uses `ModalScreen` (full-screen) with a thick red border. No floating dialogs, no banner notifications.
 
 ### §2.2 Motion primitives contract
 
@@ -220,15 +220,14 @@ Twelve components in `loom/tui/`. Each has a fixed position, fixed height, and a
 | 8 | `UserMessage` / `AssistantMessage` | `chat_log.py:128-157` | child of `TurnLabel` (same turn) | `height: auto` | read-only markdown; `padding: 0 2` |
 | 9 | `ThinkingMarker` | `chat_log.py:209-273` | child of assistant turn, before thinking body | `height: 1` | click toggles `ThinkingDisplay` visibility |
 | 10 | `ThinkingDisplay` | `chat_log.py:191-206` | child of assistant turn, indented 2 cols | `height: auto`, `display: False` default | reveals on ThinkingMarker click |
-| 11 | `ToolCallMarker` | `chat_log.py:366-429` | child of assistant turn | `height: 1` | single-click toggle `CollapsibleToolOutput`; double-click opens `ToolCallModal` |
+| 11 | `ToolCallMarker` | `chat_log.py:366-429` | child of assistant turn | `height: 1` | single-click toggle `CollapsibleToolOutput` |
 | 12 | `CollapsibleToolOutput` | `chat_log.py:275-304` | child of assistant turn, after ToolCallMarker, indented 2 cols | `max-height: 20`, `display: False` default | scrolls internally if output > 20 lines; truncated head + tail with `… N more lines omitted …` |
-| 13 | `ToolCallModal` | `chat_log.py:307-363` | full-screen ModalScreen | `width: 80%, height: 80%` | deep-dive view; ESC closes |
-| 14 | `PermissionScreen` | `screens.py:13-74` | full-screen ModalScreen | `width: 70%, height: auto` | 3 buttons: Allow once / Allow always / Deny; ESC = deny |
-| 15 | `SystemNote` | `chat_log.py:179-188` | sibling of TurnLabel in ChatLog | `height: auto` | read-only italic dim |
-| 16 | `WelcomeBanner` | `chat_log.py` | first child of empty ChatLog, before any turn | `width: 1fr`, content-align center | Static splash: weave motif + `loom` + slogan + command hints; dismissed on first user message, re-shown after `/clear`; never animates (§2 rule 2) |
-| 17 | `TurnSeparator` | `chat_log.py` | sibling of TurnLabel, before each user turn | `height: 1`, color `$border` | Hairline `─` divider in the content column; no third indent tier (§2 rule 5) |
+| 13 | `PermissionScreen` | `screens.py:13-74` | full-screen ModalScreen | `width: 70%, height: auto` | 3 buttons: Allow once / Allow always / Deny; ESC = deny |
+| 14 | `SystemNote` | `chat_log.py:179-188` | sibling of TurnLabel in ChatLog | `height: auto` | read-only italic dim |
+| 15 | `WelcomeBanner` | `chat_log.py` | first child of empty ChatLog, before any turn | `width: 1fr`, content-align center | Static splash: weave motif + `loom` + slogan + command hints; dismissed on first user message, re-shown after `/clear`; never animates (§2 rule 2) |
+| 16 | `TurnSeparator` | `chat_log.py` | sibling of TurnLabel, before each user turn | `height: 1`, color `$border` | Hairline `─` divider in the content column; no third indent tier (§2 rule 5) |
 
-All 17 components are currently implemented. `SystemNote` is not in the original spec; it lives in the State region as a sibling of `TurnLabel`. `Header` was added 2026-06-19 and refactored to per-section toggle 2026-06-20. `WelcomeBanner` and `TurnSeparator` added 2026-06-21 as low-motion decoration within the loom-ink palette.
+All 16 components are currently implemented. `SystemNote` is not in the original spec; it lives in the State region as a sibling of `TurnLabel`. `Header` was added 2026-06-19 and refactored to per-section toggle 2026-06-20. `WelcomeBanner` and `TurnSeparator` added 2026-06-21 as low-motion decoration within the loom-ink palette.
 
 ---
 
@@ -398,7 +397,7 @@ Layout consequences drawn from harness gotchas. Each anti-pattern is named so a 
 
 **Layout consequence:** Flattening all three tiers (always-on status, always-on bodies, always-on modals) creates a wall of text. The 3-tier model keeps the default screen calm while letting the user drill into detail on demand.
 
-**Enforcement:** Each chat-log element has a marker (`ThinkingMarker`, `ToolCallMarker`) that gates its body. `CollapsibleToolOutput.display = False` by default. Modals (`ToolCallModal`, `PermissionScreen`) only appear on explicit user action.
+**Enforcement:** Each chat-log element has a marker (`ThinkingMarker`, `ToolCallMarker`) that gates its body. `CollapsibleToolOutput.display = False` by default. `PermissionScreen` only appears on explicit user action.
 
 ### Full-screen only for consent
 
@@ -406,7 +405,7 @@ Layout consequences drawn from harness gotchas. Each anti-pattern is named so a 
 
 **Layout consequence:** A consent gate that occupies 30% of the screen invites the user to "look around it." A full-screen replacement with a thick red border forces a decision. Banners/toasts fade out before the user reads them in long sessions.
 
-**Enforcement:** Only `PermissionScreen` and `ToolCallModal` exist. Both are `ModalScreen` (full-screen). New modal types must be full-screen by default — a half-screen variant requires explicit justification.
+**Enforcement:** Only `PermissionScreen` exists as a full-screen modal. New modal types must be full-screen by default — a half-screen variant requires explicit justification.
 
 ### Composer = local override
 

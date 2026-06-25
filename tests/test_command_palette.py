@@ -24,7 +24,7 @@ from textual.widgets import Input, ListView, Static
 from loom.tui.app import AgentTUIApp
 from loom.tui.command_palette import CommandPaletteModal
 from loom.tui.composer import Composer
-from loom.tui.slash_commands import SlashCommand
+from loom.tui.slash_commands import SlashCommand, all_commands
 
 
 class _PaletteTestApp(App):
@@ -46,7 +46,7 @@ def test_palette_initial_population() -> None:
             list_view = pilot.app.screen.query_one(
                 "#command-palette-list", ListView
             )
-            assert len(list_view.children) == 7
+            assert len(list_view.children) == len(all_commands())
 
     asyncio.run(driver())
 

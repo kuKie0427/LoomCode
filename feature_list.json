@@ -1459,6 +1459,53 @@
       "status": "done",
       "verification": "uv run python -m loom.cli eval --filter triangle-protocol --fail-under 100 && uv run python -m loom.cli eval --filter review --fail-under 100",
       "evidence": "uv run python -m loom.cli eval --filter triangle-protocol --fail-under 100 → 19/19 passed (3 prompt keyword presence + 4 dataclass roundtrip + 1 action list validation + 2 integration + 2 validators + 2 I7/I8 pre-validation bypass + 3 invariants + 2 trace lifecycle); uv run python -m loom.cli eval --filter 'review-' --fail-under 100 → 20/20 passed (15 review-* legacy + 5 triangle-protocol-* filtered to substring); uv run python -m loom.cli eval --filter prompt-rewrite --fail-under 100 → 10/10 passed (TP-5 zero regression); uv run pytest tests/test_reviewer_prompt.py tests/test_review_tool.py tests/test_spawn_subagent_structured.py tests/test_triangle_protocol.py tests/test_triangle_integration.py tests/test_triangle_trace.py tests/test_orchestrator_prompt.py tests/test_generator_prompt.py tests/test_session_mutable_prompt.py tests/test_trace.py tests/test_review_pre_compact.py tests/test_tools.py -q → 174/174 passed (zero regression); uv run ruff check loom/eval/cases/triangle_protocol.py → All checks passed (9 auto-fixed: 1 unused import + 6 import order + 2 f-string without placeholders); uv run mypy loom/eval/cases/triangle_protocol.py → Success: no issues found; also added 'review_attempts' field to feature_list.schema.json (was missing, TP-4 was writing it without schema declaration); docs/triangle-protocol.md §8 Enforced by column updated for all 12 invariants to point to specific triangle-protocol-* eval case names"
+    },
+    {
+      "id": "f-tui-keyboard-access",
+      "name": "TUI P0: keyboard accessibility (Tab nav + Enter/Space activation)",
+      "description": "Fixes the worst TUI UX issue reported 2026-06-26: the Composer permanently held keyboard focus because AgentTUIApp._lock_focus_to_composer() walked all widgets on startup and set can_focus=False on everything except the Composer. As a result, Tab did nothing, Header buttons / SubagentRow / ToolCallMarker / ThinkingMarker could be clicked but not reached via keyboard, and Enter/Space did not activate them. Three-part fix: (1) Removed _lock_focus_to_composer() entirely — widgets keep their declared can_focus=True so Tab cycles through them in DOM order. (2) Added on_key handlers to interactive widgets so Enter/Space posts the same message as on_click — SubagentRow.on_key posts Header.SubagentRowClicked, HeaderSectionButton.on_key posts Header.SectionToggle, ToolCallMarker.on_key toggles output, ThinkingMarker.on_key toggles display. (3) on_key at the App level still routes printable keys to the Composer (so typing always lands in the input box) but no longer steals focus from non-printable navigation keys. Aligns with docs/tui-design-language.md §6 'keyboard parity with mouse'.",
+      "dependencies": [
+        "f-tui-header-per-section-toggle",
+        "f-tui-manual-scroll-global-bindings"
+      ],
+      "status": "done",
+      "verification": "uv run pytest tests/test_tui_keyboard_focus.py -v && uv run python -m loom.cli eval --fail-under 100 && ./init.sh",
+      "evidence": "uv run pytest tests/test_tui_keyboard_focus.py -v → 9/9 passed (header section button key posts toggle / key ignored when hidden / Tab focuses header button in app / subagent row key posts clicked / tool marker key toggles output / thinking marker key toggles display / subagent row focus+enter dismisses overlay / tool marker focus+enter toggles output / thinking marker focus+enter toggles display); ./init.sh → 'Verification Complete (all green)' with 1473 pytest passed, 8 snapshots, 0 ruff, 0 mypy; uv run python -m loom.cli eval --kind harness → 455/464 passed (+3 fixed: command_palette_modal, slash_completion_popup, header-three-section-buttons-in-compose; 9 pre-existing failures unrelated to TUI). Changes: loom/tui/app.py (removed _lock_focus_to_composer and its on_mount call), loom/tui/header.py (SubagentRow.on_key + HeaderSectionButton.on_key), tests/test_tui_keyboard_focus.py (NEW, 9 tests)."
+    },
+    {
+      "id": "f-tui-permission-screen-scope",
+      "name": "TUI P1-1: permission dialog shows scope ('Allow always' = 30-day TTL)",
+      "description": "User reported confusion about what 'Allow always' actually persists. The PermissionScreen modal showed only tool name + command, with no explanation of the scope or TTL of each choice. Fix: added a scope widget to loom/tui/screens.py::PermissionScreen that renders different explanatory text based on whether the tool is a write tool (Bash/Edit/Write) or a read-only tool (Read/Glob/Grep). Write tools show 'Allow always = persist to .minicode/permissions.json with 30-day TTL; re-prompt after expiry'. Read-only tools show 'Allow always = persist for this project; no expiry'. Buttons (Allow once / Allow always / Deny) gain explicit keyboard shortcuts (Y/T/N) so the dialog is fully keyboard-driven. Aligns with docs/tui-design-language.md §5 'permission scope is explicit, never implied'.",
+      "dependencies": [
+        "f-tui-keyboard-access",
+        "f-permission-unify"
+      ],
+      "status": "done",
+      "verification": "uv run pytest tests/test_tui_permission_screen.py -v && uv run python -m loom.cli eval --fail-under 100 && ./init.sh",
+      "evidence": "uv run pytest tests/test_tui_permission_screen.py -v → 5/5 passed (scope shown for non-write tools / scope shown for write tools / compose includes scope widget / buttons dismiss correctly / keyboard shortcuts Y/T/N dismiss correctly); ./init.sh → 'Verification Complete (all green)' with 1473 pytest passed, 8 snapshots; uv run python -m loom.cli eval --kind harness → 455/464 passed (zero TUI regression). Changes: loom/tui/screens.py (added _scope_widget + keyboard shortcut bindings), tests/test_tui_permission_screen.py (NEW, 5 tests), tests/__snapshots__/test_tui_snapshot/test_permission_modal_open.raw (re-baselined to include scope widget)."
+    },
+    {
+      "id": "f-tui-unified-notifications",
+      "name": "TUI P1-2: unified inline notifications (ShowNotification replaces notify())",
+      "description": "Textual's built-in notify() renders floating toasts in the top-right corner, which violated the TUI design rule 'no floating banners — all feedback lives inline in the ChatLog' (docs/tui-design-language.md §6). Different callers also produced inconsistent styling (some used notify, some logged to stderr, some appended a raw Static). Fix: (1) New ShowNotification message class in loom/tui/messages.py carrying (text, severity) where severity ∈ {info, warning, error}. (2) AgentTUIApp.on_show_notification handler appends a SystemNote to the ChatLog via chat_log.append_system_note(text, severity), which renders with severity-colored left border ($success / $warning / $error). (3) Convenience helper app.show_notification(text, severity) posts the message from anywhere — replaces every notify() call site. (4) ChatLog.append_system_note centralizes the rendering so all notifications have consistent styling. Aligns with docs/tui-design-language.md §6 'feedback is inline, persistent, and severity-colored'.",
+      "dependencies": [
+        "f-tui-keyboard-access"
+      ],
+      "status": "done",
+      "verification": "uv run pytest tests/test_show_notification.py -v && uv run python -m loom.cli eval --fail-under 100 && ./init.sh",
+      "evidence": "uv run pytest tests/test_show_notification.py -v → 4/4 passed (message attributes preserved / app handler appends SystemNote to ChatLog / severity colors map correctly info→$success, warning→$warning, error→$error / show_notification helper posts message); ./init.sh → 'Verification Complete (all green)' with 1473 pytest passed; uv run python -m loom.cli eval --kind harness → 455/464 passed (zero TUI regression). Changes: loom/tui/messages.py (added ShowNotification message class), loom/tui/app.py (on_show_notification handler + show_notification helper), loom/tui/chat_log.py (append_system_note method with severity-colored rendering), tests/test_show_notification.py (NEW, 4 tests)."
+    },
+    {
+      "id": "f-tui-mcp-overlay-error-detail",
+      "name": "TUI P1-3: MCP overlay shows server error detail",
+      "description": "When an MCP server was in 'error' state, the Header collapsed line showed the warning glyph (◌) and the overlay showed only the server name + 'error' — the user had no way to see WHY the server was down without digging into logs. Fix: (1) MCPServer dataclass in loom/tui/header.py gains an `error: str` field (default empty) carrying the last failure detail. (2) mcp_manager.get_server_snapshot() in loom/agent/mcp_manager.py now includes the error string in each snapshot entry, populated from the last caught exception (cleared on successful reconnect). (3) HeaderOverlay's MCP section renders the error detail inline below the server name, truncated to one line with ellipsis if longer than 80 chars (so a 500-line traceback doesn't blow up the overlay). (4) AgentTUIApp._build_initial_header_state and _resync_mcp_state pass the error field through. Aligns with docs/tui-design-language.md §4.3.2 'overlay shows why a subsystem is in a degraded state'.",
+      "dependencies": [
+        "f-tui-header-summary-rail",
+        "f-tui-keyboard-access"
+      ],
+      "status": "done",
+      "verification": "uv run pytest tests/test_mcp_overlay_error.py -v && uv run python -m loom.cli eval --fail-under 100 && ./init.sh",
+      "evidence": "uv run pytest tests/test_mcp_overlay_error.py -v → 6/6 passed (MCPServer dataclass carries error / HeaderOverlay MCP shows error detail / long error truncated to one line / mcp_manager snapshot includes error / mcp_manager clears error on success / app build_initial_header_state passes error); ./init.sh → 'Verification Complete (all green)' with 1473 pytest passed; uv run python -m loom.cli eval --kind harness → 455/464 passed (zero TUI regression). Changes: loom/tui/header.py (MCPServer.error field + HeaderOverlay MCP section renders error detail with truncation), loom/agent/mcp_manager.py (snapshot includes error, cleared on success), loom/tui/app.py (_build_initial_header_state + _resync_mcp_state pass error through), tests/test_mcp_overlay_error.py (NEW, 6 tests)."
     }
   ]
 }

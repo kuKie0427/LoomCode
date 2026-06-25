@@ -44,6 +44,12 @@ class AuthInputModal(ModalScreen[str | None]):
     #auth-key-input {
         margin: 0;
     }
+    #auth-error {
+        color: $error;
+        text-style: bold;
+        padding: 1 0 0 0;
+        height: auto;
+    }
     """
 
     def __init__(self, provider_id: str) -> None:
@@ -68,6 +74,7 @@ class AuthInputModal(ModalScreen[str | None]):
                 password=True,
                 id="auth-key-input",
             )
+            yield Static("", id="auth-error")
 
     def on_mount(self) -> None:
         self.query_one("#auth-key-input", Input).focus()
@@ -80,9 +87,10 @@ class AuthInputModal(ModalScreen[str | None]):
 
         key_input = self.query_one("#auth-key-input", Input)
         api_key = key_input.value.strip()
+        error_label = self.query_one("#auth-error", Static)
 
         if not api_key:
-            self.app.notify("API key is required", severity="error")
+            error_label.update("API key is required")
             key_input.focus()
             return
 
@@ -94,10 +102,8 @@ class AuthInputModal(ModalScreen[str | None]):
         credentials.set(self._provider_id, info)
 
         display_name = self._lookup_display_name()
-        self.app.notify(
-            f"Logged in to {display_name}",
-            severity="information",
-        )
+        error_label.update("")
+        self.app.show_notification(f"Logged in to {display_name}", severity="success")
         self.dismiss(self._provider_id)
 
     def action_cancel(self) -> None:

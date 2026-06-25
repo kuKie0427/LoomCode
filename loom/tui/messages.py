@@ -103,3 +103,17 @@ class SubagentEnd(Message):
         self.subagent_id = subagent_id
         self.elapsed = elapsed
         self.state = state
+
+
+class ShowNotification(Message):
+    """Posted to display an inline notification in the ChatLog.
+
+    Replaces Textual's built-in ``notify()`` toasts, which violate the
+    TUI design language (no floating banners — see §2 rule 6). The app
+    handles this by appending a SystemNote to the ChatLog.
+    """
+
+    def __init__(self, text: str, severity: str = "info") -> None:
+        super().__init__()
+        self.text = text
+        self.severity = severity

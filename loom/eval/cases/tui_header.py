@@ -391,7 +391,9 @@ class HeaderThreeSectionButtons(EvalCase):
         from loom.tui.header import VALID_SECTIONS, Header, HeaderSectionButton
 
         header = Header()
-        yielded = list(header.compose())
+        yielded = [
+            w for w in header.compose() if isinstance(w, HeaderSectionButton)
+        ]
         if len(yielded) != 3:
             return EvalResult(
                 name=self.name, passed=False,

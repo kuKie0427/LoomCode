@@ -142,12 +142,41 @@ def test_status_bar_has_no_scroll_hint_when_overflowing():
     asyncio.run(driver())
 
 
-def test_no_keyboard_scroll_bindings():
-    for b in AgentTUIApp.BINDINGS:
-        if isinstance(b, tuple):
-            key = b[0]
-        else:
-            key = b.key
-        assert key not in ("shift+pageup", "shift+pagedown", "ctrl+home", "ctrl+end"), (
-            f"Removed keyboard scroll binding still present: {key}"
-        )
+def test_keyboard_scroll_page_up_down():
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test(size=(80, 20)) as pilot:
+            chat_log = await _seed_overflow(app)
+            await pilot.pause(0.3)
+            chat_log.scroll_y = chat_log.max_scroll_y
+            await pilot.pause(0.05)
+            await pilot.press("shift+pageup")
+            await pilot.pause(0.05)
+            assert chat_log.scroll_y < chat_log.max_scroll_y, (
+                "Shift+PageUp should scroll the chat log up"
+            )
+            await pilot.press("shift+pagedown")
+            await pilot.pause(0.05)
+            assert chat_log.scroll_y == chat_log.max_scroll_y, (
+                "Shift+PageDown should scroll the chat log back to the bottom"
+            )
+    asyncio.run(driver())
+
+
+def test_keyboard_scroll_home_end():
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test(size=(80, 20)) as pilot:
+            chat_log = await _seed_overflow(app)
+            await pilot.pause(0.3)
+            chat_log.scroll_y = chat_log.max_scroll_y
+            await pilot.pause(0.05)
+            await pilot.press("ctrl+home")
+            await pilot.pause(0.05)
+            assert chat_log.scroll_y == 0, "Ctrl+Home should jump to the top of the chat log"
+            await pilot.press("ctrl+end")
+            await pilot.pause(0.05)
+            assert chat_log.scroll_y == chat_log.max_scroll_y, (
+                "Ctrl+End should jump to the bottom of the chat log"
+            )
+    asyncio.run(driver())

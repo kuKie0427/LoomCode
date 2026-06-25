@@ -63,6 +63,7 @@ def _isolate_manager_state():
     mm._ACTIVE_SERVERS.clear()
     mm._PER_SERVER_LOCKS.clear()
     mm._DISCOVERY_THREADS.clear()
+    mm._SERVER_ERRORS.clear()
     mm._DISCOVERY_STARTED = False  # P2-1 fix: reset idempotency guard
     # Snapshot & restore SUB_TOOLS / SUB_HANDLERS so tests don't leak into
     # each other. Using [:] = list preserves module identity.
@@ -83,6 +84,7 @@ def _isolate_manager_state():
     mm._ACTIVE_SERVERS.clear()
     mm._PER_SERVER_LOCKS.clear()
     mm._DISCOVERY_THREADS.clear()
+    mm._SERVER_ERRORS.clear()
     mm._DISCOVERY_STARTED = False  # P2-1 fix: reset for next test
     tools_mod.SUB_TOOLS[:] = saved_sub_tools
     tools_mod.SUB_HANDLERS.clear()

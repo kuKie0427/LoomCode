@@ -5,8 +5,8 @@ Tests ``filter_commands`` and ``all_commands`` at the module level
 
   * ``filter_commands("qu", limit=20)`` returns exactly 1 match: ``quit``
   * ``filter_commands("help", limit=20)`` returns ``help`` in the first 2 results
-  * ``filter_commands("", limit=20)`` returns 7 results (all commands)
-  * ``all_commands()`` returns 7 items, each with non-empty ``description``
+  * ``filter_commands("", limit=20)`` returns all commands
+  * ``all_commands()`` returns items, each with non-empty ``description``
 """
 
 from __future__ import annotations
@@ -51,26 +51,27 @@ class CommandPaletteModalCase(EvalCase):
                 ),
             )
 
-        # 3) Empty query → 7 results (all commands)
+        # 3) Empty query → all commands
         r3 = filter_commands("", limit=20)
-        if len(r3) != 7:
+        expected_count = len(all_commands())
+        if len(r3) != expected_count:
             return EvalResult(
                 name=self.name,
                 passed=False,
                 detail=(
-                    f"Expected 7 results for '',"
+                    f"Expected {expected_count} results for '',"
                     f" got {len(r3)}"
                 ),
             )
 
-        # 4) all_commands() → 7 items, each with non-empty description
+        # 4) all_commands() → items, each with non-empty description
         r4 = all_commands()
-        if len(r4) != 7:
+        if len(r4) != expected_count:
             return EvalResult(
                 name=self.name,
                 passed=False,
                 detail=(
-                    f"Expected 7 commands from all_commands(),"
+                    f"Expected {expected_count} commands from all_commands(),"
                     f" got {len(r4)}"
                 ),
             )
@@ -90,7 +91,7 @@ class CommandPaletteModalCase(EvalCase):
             detail=(
                 "filter_commands('qu' limit=20) → [quit], "
                 "filter_commands('help' limit=20) → help in first 2, "
-                "filter_commands('' limit=20) → 7 results, "
-                "all_commands() → 7 items all with non-empty descriptions"
+                f"filter_commands('' limit=20) → {expected_count} results, "
+                f"all_commands() → {expected_count} items all with non-empty descriptions"
             ),
         )

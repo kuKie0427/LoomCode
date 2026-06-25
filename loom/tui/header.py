@@ -39,7 +39,7 @@ from typing import Any, Literal
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.events import Click
+from textual.events import Click, Key
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
@@ -69,11 +69,13 @@ class MCPServer:
 
     ``state`` follows the spec's three-state machine: a server is either
     fully connected, in error (one bad server fails the whole MCP aggregate),
-    or disabled by the user.
+    or disabled by the user. ``error`` carries the last failure detail when
+    ``state == "error"`` so the overlay can show why the server is down.
     """
 
     name: str
     state: Literal["connected", "error", "disabled"]
+    error: str = ""
 
 
 @dataclass
@@ -238,6 +240,8 @@ class SubagentRow(Static):
     }
     SubagentRow:focus {
         background: $boost 5%;
+        text-style: underline;
+        color: $accent;
     }
     """
 
@@ -251,6 +255,12 @@ class SubagentRow(Static):
 
     def on_click(self, event: Click) -> None:
         self.post_message(Header.SubagentRowClicked(self._tool_use_id))
+
+    def on_key(self, event: Key) -> None:
+        """Enter/Space activate the subagent row like a click."""
+        if event.key in ("enter", "space"):
+            event.stop()
+            self.post_message(Header.SubagentRowClicked(self._tool_use_id))
 
 
 class HeaderSectionButton(Static):
@@ -287,6 +297,7 @@ class HeaderSectionButton(Static):
     }
     HeaderSectionButton:focus {
         background: $boost 5%;
+        text-style: bold;
     }
     HeaderSectionButton.section-hidden {
         visibility: hidden;
@@ -378,6 +389,14 @@ class HeaderSectionButton(Static):
         if self.has_class("section-hidden"):
             return
         self.post_message(Header.SectionToggle(self._section))
+
+    def on_key(self, event: Key) -> None:
+        """Enter/Space activate the section toggle like a click."""
+        if event.key in ("enter", "space"):
+            event.stop()
+            if self.has_class("section-hidden"):
+                return
+            self.post_message(Header.SectionToggle(self._section))
 
     def update_pulse(self, has_count: bool) -> None:
         """§2.2.3 primitive 4: toggle 1Hz pulse based on section count.
@@ -504,6 +523,12 @@ class Header(Horizontal):
             super().__init__()
             self.tool_use_id: str = tool_use_id
 
+    # Textual's Message metaclass derives handler_name from the nested class
+    # name, which would be ``on_header_subagent_row_clicked``. The App handler
+    # is ``on_subagent_row_clicked``, so we pin the dispatch name after class
+    # creation to match the existing handler.
+    SubagentRowClicked.handler_name = "on_subagent_row_clicked"
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._state: HeaderState = HeaderState()
@@ -628,6 +653,14 @@ class HeaderOverlay(Widget):
     .header-row.row-error {
         color: $warning;
     }
+    .header-row.row-error-detail {
+        height: auto;
+        max-height: 3;
+        overflow-y: auto;
+        padding-left: 2;
+        color: $error;
+        text-style: dim;
+    }
     """
 
     def __init__(self, section: str, state: HeaderState, **kwargs: Any) -> None:
@@ -694,6 +727,14 @@ class HeaderOverlay(Widget):
                 if server.state == "error":
                     classes += " row-error"
                 yield Static(row, classes=classes)
+                if server.state == "error" and server.error:
+                    detail = server.error[:200]
+                    if len(server.error) > 200:
+                        detail += "…"
+                    yield Static(
+                        f"   [$text-muted]└─[/] [$error]{detail}[/]",
+                        classes="header-row row-error-detail",
+                    )
 
     def _compose_todo(self) -> ComposeResult:
         glyph, _active, total = todo_glyph(self._state.todos)

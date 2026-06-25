@@ -118,9 +118,9 @@ class TuiInitShCompletionBannerRuns(EvalCase):
                 chat_log = app.query_one(ChatLog)
                 original = chat_log.append_system_note
 
-                def spy(text: str) -> None:
+                def spy(text: str, severity: str = "info") -> None:
                     captured_notes.append(text)
-                    return original(text)
+                    return original(text, severity)
 
                 chat_log.append_system_note = spy  # type: ignore[method-assign]
 

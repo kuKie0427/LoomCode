@@ -33,7 +33,15 @@ def test_model_picker_shows_connected_check() -> None:
         async with app.run_test(size=(120, 25)) as pilot:
             await pilot.pause(0.05)
             fake_cred = MagicMock()
-            with patch("loom.agent.credential.credentials.get", return_value=fake_cred):
+
+            def _fake_get(provider_id: str):
+                # Only mark anthropic as connected so the test doesn't
+                # enumerate every provider in the models.dev catalog.
+                return fake_cred if provider_id == "anthropic" else None
+
+            with patch(
+                "loom.agent.credential.credentials.get", side_effect=_fake_get
+            ):
                 mp = ModelPicker()
                 app.push_screen(mp)
                 await pilot.pause(0.4)

@@ -71,11 +71,11 @@ from loom.eval.cases import (
     stop_event_helper,  # noqa: F401
     subagent_templates,  # noqa: F401
     tdd,  # noqa: F401
-    triangle_protocol,  # noqa: F401 — TP-7: 19 cases lock 12 invariants
     telemetry_sink,  # noqa: F401
     tool_error_semantics,  # noqa: F401
     trace_batch_io,  # noqa: F401
     trace_path,  # noqa: F401
+    triangle_protocol,  # noqa: F401 — TP-7: 19 cases lock 12 invariants
     tui_app,  # noqa: F401
     tui_assistant_message_start,  # noqa: F401
     tui_async_init_sh,  # noqa: F401

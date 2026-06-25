@@ -12,7 +12,6 @@ Verifies:
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from loom.agent.system_prompt import build_fresh

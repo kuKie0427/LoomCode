@@ -15,7 +15,7 @@ from typing import Any, Literal
 
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
-from textual.events import Click
+from textual.events import Click, Key
 from textual.reactive import reactive
 from textual.widgets import Markdown, Static
 
@@ -421,6 +421,10 @@ class ThinkingMarker(Static):
         color: $accent;
         text-style: bold;
     }
+    ThinkingMarker:focus {
+        color: $accent;
+        text-style: bold;
+    }
     ThinkingMarker.thinking-long {
         color: $warning;
     }
@@ -458,8 +462,11 @@ class ThinkingMarker(Static):
     def on_click(self, event: Click) -> None:
         self._handle_toggle()
 
-    def on_press(self) -> None:
-        self._handle_toggle()
+    def on_key(self, event: Key) -> None:
+        """Enter/Space toggle the thinking display like a click."""
+        if event.key in ("enter", "space"):
+            event.stop()
+            self._handle_toggle()
 
     def _handle_toggle(self) -> None:
         """Toggle the thinking display, or notify the user when no thinking
@@ -470,7 +477,9 @@ class ThinkingMarker(Static):
         if self._display is not None:
             self._on_toggle(self._display)
         else:
-            self.notify("No thinking content for this response", timeout=2)
+            from loom.tui.messages import ShowNotification
+
+            self.post_message(ShowNotification("No thinking content for this response", severity="warning"))
 
     def set_complete(self) -> None:
         if not self._complete:
@@ -516,7 +525,10 @@ class CollapsibleToolOutput(Vertical):
 
 
 class SubagentMarker(Static):
-    can_focus = True
+    # Display-only marker: not interactive, so it does not participate in
+    # the Tab focus order. Users interact with subagents through the Header
+    # overlay rows (SubagentRow) and the linked chat-log ToolCallMarker.
+    can_focus = False
 
     DEFAULT_CSS = """
     SubagentMarker {
@@ -564,6 +576,9 @@ class ToolCallMarker(Static):
         margin: 0 0 0 0;
     }
     ToolCallMarker:hover {
+        text-style: bold underline;
+    }
+    ToolCallMarker:focus {
         text-style: bold underline;
     }
     ToolCallMarker.tool-error {
@@ -635,8 +650,11 @@ class ToolCallMarker(Static):
     def on_click(self, event: Click) -> None:
         self._toggle_output()
 
-    def on_press(self) -> None:
-        self._toggle_output()
+    def on_key(self, event: Key) -> None:
+        """Enter/Space toggle the tool output like a click."""
+        if event.key in ("enter", "space"):
+            event.stop()
+            self._toggle_output()
 
     def set_output_widget(self, widget: CollapsibleToolOutput) -> None:
         self._output_widget = widget
@@ -660,6 +678,13 @@ class ToolCallMarker(Static):
 
 
 class ChatLog(VerticalScroll):
+    # The ChatLog itself is not a focus target: scrolling is handled globally
+    # by the App (mouse wheel + Shift+PgUp/Dn + Ctrl+Home/End), and the user
+    # navigates to interactive children (markers) with Tab. Keeping it
+    # unfocused also prevents click-to-focus from swallowing App-level
+    # "click outside the overlay" collapse behavior.
+    can_focus = False
+
     _sticky: bool = True
 
     # §2.2.3 primitive 2: ChatLog receives engine_state from App, propagates to all live tool markers
@@ -947,11 +972,17 @@ class ChatLog(VerticalScroll):
         self._last_todo_summary = summary
         self.append_system_note(f"todos: {summary}")
 
-    def append_system_note(self, text: str) -> None:
+    def append_system_note(self, text: str, severity: str = "info") -> None:
         self._force_flush_stream_buffer()
         self._finalize_streaming()
         self._current_body = None
-        asyncio.create_task(self._mount_async(SystemNote(f"· {text}")))
+        token = {
+            "info": "text-muted",
+            "success": "success",
+            "warning": "warning",
+            "error": "error",
+        }.get(severity, "text-muted")
+        asyncio.create_task(self._mount_async(SystemNote(f"[$text-muted]·[/] [${token}]{text}[/]")))
         if self._sticky:
             self.scroll_end()
 

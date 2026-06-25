@@ -18,6 +18,7 @@ from loguru import logger
 from textual import messages as textual_messages
 from textual import work
 from textual.app import App, ComposeResult, ScreenStackError
+from textual.binding import Binding
 from textual.containers import Vertical
 from textual.events import Click, MouseScrollDown, MouseScrollUp
 from textual.reactive import reactive
@@ -36,6 +37,7 @@ from loom.tui.messages import (
     AssistantTurnEnd,
     AssistantTurnStart,
     CompactOccurred,
+    ShowNotification,
     SubagentEnd,
     SubagentStart,
     TextDelta,
@@ -170,11 +172,15 @@ class AgentTUIApp(App):
     engine_state: reactive[EngineState] = reactive("idle")
 
     BINDINGS = [
-        ("ctrl+c", "cancel_stream", "Cancel"),
-        ("ctrl+d", "quit", "Quit"),
-        ("ctrl+l", "clear_screen", "Clear"),
-        ("ctrl+p", "show_command_palette", "Commands"),
-        ("escape", "collapse_header", "Collapse header"),
+        Binding("ctrl+c", "cancel_stream", "Cancel"),
+        Binding("ctrl+d", "quit", "Quit"),
+        Binding("ctrl+l", "clear_screen", "Clear"),
+        Binding("ctrl+p", "show_command_palette", "Commands"),
+        Binding("escape", "collapse_header", "Collapse header"),
+        Binding("shift+pageup", "scroll_chatlog_page_up", "Page up", priority=True),
+        Binding("shift+pagedown", "scroll_chatlog_page_down", "Page down", priority=True),
+        Binding("ctrl+home", "scroll_chatlog_home", "Home", priority=True),
+        Binding("ctrl+end", "scroll_chatlog_end", "End", priority=True),
     ]
 
     def __init__(self, resume: bool = False, model: str | None = None):
@@ -241,7 +247,13 @@ class AgentTUIApp(App):
             from loom.agent.mcp_manager import get_server_snapshot
 
             for s in get_server_snapshot():
-                mcps.append(MCPServer(name=s["name"], state=s["state"]))  # type: ignore[arg-type]
+                mcps.append(
+                    MCPServer(
+                        name=s["name"],
+                        state=s["state"],  # type: ignore[arg-type]
+                        error=s.get("error", ""),
+                    )
+                )
         except Exception:
             pass
         return HeaderState(mcps=mcps, todos=[], subagents=[])
@@ -288,7 +300,6 @@ class AgentTUIApp(App):
         self.set_interval(3.0, self._resync_mcp_state, name="mcp-sync")
         self._detect_git_branch()
         self._check_credentials_on_startup()
-        self._lock_focus_to_composer()
         # Push the full-screen centered welcome page on top of the empty
         # layout.  Dismissed when the user types Enter (or ESC to skip).
         # Skipped when _skip_welcome is set (used by test harness).
@@ -316,25 +327,12 @@ class AgentTUIApp(App):
         self.post_message(Composer.Submitted(text))
 
     def on_key(self, event) -> None:
-        """Ensure printable keys always reach the Composer (input box)."""
+        """Handle global shortcuts and ensure printable keys reach the Composer."""
+        # Ensure printable keys always reach the Composer (input box).
         if event.is_printable:
             composer = self.query_one("#composer", Composer)
             if not composer.has_focus:
                 composer.focus()
-
-    def _lock_focus_to_composer(self) -> None:
-        """Walk all widgets and disable ``can_focus`` except on the Composer.
-
-        Called once at startup so the input box is the only widget that
-        can receive keyboard focus.  Other widgets (ChatLog, Header
-        buttons, tool markers, etc.) declare ``can_focus = True`` to
-        support click-to-focus, but here we disable that to keep the
-        Composer permanently focused.
-        """
-        composer = self.query_one("#composer", Composer)
-        for widget in self.walk_children():
-            if widget is not composer and hasattr(widget, 'can_focus'):
-                widget.can_focus = False
 
     def on_mouse_scroll_up(self, event: MouseScrollUp) -> None:
         if self._forward_scroll_to_chatlog(event, direction=-1):
@@ -404,6 +402,49 @@ class AgentTUIApp(App):
             pass
         return True
 
+    def _scroll_chatlog_by_page(self, down: bool) -> None:
+        """Scroll the ChatLog by one page (keyboard fallback for Shift+PgUp/Dn)."""
+        try:
+            chat_log = self.query_one(ChatLog)
+        except Exception:
+            return
+        if chat_log.max_scroll_y <= 0:
+            return
+        page = max(1, chat_log.size.height - 1)
+        direction = 1 if down else -1
+        new_y = max(
+            0.0,
+            min(float(chat_log.max_scroll_y), chat_log.scroll_y + direction * page),
+        )
+        if new_y == chat_log.scroll_y:
+            return
+        chat_log.scroll_to(y=new_y, animate=False, immediate=True)
+        try:
+            chat_log._set_dirty(chat_log.size.region)
+            self.screen.post_message(textual_messages.Update(chat_log))
+            self.screen.post_message(textual_messages.UpdateScroll())
+        except Exception:
+            pass
+
+    def _scroll_chatlog_to_end(self, end: bool) -> None:
+        """Jump to the top (Ctrl+Home) or bottom (Ctrl+End) of the ChatLog."""
+        try:
+            chat_log = self.query_one(ChatLog)
+        except Exception:
+            return
+        if chat_log.max_scroll_y <= 0:
+            return
+        new_y = float(chat_log.max_scroll_y) if end else 0.0
+        if new_y == chat_log.scroll_y:
+            return
+        chat_log.scroll_to(y=new_y, animate=False, immediate=True)
+        try:
+            chat_log._set_dirty(chat_log.size.region)
+            self.screen.post_message(textual_messages.Update(chat_log))
+            self.screen.post_message(textual_messages.UpdateScroll())
+        except Exception:
+            pass
+
     def _sync_status_bar(self) -> None:
         try:
             status_bar = self.query_one(StatusBar)
@@ -434,7 +475,9 @@ class AgentTUIApp(App):
         new_mcps: list[MCPServer] = []
         for s in snapshot:
             state = cast(Literal["connected", "error"], s["state"])
-            new_mcps.append(MCPServer(name=s["name"], state=state))
+            new_mcps.append(
+                MCPServer(name=s["name"], state=state, error=s.get("error", ""))
+            )
         if new_mcps == self._header_state.mcps:
             return
         self._header_state.mcps = new_mcps
@@ -768,6 +811,23 @@ class AgentTUIApp(App):
             composer.focus()
             composer.cursor_location = (0, len(composer.text))
 
+    def on_show_notification(self, event: ShowNotification) -> None:
+        """Display an inline notification in the ChatLog.
+
+        Replaces Textual's ``notify()`` toasts with a SystemNote so the
+        notification respects the TUI's "no floating banners" rule.
+        """
+        try:
+            self.query_one("#chat-log", ChatLog).append_system_note(
+                event.text, severity=event.severity
+            )
+        except Exception:
+            logger.warning("Failed to show notification: {}", event.text)
+
+    def show_notification(self, text: str, severity: str = "info") -> None:
+        """Convenience helper to post a ShowNotification from anywhere."""
+        self.post_message(ShowNotification(text, severity))
+
     async def on_composer_submitted(self, event: Composer.Submitted) -> None:
         user_msg = event.value.strip()
         if not user_msg:
@@ -881,6 +941,18 @@ class AgentTUIApp(App):
     def action_clear_screen(self) -> None:
         chat_log = self.query_one(ChatLog)
         asyncio.create_task(chat_log.clear_content())
+
+    def action_scroll_chatlog_page_up(self) -> None:
+        self._scroll_chatlog_by_page(down=False)
+
+    def action_scroll_chatlog_page_down(self) -> None:
+        self._scroll_chatlog_by_page(down=True)
+
+    def action_scroll_chatlog_home(self) -> None:
+        self._scroll_chatlog_to_end(end=False)
+
+    def action_scroll_chatlog_end(self) -> None:
+        self._scroll_chatlog_to_end(end=True)
 
     async def action_quit(self) -> None:
         """Override default quit: fire-and-forget init.sh, exit immediately."""

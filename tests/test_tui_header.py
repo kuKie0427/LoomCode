@@ -628,6 +628,7 @@ def test_app_initial_header_state_empty_mcp_when_no_servers_configured():
         # Ensure pristine state — no servers configured, none active.
         mm._CONFIGURED_SERVER_NAMES.clear()
         mm._ACTIVE_SERVERS.clear()
+        mm._SERVER_ERRORS.clear()
 
         app = AgentTUIApp()
         async with app.run_test() as pilot:
@@ -662,6 +663,7 @@ def test_app_initial_header_state_reflects_configured_mcp_servers():
         try:
             mm._CONFIGURED_SERVER_NAMES.clear()
             mm._ACTIVE_SERVERS.clear()
+            mm._SERVER_ERRORS.clear()
 
             # Seed one connected server and one that failed to connect.
             mm._CONFIGURED_SERVER_NAMES.update({"healthy-server", "error-server"})
