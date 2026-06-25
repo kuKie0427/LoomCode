@@ -7,28 +7,49 @@ from tests._mock_provider import MockProvider
 @pytest.fixture(autouse=True)
 def _clear_provider_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
     """Clear provider env vars that may have been loaded from .env by
-    loom.agent.loop's module-level dotenv.load_dotenv()."""
+    loom.agent.loop's module-level dotenv.load_dotenv().
+
+    Also mock ``credentials.get`` to return None for all providers so
+    tests don't pick up real keys from ``~/.loom/auth.json``. Without
+    this, tests that set ``DEEPSEEK_API_KEY`` via monkeypatch still
+    see the real DeepSeek key from auth.json (which has higher priority
+    than env vars in ``LLMClient._resolve_credential``). This is a
+    test-isolation concern, not a production issue — production correctly
+    prefers auth.json over env vars.
+    """
     for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY",
                 "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "LOOM_AUTH_CONTENT"):
         monkeypatch.delenv(var, raising=False)
-    # Restore the default env so LLMClient init can act as if .env doesn't exist
+    # Mock credentials.get so auth.json doesn't leak real keys into tests.
+    monkeypatch.setattr(
+        "loom.agent.credential.credentials.get", lambda *a, **kw: None
+    )
 
 
 def test_init_creates_anthropic_client(mocker, monkeypatch):
-    """__init__ creates an Anthropic client instance via the provider."""
+    """__init__ creates an Anthropic client instance via the provider.
+
+    Note: after the _resolve_credential refactor, get_provider is called
+    with api_key="" when no explicit kwarg and no auth.json entry. The
+    ANTHROPIC_API_KEY env var is then applied to the provider instance
+    via the post-get_provider fallback (llm.py:51-54). This test verifies
+    the env var fallback path: MockProvider starts with empty api_key,
+    env_var is set to ANTHROPIC_API_KEY, and the fallback fills it in.
+    """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.com")
 
-    mock_prov = MockProvider(api_key="fake-key", base_url="https://example.com")
-    get_provider_mock = mocker.patch(
+    mock_prov = MockProvider(api_key="", base_url="https://example.com")
+    # Override env_var so the fallback picks up ANTHROPIC_API_KEY.
+    mock_prov.env_var = "ANTHROPIC_API_KEY"
+    mocker.patch(
         "loom.agent.llm.get_provider",
         return_value=mock_prov,
     )
     client = LLMClient(model="test-model")
 
-    get_provider_mock.assert_any_call(
-        "anthropic", api_key="fake-key", base_url="https://example.com"
-    )
+    # Env var fallback fills in the api_key after get_provider returns.
+    assert client.api_key == "fake-key"
     assert client.model == "anthropic/test-model"
 
 
@@ -66,13 +87,21 @@ def test_change_model_updates_model_attr(mocker, monkeypatch):
 
 
 def test_get_context_window_known_model(monkeypatch):
-    """Returns correct window for a known model."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.com")
+    """Returns correct window for a known model.
 
-    client = LLMClient(model="deepseek-v4-flash")
+    Uses ``deepseek/deepseek-chat`` so parse_model_id routes to the
+    deepseek provider. Mocks models_dev cache to ensure deterministic
+    results (the cache at ~/.loom/models_dev.json may have updated
+    context windows that differ from the hardcoded fallback).
+    """
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "loom.agent.models_dev.lookup_context_window", lambda *a, **kw: None
+    )
 
-    assert client.get_context_window() == 64_000
+    client = LLMClient(model="deepseek/deepseek-chat")
+
+    assert client.get_context_window() == 64_000  # hardcoded fallback
 
 
 def test_get_context_window_unknown_model(monkeypatch):
@@ -86,15 +115,23 @@ def test_get_context_window_unknown_model(monkeypatch):
 
 
 def test_get_context_window_after_change(monkeypatch):
-    """Window updates after model change."""
+    """Window updates after model change.
+
+    Same models_dev mock as test_get_context_window_known_model for
+    deterministic results.
+    """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.com")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "loom.agent.models_dev.lookup_context_window", lambda *a, **kw: None
+    )
 
     client = LLMClient(model="unknown-model")
 
-    client.change_model("deepseek-v4-flash")
+    client.change_model("deepseek/deepseek-chat")
 
-    assert client.get_context_window() == 64_000
+    assert client.get_context_window() == 64_000  # hardcoded fallback
 
 
 # ---------------------------------------------------------------------------

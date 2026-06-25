@@ -36,9 +36,19 @@ def test_no_recent_defaults_to_empty() -> None:
 
 
 def test_on_list_view_selected_parses_model_id() -> None:
+    """on_list_view_selected dismisses with (provider_id, model_id) from _model_items.
+
+    Note: after the model_picker refactor, item IDs are safe indices
+    (``m0``, ``r0``, ...) that map to (provider_id, model_id) via the
+    ``_model_items`` dict populated by ``_build_rows``. The old format
+    ``model:openai/gpt-4o`` is no longer used.
+    """
     mp = ModelPicker()
+    # Populate _model_items as _build_rows would (without requiring a full
+    # app.run_test() cycle).
+    mp._model_items["m0"] = ("openai", "gpt-4o")
     mock_event = MagicMock()
-    mock_event.item.id = "model:openai/gpt-4o"
+    mock_event.item.id = "m0"
 
     fake_cred = MagicMock()
     with patch.object(mp, "dismiss") as mock_dismiss, patch(
@@ -49,13 +59,20 @@ def test_on_list_view_selected_parses_model_id() -> None:
 
 
 def test_on_list_view_selected_parses_recent_id() -> None:
+    """Recent section item uses ``r0`` safe ID, mapped via _model_items."""
     from loom.agent.model_state import ModelRef
 
     mp = ModelPicker(recent=[ModelRef("anthropic", "claude-sonnet-4-5")])
+    mp._model_items["r0"] = ("anthropic", "claude-sonnet-4-5")
     mock_event = MagicMock()
-    mock_event.item.id = "recent:anthropic/claude-sonnet-4-5"
+    mock_event.item.id = "r0"
 
-    with patch.object(mp, "dismiss") as mock_dismiss:
+    # Mock credentials so the handler goes straight to dismiss() instead
+    # of trying to push AuthInputModal (which requires an active app).
+    fake_cred = MagicMock()
+    with patch.object(mp, "dismiss") as mock_dismiss, patch(
+        "loom.agent.credential.credentials.get", return_value=fake_cred
+    ):
         mp.on_list_view_selected(mock_event)
     mock_dismiss.assert_called_once_with(("anthropic", "claude-sonnet-4-5"))
 

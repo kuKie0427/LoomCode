@@ -53,10 +53,17 @@ def _isolate_manager_state():
     ``_resync_from_registry`` does not linger as a phantom item in the
     module-level TOOLS list (which the next test would observe as
     ``initial = len(get_tools())`` and fail its ``initial + 1`` assertion).
+
+    P2-1 fix: also reset ``mm._DISCOVERY_STARTED`` — without this, the first
+    test that calls ``start_discovery`` sets the flag True, and subsequent
+    tests' ``start_discovery`` calls become no-ops (mcp_manager.py:110-113
+    early-return), so no tools ever register. Mirrors the fixture in
+    test_mcp_manager.py:44,57.
     """
     mm._ACTIVE_SERVERS.clear()
     mm._PER_SERVER_LOCKS.clear()
     mm._DISCOVERY_THREADS.clear()
+    mm._DISCOVERY_STARTED = False  # P2-1 fix: reset idempotency guard
     # Snapshot & restore SUB_TOOLS / SUB_HANDLERS so tests don't leak into
     # each other. Using [:] = list preserves module identity.
     saved_sub_tools = list(tools_mod.SUB_TOOLS)
@@ -76,6 +83,7 @@ def _isolate_manager_state():
     mm._ACTIVE_SERVERS.clear()
     mm._PER_SERVER_LOCKS.clear()
     mm._DISCOVERY_THREADS.clear()
+    mm._DISCOVERY_STARTED = False  # P2-1 fix: reset for next test
     tools_mod.SUB_TOOLS[:] = saved_sub_tools
     tools_mod.SUB_HANDLERS.clear()
     tools_mod.SUB_HANDLERS.update(saved_sub_handlers)

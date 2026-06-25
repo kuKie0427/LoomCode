@@ -10,6 +10,8 @@ deliverable, and the plan's broader `>= 6` check is deferred to P2.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from loom.agent.providers import (
@@ -140,9 +142,15 @@ class TestParseModelIdWithProfileCompat:
         assert p.context_window("gpt-4o") == 128_000
 
     def test_deepseek_end_to_end(self):
-        p = get_provider(*parse_model_id("deepseek/deepseek-chat"), api_key="k")
-        assert p.provider_id == "deepseek"
-        assert p.context_window("deepseek-chat") == 64_000
+        # Mock models_dev cache so the hardcoded _CONTEXT_WINDOWS fallback
+        # is used (deterministic). Without this, ~/.loom/models_dev.json
+        # may return a different (more current) value.
+        with patch(
+            "loom.agent.models_dev.lookup_context_window", return_value=None
+        ):
+            p = get_provider(*parse_model_id("deepseek/deepseek-chat"), api_key="k")
+            assert p.provider_id == "deepseek"
+            assert p.context_window("deepseek-chat") == 64_000  # hardcoded fallback
 
     def test_ollama_end_to_end(self):
         p = get_provider(*parse_model_id("ollama/llama3"), api_key="")

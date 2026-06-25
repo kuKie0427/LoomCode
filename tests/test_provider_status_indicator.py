@@ -20,7 +20,13 @@ from loom.tui.status_bar import StatusBar
 
 
 def test_model_picker_shows_connected_check() -> None:
-    """ModelPicker compose: connected provider labels contain ✓."""
+    """ModelPicker compose: connected provider labels contain ●.
+
+    Note: the indicator was changed from ✓ to ● (model_picker.py:173)
+    to match the design spec's section-header style. The StatusBar still
+    uses ✓ for its own compact layout; ModelPicker uses ● for the
+    full-width section header.
+    """
 
     async def driver():
         app = AgentTUIApp()
@@ -30,7 +36,7 @@ def test_model_picker_shows_connected_check() -> None:
             with patch("loom.agent.credential.credentials.get", return_value=fake_cred):
                 mp = ModelPicker()
                 app.push_screen(mp)
-                await pilot.pause(0.2)
+                await pilot.pause(0.4)
                 list_view = mp.query_one(ListView)
                 found = False
                 for item in list_view.children:
@@ -38,10 +44,10 @@ def test_model_picker_shows_connected_check() -> None:
                         label = item.children[0]
                         rendered = label.render()
                         rendered_str = str(rendered)
-                        if "✓" in rendered_str:
+                        if "●" in rendered_str:
                             found = True
                             break
-                assert found, "ModelPicker should show ✓ for connected providers"
+                assert found, "ModelPicker should show ● for connected providers"
 
     asyncio.run(driver())
 
