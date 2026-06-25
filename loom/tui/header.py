@@ -286,7 +286,7 @@ class HeaderSectionButton(Static):
         height: 1;
         background: transparent;
         padding: 0 1;
-        border-left: solid $border;
+        border-left: solid $hairline;
     }
     HeaderSectionButton.first {
         border-left: none;
@@ -294,10 +294,12 @@ class HeaderSectionButton(Static):
     HeaderSectionButton:hover {
         text-style: bold;
         color: $text;
+        border-left: solid $accent-dim;
     }
     HeaderSectionButton:focus {
         background: $boost 5%;
         text-style: bold;
+        border-left: solid $accent-dim;
     }
     HeaderSectionButton.section-hidden {
         visibility: hidden;
