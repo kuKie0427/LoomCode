@@ -123,13 +123,13 @@
 **改动文件**: `loom/tui/header.py`（`HeaderSectionButton._render_section` 或 CSS）
 
 ### C-3. ToolCallMarker 展开内容背景
-**问题**: ToolCallMarker 展开时，内容区与未展开状态视觉无区分。
+**问题**: `CollapsibleToolOutput` 已有 `background: $surface`，但 `toggle()` 只翻转 `display` 布尔值，不区分展开/收起的视觉状态。展开时内容区与周围 ChatLog 背景对比不够明显。
 
-**方案**: `CollapsibleToolOutput` 展开时，内容区加 `$surface` 背景。
-- 已展开的 `.collapsible-tool-output--expanded` 类加 `background: $surface`
-- 未展开保持透明
+**方案**: `CollapsibleToolOutput.toggle()` 翻转 `display` 时同步加/移 `expanded` CSS class，展开时强化视觉：
+- 加 `border-left: outer $accent-dim`（与 AssistantMessage 一致的左色边框）
+- 背景从 `$surface` 改为 `$surface 90%`（略深，展开时更突出）
 
-**改动文件**: `loom/tui/chat_log.py`（`CollapsibleToolOutput` CSS）
+**改动文件**: `loom/tui/chat_log.py`（`CollapsibleToolOutput.toggle()` + CSS 加 `.expanded` 变体）
 
 ---
 
