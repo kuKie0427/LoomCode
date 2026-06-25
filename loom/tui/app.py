@@ -115,6 +115,7 @@ class AgentTUIApp(App):
         height: 1fr;
         background: $background;
         padding: 1 2 0 2;
+        border-top: solid $hairline;
         overflow-y: auto;
         overflow-x: hidden;
         scrollbar-background: $background;
@@ -185,6 +186,12 @@ class AgentTUIApp(App):
 
     def __init__(self, resume: bool = False, model: str | None = None):
         super().__init__()
+        # Register theme BEFORE CSS is parsed (on_mount is too late —
+        # Textual parses App.CSS during _init_mode, before on_mount).
+        # Custom variables like $hairline / $accent-dim are otherwise
+        # unresolved and crash the app on startup.
+        self.register_theme(_LOOM_INK_THEME)
+        self.theme = "loom-ink"
         self.resume = resume
         # Skip the welcome modal when running under pytest (detected by
         # looking for the pytest module in sys.modules, which is set by
@@ -275,8 +282,6 @@ class AgentTUIApp(App):
 
     def on_mount(self) -> None:
         """Capture the main event loop for cross-thread async dispatch."""
-        self.register_theme(_LOOM_INK_THEME)
-        self.theme = "loom-ink"
         self._main_loop = asyncio.get_running_loop()
         self.query_one("#composer", Composer).focus()
         status_bar = self.query_one(StatusBar)

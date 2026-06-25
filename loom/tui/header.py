@@ -490,11 +490,6 @@ class Header(Horizontal):
         text-style: dim;
         padding: 0 2;
     }
-    /* NOTE: spec §4.3.1 calls for a hairline bottom border, but
-       Textual's `border-bottom: solid` on a height: 1 widget collapses
-       the content area to 0 (the border consumes the only line). The
-       visual separation is provided by the $panel background change
-       instead. See docs/tui-design-language.md §4.3.1. */
     """
 
     class SectionToggle(Message):
