@@ -47,3 +47,6 @@ snapshot_report.html
 # Session artifacts (not committed — auto-loaded on cold start)
 progress.md
 session-handoff.md
+
+# Triangle Protocol live-run test sandbox (Phase A/B evaluation)
+.triangle-test/

@@ -231,6 +231,16 @@ class LLMClient:
         that previously reached for ``llm_client.client.messages.create(...)``
         (which is Anthropic-specific) — namely ``spawn_subagent`` and
         ``context._generate_summary``.
+
+        Text deltas are coalesced: consecutive ``text`` stream events are
+        accumulated into a single ``TextBlock`` rather than one TextBlock
+        per delta. Without coalescing, OpenAI-compatible providers (DeepSeek,
+        etc.) that emit one token per delta produce content lists with
+        hundreds of single-char TextBlocks, which ``extract_text`` then
+        joins with ``\\n`` — fragmenting protocol tags like ``<delta_report>``
+        into ``<\\ndelta\\n_report\\n>`` and breaking every regex-based
+        parser in the Triangle Protocol. Anthropic's SDK coalesces internally;
+        this method must match that behavior for stream=False parity.
         """
         content: list = []
         input_tokens = 0
@@ -239,13 +249,23 @@ class LLMClient:
         cache_creation_tokens = 0
         reasoning_tokens = 0
         stop_reason = StopReason.END_TURN
+        # Coalesce consecutive text deltas into one TextBlock to match
+        # the non-streaming Anthropic/OpenAI response shape.
+        text_buf: list[str] = []
+
+        def _flush_text() -> None:
+            if text_buf:
+                content.append(TextBlock(text="".join(text_buf)))
+                text_buf.clear()
 
         for ev in self.stream_iter(system, messages, tools, max_tokens):
             if ev.kind == "text":
-                content.append(TextBlock(text=ev.text))
+                text_buf.append(ev.text)
             elif ev.kind == "thinking":
+                _flush_text()
                 content.append(ThinkingBlock(thinking=ev.text))
             elif ev.kind == "tool_use":
+                _flush_text()
                 content.append(ToolUseBlock(
                     id=ev.tool_id,
                     name=ev.tool_name,
@@ -268,11 +288,13 @@ class LLMClient:
                     except ValueError:
                         stop_reason = StopReason.END_TURN
             elif ev.kind == "error":
+                _flush_text()
                 from loom.agent.providers.types import ProviderError
                 raise ProviderError(
                     ev.error_code or "unknown",
                     ev.error_message or "provider error",
                 )
+        _flush_text()
 
         return ProviderResponse(
             model=self.model,
