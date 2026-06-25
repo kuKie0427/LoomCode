@@ -297,6 +297,15 @@ def _parse_policy_section(section: dict | None) -> PermissionPolicy:
             raise ConfigError("[permissions] deny_patterns_add must be a list of strings")
         base_deny = base_deny + tuple(deny_add)
 
+    # P2-1: parse allow_patterns (wildcard, silent allow).
+    # Sourced from [permissions] allow_patterns (simple list) OR
+    # [bash.permissions] allow_patterns (same format). Both feed into
+    # the same PermissionPolicy.allow_patterns field.
+    allow = section.get("allow_patterns", [])
+    if not isinstance(allow, list) or not all(isinstance(p, str) for p in allow):
+        raise ConfigError("[permissions] allow_patterns must be a list of strings")
+    base_allow = tuple(allow)
+
     rules = list(DEFAULT_POLICY.rules)
     rules_section = section.get("rules")
     if rules_section:
@@ -330,7 +339,7 @@ def _parse_policy_section(section: dict | None) -> PermissionPolicy:
                     message=message,
                 ))
 
-    return PermissionPolicy(deny_patterns=base_deny, rules=tuple(rules))
+    return PermissionPolicy(deny_patterns=base_deny, allow_patterns=base_allow, rules=tuple(rules))
 
 
 def _validate_check_ast(code: str) -> tuple[bool, int | None]:
@@ -661,6 +670,15 @@ _SKELETON = """# harness.toml — per-project loom agent config
 # [permissions]
 # deny_patterns = ["rm -rf /", "sudo"]        # REPLACES defaults
 # deny_patterns_add = ["halt"]                # APPENDS to defaults
+# allow_patterns = [                           # P2-1: silent-allow (no prompt)
+#   "python -c *",       # allow LLM to run `python -c 'assert ...'` verification
+#   "python3 -c *",
+#   "pytest *",          # allow running the test suite
+#   "uv run pytest *",   # allow uv-managed pytest
+# ]
+# # Wildcard syntax: `*` matches any chars, `?` matches one char.
+# # deny_patterns ALWAYS take precedence over allow_patterns (bypass-immune).
+# # So `python -c *rm -rf*` is still blocked by the deny pattern `rm -rf /`.
 #
 # [permissions.rules.add]
 # # Custom rule: require review before writing to templates/

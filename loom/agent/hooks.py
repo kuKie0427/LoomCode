@@ -55,10 +55,21 @@ class Hooks:
             logger.warning("⛔ Tool '{}' disabled by harness.toml", block.name)
             return f"Tool '{block.name}' disabled by harness.toml"
         if block.name == "bash":
-            reason = self._check_deny_list(block.input.get("command", ""))
+            # P2-1: three-state bash permission gate (deny → allow → rules).
+            # Order mirrors Claude Code and opencode v2:
+            #   1. deny_patterns (substring, bypass-immune) — hard block
+            #   2. allow_patterns (wildcard, silent) — auto-allow, no prompt
+            #   3. rules (interactive) — _ask_user y/N
+            # deny is always checked first and cannot be overridden by allow.
+            command = block.input.get("command", "")
+            reason = self._check_deny_list(command)
             if reason:
                 logger.warning("⛔ {}", reason)
                 return "Permission denied."
+            # allow_patterns check: silent allow, skip the rules prompt.
+            allow_match = self.policy.matches_allow(command)
+            if allow_match is not None:
+                return None
         # PM-2: MCP 3-state permission gate (M5). Runs BEFORE the generic
         # rule check so mcp__* tools are NOT subject to the unrelated
         # write_file / bash / lsp_rename rules below. A return value of

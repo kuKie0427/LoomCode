@@ -10,10 +10,18 @@ This module consolidates them. Both `run_bash` (direct invocation path) and
 `DEFAULT_POLICY`, so a dangerous pattern either blocks everywhere or blocks
 nowhere.
 
-Two policy components, distinct semantics:
+Three policy components, distinct semantics (P2-1 three-state model):
 
 - `deny_patterns` — auto-deny any tool input matching a substring.
+  Hard-block, no user override. Bypass-immune: allow_patterns cannot
+  override a deny match.
+- `allow_patterns` — auto-allow (silent, no prompt). Only checked AFTER
+  deny_patterns misses. Wildcard match (``*`` → ``.*``). Empty by default.
 - `rules` — when matched, prompt the user (y/N). `_ask_user` lives on Hooks.
+
+The three-state evaluation order (deny → allow → rules) mirrors both
+Claude Code and opencode v2. deny is the safety net; allow is a
+convenience layer; rules is the interactive fallback.
 
 Future `harness.toml` per-project overrides can replace `DEFAULT_POLICY`
 at startup; the dataclass is the natural injection point.
@@ -21,6 +29,7 @@ at startup; the dataclass is the natural injection point.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,15 +60,51 @@ def _canonicalize(command: str) -> str:
         return command
 
 
+def _wildcard_to_regex(pattern: str) -> re.Pattern[str]:
+    """Convert a glob-style wildcard pattern to a compiled regex.
+
+    ``*`` matches any sequence of characters (including none), ``?``
+    matches exactly one character. All other regex metacharacters are
+    escaped. The regex is anchored to match the full string (``^...$``)
+    so ``python -c *`` matches ``python -c 'assert ...'`` but not
+    ``echo python -c foo``.
+
+    This mirrors opencode v2's ``Wildcard.match`` implementation
+    (``packages/core/src/util/wildcard.ts``).
+    """
+    # Escape everything that's regex-special, then turn escaped \* and \?
+    # back into their wildcard forms.
+    escaped = re.escape(pattern)
+    escaped = escaped.replace(r"\*", ".*").replace(r"\?", ".")
+    return re.compile(f"^{escaped}$")
+
+
 @dataclass(frozen=True)
 class PermissionPolicy:
     deny_patterns: tuple[str, ...]
     rules: tuple[PermissionRule, ...] = field(default_factory=tuple)
+    # P2-1: wildcard patterns that silent-allow bash commands (no prompt).
+    # Checked AFTER deny_patterns, so deny is always bypass-immune.
+    # Empty by default — users opt in via [bash.permissions] in harness.toml.
+    allow_patterns: tuple[str, ...] = field(default_factory=tuple)
 
     def matches_deny(self, command: str) -> str | None:
         canonical = _canonicalize(command)
         for pattern in self.deny_patterns:
             if pattern in canonical:
+                return pattern
+        return None
+
+    def matches_allow(self, command: str) -> str | None:
+        """Return the first matching allow pattern, or None.
+
+        Wildcard match (``*`` → ``.*``), anchored full-string. Only called
+        AFTER ``matches_deny`` returns None — deny is always bypass-immune.
+        """
+        if not self.allow_patterns:
+            return None
+        for pattern in self.allow_patterns:
+            if _wildcard_to_regex(pattern).match(command):
                 return pattern
         return None
 
@@ -139,7 +184,7 @@ def _mcp_pattern_matches(pattern: str, tool_name: str) -> bool:
         t_parts = t_parts[1:]
     if len(p_parts) != len(t_parts):
         return False
-    for p, t in zip(p_parts, t_parts):
+    for p, t in zip(p_parts, t_parts, strict=False):
         if p != "*" and p != t:
             return False
     return True
