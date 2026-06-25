@@ -506,6 +506,10 @@ class CollapsibleToolOutput(Vertical):
         margin: 0 0 1 2;
         border: none;
     }
+    CollapsibleToolOutput.expanded {
+        background: $surface 90%;
+        border-left: outer $accent-dim;
+    }
     CollapsibleToolOutput > Static {
         height: auto;
     }
@@ -521,6 +525,7 @@ class CollapsibleToolOutput(Vertical):
 
     def toggle(self) -> None:
         self.display = not self.display
+        self.set_class(self.display, "expanded")
 
     def set_output(self, text: str) -> None:
         self._output = text
