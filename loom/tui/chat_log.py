@@ -272,6 +272,13 @@ class SystemNote(Static):
         padding: 0 2;
         margin: 0 0 1 0;
     }
+    SystemNote.severity-error {
+        background: $error 10%;
+        color: $text;
+        text-style: bold;
+        border-left: outer $error;
+        padding: 0 2;
+    }
     """
 
 
@@ -982,7 +989,12 @@ class ChatLog(VerticalScroll):
             "warning": "warning",
             "error": "error",
         }.get(severity, "text-muted")
-        asyncio.create_task(self._mount_async(SystemNote(f"[$text-muted]·[/] [${token}]{text}[/]")))
+        if severity == "error":
+            note = SystemNote(f"[$error]✗[/] [$error]{text}[/]")
+            note.add_class("severity-error")
+        else:
+            note = SystemNote(f"[$text-muted]·[/] [${token}]{text}[/]")
+        asyncio.create_task(self._mount_async(note))
         if self._sticky:
             self.scroll_end()
 
