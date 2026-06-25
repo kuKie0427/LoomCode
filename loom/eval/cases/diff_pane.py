@@ -22,18 +22,18 @@ class DiffPaneModuleDefined(EvalCase):
 
 class DiffPaneColorsCorrectly(EvalCase):
     name = "diff-pane-colors-correctly"
-    description = "colorize_diff applies green to +, red to -, yellow to @@"
+    description = "colorize_diff applies $success to +, $error to -, $warning to @@"
 
     def run(self) -> EvalResult:
         from loom.tui.diff_pane import colorize_diff
         out = colorize_diff("+added\n-removed\n@@ hunk\n")
-        if "[green]+added" not in out:
-            return EvalResult(name=self.name, passed=False, detail="green missing")
-        if "[red]-removed" not in out:
-            return EvalResult(name=self.name, passed=False, detail="red missing")
-        if "[yellow]@@ hunk" not in out:
-            return EvalResult(name=self.name, passed=False, detail="yellow missing")
-        return EvalResult(name=self.name, passed=True, detail="green/red/yellow all present")
+        if "[$success]+added" not in out:
+            return EvalResult(name=self.name, passed=False, detail="$success missing")
+        if "[$error]-removed" not in out:
+            return EvalResult(name=self.name, passed=False, detail="$error missing")
+        if "[$warning]@@ hunk" not in out:
+            return EvalResult(name=self.name, passed=False, detail="$warning missing")
+        return EvalResult(name=self.name, passed=True, detail="$success/$error/$warning all present")
 
 
 class DiffPaneEmptyShowsPlaceholder(EvalCase):
