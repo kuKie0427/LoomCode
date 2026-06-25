@@ -1506,6 +1506,18 @@
       "status": "done",
       "verification": "uv run pytest tests/test_mcp_overlay_error.py -v && uv run python -m loom.cli eval --fail-under 100 && ./init.sh",
       "evidence": "uv run pytest tests/test_mcp_overlay_error.py -v → 6/6 passed (MCPServer dataclass carries error / HeaderOverlay MCP shows error detail / long error truncated to one line / mcp_manager snapshot includes error / mcp_manager clears error on success / app build_initial_header_state passes error); ./init.sh → 'Verification Complete (all green)' with 1473 pytest passed; uv run python -m loom.cli eval --kind harness → 455/464 passed (zero TUI regression). Changes: loom/tui/header.py (MCPServer.error field + HeaderOverlay MCP section renders error detail with truncation), loom/agent/mcp_manager.py (snapshot includes error, cleared on success), loom/tui/app.py (_build_initial_header_state + _resync_mcp_state pass error through), tests/test_mcp_overlay_error.py (NEW, 6 tests)."
+    },
+    {
+      "id": "f-tui-visual-polish",
+      "name": "TUI visual polish batch — diff_pane tokens + hairline + snapshot expansion + typography + interaction feedback",
+      "description": "5-part visual polish batch per docs/superpowers/specs/2026-06-26-tui-visual-polish-design.md: (1A) diff_pane.py hardcoded [yellow]/[green]/[red] → semantic tokens $warning/$success/$error (spec §8.1 compliance, zero visual change). (1B) Header bottom hairline via #chat-log border-top: solid $hairline (resolves Textual height:1 + border-bottom content collapse compromise). Root fix: moved register_theme from on_mount to __init__ — Textual parses App.CSS before on_mount, so custom variables ($hairline/$accent-dim) were unresolved and crashed app startup. (1C) +9 snapshot baselines (StatusBar idle/streaming/error, ChatLog streaming+thinking/tool-call collapsed/expanded, WelcomeModal, command_palette, model_picker) — total 8→17. (2) Typography unification: UserMessage padding 1 2 → 0 2, AssistantSummary padding 0 0 0 2 → 0 2. (3) Interaction feedback (all static, spec §6 compliant): C-1 error SystemNote gains $error 10% bg + left border + ✗ icon; C-2 HeaderSectionButton dividers $border→$hairline + $accent-dim on hover/focus; C-3 CollapsibleToolOutput.expanded gains $surface 90% bg + $accent-dim left border. Streaming cursor rejected (spec §2.2.2 forbids typewriter).",
+      "dependencies": [
+        "f-tui-keyboard-access",
+        "f-tui-mcp-overlay-error-detail"
+      ],
+      "status": "done",
+      "verification": "./init.sh && uv run python -m loom.cli eval --kind harness",
+      "evidence": "./init.sh → 'Verification Complete (all green)' with 1482 pytest passed, 17 snapshots, 0 ruff, 0 mypy; uv run python -m loom.cli eval --kind harness → 455/464 passed (diff-pane-colors-correctly eval case updated to match new tokens; 9 pre-existing failures unrelated to TUI). 9 new snapshot baselines added (8→17 total). Changes: loom/tui/diff_pane.py (3 lines token-ized), loom/tui/app.py (#chat-log border-top + theme registration moved to __init__), loom/tui/header.py (HeaderSectionButton CSS + NOTE removed), loom/tui/chat_log.py (UserMessage/AssistantSummary padding + SystemNote.severity-error + CollapsibleToolOutput.expanded), tests/test_tui_snapshot.py (+9 tests), tests/test_diff_pane.py (11 assertions updated), loom/eval/cases/diff_pane.py (eval case updated to check tokens)."
     }
   ]
 }
