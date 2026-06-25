@@ -49,22 +49,22 @@ def log_no_async():
 
 
 class TestStreamingOverlay:
-    def test_inherits_from_markdown(self):
-        from textual.widgets import Markdown
+    def test_inherits_from_static(self):
+        from textual.widgets import Static
 
-        assert issubclass(StreamingOverlay, Markdown)
-
-    def test_update_content_calls_update_with_normalized_text(self):
-        overlay = StreamingOverlay()
-        overlay.update = MagicMock()
-        overlay.update_content("hello world")
-        overlay.update.assert_called_once_with(_normalize_for_stream("hello world"))
+        assert issubclass(StreamingOverlay, Static)
 
     def test_update_content_normalizes_newlines(self):
         overlay = StreamingOverlay()
         overlay.update = MagicMock()
         overlay.update_content("a\nb\nc")
         overlay.update.assert_called_once_with(_normalize_for_stream("a\nb\nc"))
+
+    def test_update_content_preserves_normalized_text(self):
+        overlay = StreamingOverlay()
+        overlay.update = MagicMock()
+        overlay.update_content("hello world")
+        overlay.update.assert_called_once_with(_normalize_for_stream("hello world"))
 
 
 class TestAppendStreamingText:

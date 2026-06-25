@@ -238,7 +238,11 @@ class AssistantMessage(Markdown):
         super().__init__(markdown, **kwargs)
 
 
-class StreamingOverlay(Markdown):
+class StreamingOverlay(Static):
+    # Uses Static(markup=False) per Working Rule #16 — Markdown.update()
+    # returns unawaited AwaitComplete, causing rendering races during
+    # rapid streaming (each token wrapping to its own line).
+
     DEFAULT_CSS = """
     StreamingOverlay {
         background: $background;
@@ -249,11 +253,13 @@ class StreamingOverlay(Markdown):
     }
     """
 
-    def __init__(self, markdown: str | None = None, **kwargs: Any) -> None:
-        kwargs.setdefault("parser_factory", _markdown_parser_factory)
-        super().__init__(markdown, **kwargs)
+    def __init__(self, content: str = "", **kwargs: Any) -> None:
+        super().__init__(content, markup=False, **kwargs)
 
     def update_content(self, text: str) -> None:
+        # Normalize single newlines → spaces (same logic as the final
+        # AssistantMessage), so \n tokens from the LLM stream don't cause
+        # each word fragment to wrap to its own line during live rendering.
         self.update(_normalize_for_stream(text))
 
 

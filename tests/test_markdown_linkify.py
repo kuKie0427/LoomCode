@@ -27,7 +27,6 @@ import pytest
 from loom.tui.app import AgentTUIApp
 from loom.tui.chat_log import (
     AssistantMessage,
-    StreamingOverlay,
     ThinkingDisplay,
     UserMessage,
     _markdown_parser_factory,
@@ -99,7 +98,7 @@ def test_parser_factory_keeps_strikethrough():
 
 @pytest.mark.parametrize(
     "cls",
-    [UserMessage, AssistantMessage, StreamingOverlay, ThinkingDisplay],
+    [UserMessage, AssistantMessage, ThinkingDisplay],
 )
 def test_markdown_subclass_uses_safe_parser(cls):
     """Every Markdown subclass in the chat log must use the safe parser.
