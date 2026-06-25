@@ -260,7 +260,10 @@ def _run_tool_block(block, hooks) -> dict:
             if cb is not None and cb.get("on_subagent_end") is not None:
                 cb["on_subagent_end"](block.id, elapsed, state)
     else:
-        output = handler(**block.input) if handler else f"Unknown: {block.name}"
+        try:
+            output = handler(**block.input) if handler else f"Unknown: {block.name}"
+        except TypeError as e:
+            output = f"Error: tool {block.name} called with invalid arguments: {e}"
     hooks.trigger_hooks("PostToolUse", block, output)
     return {"type": "tool_result", "tool_use_id": block.id,
             "content": output, "is_error": False}
