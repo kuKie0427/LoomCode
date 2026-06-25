@@ -211,7 +211,7 @@ class UserMessage(Markdown):
     UserMessage {
         background: $surface;
         color: $text;
-        padding: 1 2;
+        padding: 0 2;
         margin: 0 0 1 0;
         border: none;
     }
@@ -285,7 +285,7 @@ class AssistantSummary(Static):
     DEFAULT_CSS = """
     AssistantSummary {
         height: auto;
-        padding: 0 0 0 2;
+        padding: 0 2;
         margin: 0 0 1 0;
     }
     """
