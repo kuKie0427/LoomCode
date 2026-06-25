@@ -136,9 +136,17 @@ def _parse_yaml_ish(body: str) -> dict[str, str | list[str]]:
 
 
 def _parse_action_list(body: str) -> list[str]:
-    """Extract ``action: [item1, item2, ...]`` from a parsed body.
+    """Extract ``action: [item1, item2, ...]`` or ``action: item`` from a parsed body.
 
-    Returns empty list if no action field found or it's not a bracketed list.
+    Returns empty list if no action field found.
+
+    Accepts both bracketed list format (``action: [none]``) and bare string
+    format (``action: none``). The bare string is treated as a single-element
+    list. This flexibility is important because the REVIEW_SYSTEM prompt
+    historically showed ``action: <none|fix_bug|...>`` (bare), and LLMs
+    (especially DeepSeek) tend to copy that format rather than the bracketed
+    form — rejecting bare strings caused Phase B's ``feedback_action=["missing"]``
+    false negatives.
     """
     raw = _parse_yaml_ish(body)
     action_val = raw.get("action")
@@ -146,10 +154,15 @@ def _parse_action_list(body: str) -> list[str]:
         return []
     if isinstance(action_val, list):
         return [str(a).strip() for a in action_val]
-    # Try to parse "[a, b, c]" format
-    if isinstance(action_val, str) and action_val.startswith("[") and action_val.endswith("]"):
-        inner = action_val[1:-1]
-        return [a.strip().strip('"').strip("'") for a in inner.split(",") if a.strip()]
+    if isinstance(action_val, str):
+        s = action_val.strip()
+        # Try to parse "[a, b, c]" format
+        if s.startswith("[") and s.endswith("]"):
+            inner = s[1:-1]
+            return [a.strip().strip('"').strip("'") for a in inner.split(",") if a.strip()]
+        # Bare string: treat as single-element list (P0-2 fix)
+        if s:
+            return [s.strip('"').strip("'")]
     return []
 
 

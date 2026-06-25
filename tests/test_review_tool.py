@@ -122,12 +122,27 @@ class TestParseVerdict:
 class TestRunReviewHandler:
     """run_review(): spawn_subagent integration, truncation, error handling."""
 
+    # P0-2: Mock returns must include BOTH <verdict> and <feedback_directive>
+    # blocks, otherwise run_review's feedback_retry logic fires a second
+    # spawn_subagent call, which breaks call_count/call_args assertions.
+    _MOCK_BOTH_BLOCKS = (
+        '<verdict>{"status":"pass","summary":"OK","evidence":[],"recommendations":[]}</verdict>\n'
+        '<feedback_directive>\n'
+        'action: none\n'
+        'target_files: []\n'
+        'target_lines: []\n'
+        'retry_review: false\n'
+        'notes: "pass"\n'
+        '</feedback_directive>'
+    )
+
     def test_happy_path(self):
         """Mock spawn_subagent returns valid verdict → result contains [review: pass]."""
         with patch("loom.agent.tools.spawn_subagent") as mock_spawn:
             mock_spawn.return_value = (
                 '[done: 3 turns, 5 tool calls]\n'
-                '<verdict>{"status":"pass","summary":"All good","evidence":[],"recommendations":[]}</verdict>'
+                '<verdict>{"status":"pass","summary":"All good","evidence":[],"recommendations":[]}</verdict>\n'
+                '<feedback_directive>\naction: none\ntarget_files: []\ntarget_lines: []\nretry_review: false\nnotes: "ok"\n</feedback_directive>'
             )
             from loom.agent.review import run_review_legacy_str
             result = run_review_legacy_str("f-test", "test feature")
@@ -146,9 +161,7 @@ class TestRunReviewHandler:
     def test_long_description_truncation(self):
         """feature_description >= 2000 chars → truncated to 2000 + suffix."""
         with patch("loom.agent.tools.spawn_subagent") as mock_spawn:
-            mock_spawn.return_value = (
-                '<verdict>{"status":"pass","summary":"truncation test","evidence":[],"recommendations":[]}</verdict>'
-            )
+            mock_spawn.return_value = self._MOCK_BOTH_BLOCKS
             long_desc = "A" * 2500
             from loom.agent.review import run_review
             run_review("f-trunc", long_desc)
@@ -161,21 +174,19 @@ class TestRunReviewHandler:
     def test_scope_hint_optional(self):
         """scope_hint not provided still works (defaults to '')."""
         with patch("loom.agent.tools.spawn_subagent") as mock_spawn:
-            mock_spawn.return_value = (
-                '<verdict>{"status":"pass","summary":"no scope hint","evidence":[],"recommendations":[]}</verdict>'
-            )
+            mock_spawn.return_value = self._MOCK_BOTH_BLOCKS
             from loom.agent.review import run_review_legacy_str
             result = run_review_legacy_str("f-scope", "test feature")  # no scope_hint
             assert "[review: pass]" in result
 
     def test_max_turns_15(self):
-        """run_review passes max_turns=15 to spawn_subagent."""
+        """run_review passes max_turns=15 to spawn_subagent (first call)."""
         with patch("loom.agent.tools.spawn_subagent") as mock_spawn:
-            mock_spawn.return_value = (
-                '<verdict>{"status":"pass","summary":"turns check","evidence":[],"recommendations":[]}</verdict>'
-            )
+            mock_spawn.return_value = self._MOCK_BOTH_BLOCKS
             from loom.agent.review import run_review
             run_review("f-turns", "test turns")
+            # P0-2: with both blocks in mock return, no retry fires —
+            # call_args is the first (and only) call.
             call_kwargs = mock_spawn.call_args[1]
             assert call_kwargs.get("max_turns") == 15
 
@@ -183,7 +194,8 @@ class TestRunReviewHandler:
         """Result string starts with [review: {status}] where status comes from the verdict."""
         with patch("loom.agent.tools.spawn_subagent") as mock_spawn:
             mock_spawn.return_value = (
-                '<verdict>{"status":"quality_issue","summary":"Needs cleanup","evidence":["a.py:5"],"recommendations":["fix style"]}</verdict>'
+                '<verdict>{"status":"quality_issue","summary":"Needs cleanup","evidence":["a.py:5"],"recommendations":["fix style"]}</verdict>\n'
+                '<feedback_directive>\naction: improve_quality\ntarget_files: []\ntarget_lines: []\nretry_review: true\nnotes: "fix"\n</feedback_directive>'
             )
             from loom.agent.review import run_review_legacy_str
             result = run_review_legacy_str("f-format", "test format")

@@ -144,9 +144,13 @@ class TestRunReviewDeltaReport:
             escalations=(),
         )
         with patch("loom.agent.tools.spawn_subagent") as mock_spawn:
+            # P0-2: mock must include both blocks so feedback_retry doesn't fire
+            # (otherwise call_args points to the retry call, not the original).
             mock_spawn.return_value = (
                 '<verdict>{"status":"pass","summary":"OK",'
-                '"evidence":[],"recommendations":[]}</verdict>'
+                '"evidence":[],"recommendations":[]}</verdict>\n'
+                '<feedback_directive>\naction: none\ntarget_files: []\n'
+                'target_lines: []\nretry_review: false\nnotes: "ok"\n</feedback_directive>'
             )
             from loom.agent.review import run_review
 
@@ -245,9 +249,13 @@ class TestRunReviewPreValidation:
     def test_run_review_pre_validation_pass_proceeds_to_llm(self) -> None:
         """No delta_report: pre-validation skipped, LLM is called."""
         with patch("loom.agent.tools.spawn_subagent") as mock_spawn:
+            # P0-2: include both blocks so feedback_retry doesn't fire
+            # (otherwise assert_called_once fails due to retry).
             mock_spawn.return_value = (
                 '<verdict>{"status":"pass","summary":"OK",'
-                '"evidence":[],"recommendations":[]}</verdict>'
+                '"evidence":[],"recommendations":[]}</verdict>\n'
+                '<feedback_directive>\naction: none\ntarget_files: []\n'
+                'target_lines: []\nretry_review: false\nnotes: "ok"\n</feedback_directive>'
             )
             from loom.agent.review import run_review
 

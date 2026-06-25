@@ -158,11 +158,14 @@ def test_review_system_legacy_rules_preserved() -> None:
 
 
 def test_review_system_length_within_budget() -> None:
-    """REVIEW_SYSTEM length is within plan budget (≤5000 chars).
+    """REVIEW_SYSTEM length is within plan budget (≤5500 chars).
 
     The plan budget allows for the 5 reconciliation steps + decision tree +
-    output protocol + mapping table + self-review prohibition. If this test
-    starts failing, the prompt has grown past the budget and needs trimming.
+    output protocol + mapping table + self-review prohibition + few-shot
+    examples (P0-2: added pass/fail output examples + completeness self-check
+    to improve LLM compliance with dual-block output requirement).
+    If this test starts failing, the prompt has grown past the budget and
+    needs trimming.
     """
     s = _rs()
-    assert len(s) <= 5000, f"REVIEW_SYSTEM {len(s)} chars exceeds 5000 budget"
+    assert len(s) <= 5500, f"REVIEW_SYSTEM {len(s)} chars exceeds 5500 budget"

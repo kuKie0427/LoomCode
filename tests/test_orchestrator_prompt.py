@@ -34,8 +34,8 @@ def test_orchestrator_prompt_mentions_triangle_roles(tmp_path: Path) -> None:
 def test_orchestrator_prompt_mentions_delegation_decision(tmp_path: Path) -> None:
     """Delegation decision rule is present (when to delegate vs do it yourself)."""
     p = _prompt(tmp_path)
-    # Plan-mandated section header
-    assert "何时委派给 Generator" in p
+    # P0-1: delegation hard constraint section (replaces old "何时委派给 Generator")
+    assert "委派硬约束" in p
     assert "何时自己做" in p
     assert "何时调 Reviewer" in p
 

@@ -199,6 +199,57 @@ REVIEW_SYSTEM = (
     "- evidence 必须可验证：每条都要带 file:line，让 Orchestrator 能去 git diff 对账\n"
     "- recommendations 必须可执行：写'修一下 bar() 的空列表处理'而不是'代码可以更好'\n"
     "\n"
+    "## 完整输出示例（两个块都必须出现）\n"
+    "\n"
+    "好的输出（pass 场景）：\n"
+    "```\n"
+    "<verdict>\n"
+    "{\n"
+    '  "status": "pass",\n'
+    '  "summary": "sub(a,b) 函数已正确实现，返回 a-b。git diff 与 delta_report 一致，改动落在 calculator.py 范围内。",\n'
+    '  "evidence": ["calculator.py:5-6: def sub(a,b): return a-b", "git diff: +2 行 -0 行，与 delta_report 一致"],\n'
+    '  "recommendations": []\n'
+    "}\n"
+    "</verdict>\n"
+    "\n"
+    "<feedback_directive>\n"
+    "action: none\n"
+    "target_files: []\n"
+    "target_lines: []\n"
+    "retry_review: false\n"
+    'notes: "审查通过，feature 可标记为 done"\n'
+    "</feedback_directive>\n"
+    "```\n"
+    "\n"
+    "好的输出（fail 场景）：\n"
+    "```\n"
+    "<verdict>\n"
+    "{\n"
+    '  "status": "fail",\n'
+    '  "summary": "sub() 函数实现错误：返回了 a+b 而非 a-b。",\n'
+    '  "evidence": ["calculator.py:5: return a + b （应为 a - b）"],\n'
+    '  "recommendations": ["修改 calculator.py:5，将 return a + b 改为 return a - b"]\n'
+    "}\n"
+    "</verdict>\n"
+    "\n"
+    "<feedback_directive>\n"
+    "action: fix_bug\n"
+    'target_files: ["calculator.py"]\n'
+    'target_lines: ["5"]\n'
+    "retry_review: true\n"
+    'notes: "修复后需要重新 review"\n'
+    "</feedback_directive>\n"
+    "```\n"
+    "\n"
+    "## 输出完整性自检（CRITICAL）\n"
+    "\n"
+    "在提交回复前，必须自检：\n"
+    "1. 我的回复里有 `<verdict>` 开标签和 `</verdict>` 闭标签吗？\n"
+    "2. 我的回复里有 `<feedback_directive>` 开标签和 `</feedback_directive>` 闭标签吗？\n"
+    "3. `<feedback_directive>` 块里包含 action / target_files / target_lines / retry_review / notes 五个字段吗？\n"
+    "\n"
+    "如果任何一个缺失，你的回复视为不完整——Orchestrator 无法决定下一步动作，三角闭环会卡住。\n"
+    "\n"
     "## 自审禁令\n"
     "\n"
     "你在审查 Generator 的工作时，绝对不要：\n"
@@ -206,6 +257,7 @@ REVIEW_SYSTEM = (
     "- 试图修复你看到的问题——你只能 recommendations，不能 edit\n"
     "- 假装看不到问题给 pass——你的存在意义就是抓出问题\n"
     "- 审查'你自己之前的审查'——同一 session 多次 review 同 feature 时，每次都从头看 git diff，不要相信前一次的结论\n"
+    "- 只输出 <verdict> 而漏掉 <feedback_directive>——两个块都是必需的，缺一不可\n"
 )
 
 
@@ -216,6 +268,7 @@ def run_review(
     delta_report: DeltaReport | None = None,
     scope: ScopeEnvelope | None = None,
     workdir: Path | None = None,
+    flip_status_on_pass: bool = False,
 ) -> tuple[str, FeedbackDirective | None]:
     """Run a code review for the given feature.
 
@@ -234,6 +287,13 @@ def run_review(
     parse_feedback_directive() validates action list combination rules (§7.3).
     If invalid → returns fd=None. If <verdict> missing → returns verdict=unknown.
 
+    State machine (P1-1 hard guarantee):
+    If ``flip_status_on_pass=True`` and verdict=pass and fd.action contains
+    "none", directly flip feature_list.json status to "done". This removes
+    the dependency on Orchestrator LLM calling edit_file to flip status —
+    a flaky path observed in Phase B testing. Set False for pre_compact
+    reviews (lite review without delta_report, not a done-gate).
+
     Args:
         feature_id: Short identifier for the feature.
         feature_description: Description of what was implemented.
@@ -241,6 +301,9 @@ def run_review(
         delta_report: Optional DeltaReport for three-way reconciliation.
         scope: Optional ScopeEnvelope for pre-validation.
         workdir: Optional working directory for git diff validation.
+        flip_status_on_pass: If True, flip feature_list.json status to
+            "done" when verdict=pass and fd.action=["none"]. Default False
+            (pre_compact and lite reviews should not flip).
 
     Returns:
         Tuple of (formatted_review_result_string, FeedbackDirective_or_None).
@@ -285,12 +348,43 @@ def run_review(
         "使用只读工具检查代码。最终输出必须包含 <verdict>...</verdict> 标签。"
     )
 
-    # === SPAWN REVIEWER ===
-    try:
-        result = spawn_subagent(prompt, system=REVIEW_SYSTEM, tools=REVIEW_TOOLS, max_turns=15)
-    except Exception as exc:
-        logger.warning("run_review: LLM call failed: {}", exc)
-        return (f"[review: unknown — LLM call failed: {exc}]", None)
+    # === SPAWN REVIEWER (with feedback_directive retry) ===
+    # I5 enforcement: both <verdict> AND <feedback_directive> are required.
+    # If Reviewer LLM omits <feedback_directive> on first attempt, retry
+    # once with a focused "you missed the block" prompt. This addresses
+    # the Phase B finding where DeepSeek emitted only <verdict>.
+    MAX_FEEDBACK_RETRIES = 1
+    result = ""
+    for retry_idx in range(MAX_FEEDBACK_RETRIES + 1):
+        try:
+            if retry_idx == 0:
+                result = spawn_subagent(prompt, system=REVIEW_SYSTEM, tools=REVIEW_TOOLS, max_turns=15)
+            else:
+                # Focused retry: keep the verdict, just ask for the missing block.
+                # Include the first-attempt output so the LLM doesn't have to re-derive.
+                retry_prompt = (
+                    "你上一轮的回复缺少 <feedback_directive> 块。请基于你刚才的审查结论，"
+                    "补全 <feedback_directive> 块。\n\n"
+                    f"你上一轮的输出：\n{result}\n\n"
+                    "请只输出完整的 <feedback_directive> 块，包含 action / target_files / "
+                    "target_lines / retry_review / notes 五个字段。参照 REVIEW_SYSTEM 中的"
+                    "Verdict ↔ Action 映射表决定 action 值。"
+                )
+                result_retry = spawn_subagent(retry_prompt, system=REVIEW_SYSTEM, tools=REVIEW_TOOLS, max_turns=3)
+                # Append the feedback block to the original result so parsers
+                # can still find the <verdict> from attempt 1.
+                result = result + "\n\n" + result_retry
+                logger.info("run_review: feedback_directive retry succeeded for {}", feature_id)
+        except Exception as exc:
+            logger.warning("run_review: LLM call failed (attempt {}): {}", retry_idx + 1, exc)
+            return (f"[review: unknown — LLM call failed: {exc}]", None)
+
+        # Check if feedback_directive is now present; if so, stop retrying.
+        from loom.agent.triangle_protocol import parse_feedback_directive
+        fd = parse_feedback_directive(result)
+        if fd is not None or retry_idx >= MAX_FEEDBACK_RETRIES:
+            break
+        logger.warning("run_review: feedback_directive missing on attempt {} for {}, retrying", retry_idx + 1, feature_id)
 
     # === POST-PROCESSING: parse verdict + feedback_directive ===
     verdict = _parse_verdict(result)
@@ -304,10 +398,8 @@ def run_review(
     # parse_feedback_directive handles I6 internally:
     # - returns None if action list empty / invalid combination (§7.3 rules)
     # - returns None if block missing entirely
-    from loom.agent.triangle_protocol import parse_feedback_directive
-    fd = parse_feedback_directive(result)
     if fd is None:
-        logger.warning("run_review: feedback_directive missing or invalid for {}", feature_id)
+        logger.warning("run_review: feedback_directive still missing after retry for {}", feature_id)
 
     # === Triangle Protocol: record review event (TP-3) ===
     attempt = _REVIEW_ATTEMPT_COUNTER.get(feature_id, 0) + 1
@@ -324,11 +416,64 @@ def run_review(
                 feedback_action=list(fd.action) if fd is not None else ["missing"],
                 retry_review=fd.retry_review if fd is not None else False,
                 attempt=attempt,
+                feedback_retried=retry_idx > 0,
             )
         except Exception as trace_exc:
             logger.warning("run_review: trace.record(triangle.review) failed: {}", trace_exc)
 
+    # === P1-1: state machine hard guarantee ===
+    # If verdict=pass and fd.action contains "none", flip feature_list.json
+    # status to "done" directly. This removes the dependency on Orchestrator
+    # LLM calling edit_file to flip status (observed flaky in Phase B).
+    if flip_status_on_pass and verdict.is_pass and fd is not None and "none" in fd.action:
+        _flip_feature_status_to_done(feature_id, workdir)
+
     return (verdict_str, fd)
+
+
+def _flip_feature_status_to_done(feature_id: str, workdir: Path | None = None) -> bool:
+    """P1-1: flip feature_list.json status from in-progress/review-pending to done.
+
+    Called by run_review() when verdict=pass and fd.action=["none"].
+    Returns True if the flip happened, False if the feature was not found
+    or was already done. Errors are logged but not raised — a failed flip
+    should not crash the review flow.
+
+    This is the "hard guarantee" path: even if the Orchestrator LLM forgets
+    to call edit_file, the status flips correctly.
+    """
+    from pathlib import Path as _Path
+    wd = workdir if workdir is not None else _Path.cwd()
+    fl_path = wd / "feature_list.json"
+    if not fl_path.exists():
+        logger.debug("_flip_feature_status_to_done: no feature_list.json at {}", fl_path)
+        return False
+    try:
+        fl = json.loads(fl_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("_flip_feature_status_to_done: read failed: {}", exc)
+        return False
+    flipped = False
+    for f in fl.get("features", []):
+        if f.get("id") == feature_id and f.get("status") != "done":
+            f["status"] = "done"
+            f["completed_at"] = _now_iso()
+            flipped = True
+            break
+    if flipped:
+        try:
+            fl_path.write_text(json.dumps(fl, indent=2, ensure_ascii=False), encoding="utf-8")
+            logger.info("_flip_feature_status_to_done: flipped {} to done", feature_id)
+        except OSError as exc:
+            logger.warning("_flip_feature_status_to_done: write failed: {}", exc)
+            return False
+    return flipped
+
+
+def _now_iso() -> str:
+    """ISO 8601 timestamp for completed_at field."""
+    from datetime import UTC, datetime
+    return datetime.now(UTC).isoformat()
 
 
 def run_review_legacy_str(feature_id: str, feature_description: str, scope_hint: str = "") -> str:

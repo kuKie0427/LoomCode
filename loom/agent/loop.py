@@ -820,10 +820,15 @@ def _run_pre_compact_review(messages: list, config: HarnessConfig) -> None:
 def _run_session_end_review(workdir: Path, config: HarnessConfig, history: list) -> None:
     """Fire-and-forget code review at session end.
 
-    Spawns a daemon thread that reads ``feature_list.json``, finds the active
+    Spawns a thread that reads ``feature_list.json``, finds the active
     feature, calls ``run_review()``, writes the verdict to progress.md, and
     updates I9 ``review_attempts`` counter (reset on pass, increment on non-pass).
-    Never blocks process exit — the daemon thread dies when the process exits.
+
+    P1-2 fix: previously used a daemon thread that could be killed by process
+    exit before the Reviewer LLM call (typically 20-30s) completed. Now uses
+    a non-daemon thread with a bounded join (default 60s) so the review has
+    time to finish. The join is bounded so a hung LLM call doesn't block
+    process exit indefinitely.
     """
     def _runner() -> None:
         if not config.review.enabled or not config.review.session_end_review:
@@ -835,7 +840,10 @@ def _run_session_end_review(workdir: Path, config: HarnessConfig, history: list)
             from loom.agent.review import run_review
 
             feat_id = feat["id"]
-            verdict_str, fd = run_review(feat_id, feat.get("description", ""), feat.get("name", ""))
+            verdict_str, fd = run_review(
+                feat_id, feat.get("description", ""), feat.get("name", ""),
+                workdir=workdir, flip_status_on_pass=True,
+            )
             _write_verdict_to_progress_md(workdir, feat_id, verdict_str)
 
             # I9: reset on pass, increment on non-pass (mirror _run_pre_compact_review)
@@ -847,7 +855,16 @@ def _run_session_end_review(workdir: Path, config: HarnessConfig, history: list)
         except Exception as exc:
             logger.warning("SessionEnd review failed: %s", exc)
 
-    threading.Thread(target=_runner, daemon=True).start()
+    # P1-2: non-daemon thread + bounded join. Daemon threads die when the
+    # main thread exits, which killed SessionEnd reviews in Phase B (the
+    # Reviewer LLM call takes ~27s but the main thread exited in <1s).
+    # 60s bound is generous: longest observed review was 27s; if a future
+    # review exceeds 60s, we let the thread be killed rather than block.
+    t = threading.Thread(target=_runner, daemon=False, name="session-end-review")
+    t.start()
+    t.join(timeout=60.0)
+    if t.is_alive():
+        logger.warning("SessionEnd review thread still alive after 60s join; proceeding with exit")
 
 
 def _execute_feedback_directive(feat_id: str, fd: FeedbackDirective) -> None:

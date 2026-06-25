@@ -272,8 +272,12 @@ class TriangleRunReviewInjectsDeltaReport(EvalCase):
             verification_run="echo", verification_result="ok", escalations=(),
         )
         with patch("loom.agent.tools.spawn_subagent") as mock_spawn:
+            # P0-2: include both blocks so feedback_retry doesn't fire
+            # (otherwise call_args points to retry prompt, missing <delta_report>)
             mock_spawn.return_value = (
-                '<verdict>{"status":"pass","summary":"ok","evidence":[],"recommendations":[]}</verdict>'
+                '<verdict>{"status":"pass","summary":"ok","evidence":[],"recommendations":[]}</verdict>\n'
+                '<feedback_directive>\naction: none\ntarget_files: []\n'
+                'target_lines: []\nretry_review: false\nnotes: "ok"\n</feedback_directive>'
             )
             run_review("f-eval", "feature desc", delta_report=delta)
             if mock_spawn.call_args is None:

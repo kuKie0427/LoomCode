@@ -149,15 +149,22 @@ class TestRunSessionEndReview:
         done = threading.Event()
 
         with patch("loom.agent.review.run_review") as mock_run:
-            def _mock_run(feature_id, description="", scope_hint=""):
+            def _mock_run(feature_id, description="", scope_hint="", **kwargs):
                 done.set()
-                return "[review: pass] OK"
+                return ("[review: pass] OK", None)
             mock_run.side_effect = _mock_run
 
             _run_session_end_review(tmp_path, config, [])
-            assert done.wait(timeout=2.0), "daemon thread did not complete"
+            # P1-2: _run_session_end_review now blocks until thread completes
+            # (bounded join), so done should already be set by the time we
+            # reach this assertion.
+            assert done.wait(timeout=2.0), "thread did not complete"
 
-            mock_run.assert_called_once_with("f-magic", "implements magic", "MagicFeature")
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args
+            assert call_args.args == ("f-magic", "implements magic", "MagicFeature")
+            assert call_args.kwargs.get("workdir") == tmp_path
+            assert call_args.kwargs.get("flip_status_on_pass") is True
 
     def test_review_pending_triggers_review(self, tmp_path):
         """review-pending status also triggers the review."""
@@ -179,15 +186,17 @@ class TestRunSessionEndReview:
         done = threading.Event()
 
         with patch("loom.agent.review.run_review") as mock_run:
-            def _mock_run(feature_id, description="", scope_hint=""):
+            def _mock_run(feature_id, description="", scope_hint="", **kwargs):
                 done.set()
-                return "[review: pass] OK"
+                return ("[review: pass] OK", None)
             mock_run.side_effect = _mock_run
 
             _run_session_end_review(tmp_path, config, [])
-            assert done.wait(timeout=2.0), "daemon thread did not complete"
+            assert done.wait(timeout=2.0), "thread did not complete"
 
-            mock_run.assert_called_once_with("f-pending", "needs review", "Pending")
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args
+            assert call_args.args == ("f-pending", "needs review", "Pending")
 
     def test_fail_closed_on_exception(self, tmp_path):
         """run_review raises -> logger.warning called, no crash."""
@@ -243,13 +252,13 @@ class TestRunSessionEndReview:
 
         with patch("loom.agent.review.run_review") as mock_run:
             verdict = "[review: pass]\nAll checks passed.\n"
-            def _mock_run(feature_id, description="", scope_hint=""):
+            def _mock_run(feature_id, description="", scope_hint="", **kwargs):
                 done.set()
-                return verdict
+                return (verdict, None)
             mock_run.side_effect = _mock_run
 
             _run_session_end_review(tmp_path, config, [])
-            assert done.wait(timeout=2.0), "daemon thread did not complete"
+            assert done.wait(timeout=2.0), "thread did not complete"
 
             # done fires inside mock run_review, but _write_verdict_to_progress_md
             # runs after run_review returns. Wait for the file to appear.
@@ -269,7 +278,16 @@ class TestRunSessionEndReview:
         assert "(auto, " in content, "should contain auto timestamp marker"
 
     def test_daemon_thread_does_not_block(self, tmp_path):
-        """Daemon thread allows _run_session_end_review to return immediately."""
+        """P1-2: _run_session_end_review now uses bounded join (not fire-and-forget).
+
+        Old behavior: daemon thread, returns immediately (<1s).
+        New behavior: non-daemon thread + 60s bounded join. Blocks until
+        review completes or 60s timeout. This ensures the SessionEnd
+        review actually runs before process exit (P1-2 fix).
+
+        With a 5s sleep in run_review, the function should block for ~5s
+        (not <1s like before, and not >60s like a hung call would).
+        """
         fl = tmp_path / "feature_list.json"
         fl.write_text(
             json.dumps({
@@ -287,13 +305,15 @@ class TestRunSessionEndReview:
         )
 
         with patch("loom.agent.review.run_review") as mock_run:
-            mock_run.side_effect = lambda *a, **kw: time.sleep(5)
+            mock_run.side_effect = lambda *a, **kw: (time.sleep(0.5), ("[review: pass]", None))[1]
 
             t0 = time.monotonic()
             _run_session_end_review(tmp_path, config, [])
             elapsed = time.monotonic() - t0
 
-            assert elapsed < 1.0, f"_run_session_end_review blocked for {elapsed:.2f}s"
+            # P1-2: should block for ~0.5s (the sleep), not return immediately.
+            # Upper bound 10s is generous (allows for thread scheduling).
+            assert 0.3 < elapsed < 10.0, f"_run_session_end_review blocked for {elapsed:.2f}s (expected ~0.5s)"
 
 
 class TestRunReplIntegration:
@@ -368,7 +388,7 @@ class TestRunReplIntegration:
              patch("loom.agent.loop.discover_user_hooks", return_value={}), \
              patch("loom.agent.loop.hooks.trigger_hooks"), \
              patch("loom.agent.review.run_review") as mock_run:
-            mock_run.side_effect = lambda *a, **kw: (done.set(), "[review: pass] OK")[1]
+            mock_run.side_effect = lambda *a, **kw: (done.set(), ("[review: pass] OK", None))[1]
 
             from loom.agent.loop import run_repl
             run_repl(resume=False)

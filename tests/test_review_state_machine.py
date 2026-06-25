@@ -168,3 +168,106 @@ class TestSystemPrompt:
         with tempfile.TemporaryDirectory() as tmp:
             prompt = build_fresh(Path(tmp))
         assert "标 feature 为 done 前必须调 review" in prompt
+
+
+class TestP1FlipStatusOnPass:
+    """P1-1: run_review(flips_status_on_pass=True) flips feature_list.json
+    status to 'done' when verdict=pass and fd.action=['none'].
+
+    This is the 'hard guarantee' path — even if the Orchestrator LLM forgets
+    to call edit_file, the status flips correctly inside run_review.
+    """
+
+    def test_pass_with_none_action_flips_to_done(self, tmp_path):
+        """verdict=pass + action=[none] → feature_list.json status becomes 'done'."""
+        fl = tmp_path / "feature_list.json"
+        fl.write_text(json.dumps({
+            "features": [
+                {"id": "f-flip", "name": "Flip", "description": "flip test",
+                 "status": "in-progress", "verification": "echo"},
+            ]
+        }), encoding="utf-8")
+
+        from unittest.mock import patch
+        mock_return = (
+            '<verdict>{"status":"pass","summary":"OK","evidence":[],"recommendations":[]}</verdict>\n'
+            '<feedback_directive>\naction: none\ntarget_files: []\n'
+            'target_lines: []\nretry_review: false\nnotes: "ok"\n</feedback_directive>'
+        )
+        with patch("loom.agent.tools.spawn_subagent", return_value=mock_return):
+            from loom.agent.review import run_review
+            run_review("f-flip", "flip test", workdir=tmp_path, flip_status_on_pass=True)
+
+        data = json.loads(fl.read_text(encoding="utf-8"))
+        assert data["features"][0]["status"] == "done"
+        assert "completed_at" in data["features"][0]
+
+    def test_pass_without_flip_flag_does_not_flip(self, tmp_path):
+        """flip_status_on_pass=False (default) → status stays 'in-progress'."""
+        fl = tmp_path / "feature_list.json"
+        fl.write_text(json.dumps({
+            "features": [
+                {"id": "f-noflip", "name": "NoFlip", "description": "no flip",
+                 "status": "in-progress", "verification": "echo"},
+            ]
+        }), encoding="utf-8")
+
+        from unittest.mock import patch
+        mock_return = (
+            '<verdict>{"status":"pass","summary":"OK","evidence":[],"recommendations":[]}</verdict>\n'
+            '<feedback_directive>\naction: none\ntarget_files: []\n'
+            'target_lines: []\nretry_review: false\nnotes: "ok"\n</feedback_directive>'
+        )
+        with patch("loom.agent.tools.spawn_subagent", return_value=mock_return):
+            from loom.agent.review import run_review
+            run_review("f-noflip", "no flip", workdir=tmp_path)  # flip_status_on_pass=False
+
+        data = json.loads(fl.read_text(encoding="utf-8"))
+        assert data["features"][0]["status"] == "in-progress"
+
+    def test_fail_verdict_does_not_flip(self, tmp_path):
+        """verdict=fail → status stays 'in-progress' even with flip_status_on_pass=True."""
+        fl = tmp_path / "feature_list.json"
+        fl.write_text(json.dumps({
+            "features": [
+                {"id": "f-fail", "name": "Fail", "description": "fail test",
+                 "status": "in-progress", "verification": "echo"},
+            ]
+        }), encoding="utf-8")
+
+        from unittest.mock import patch
+        mock_return = (
+            '<verdict>{"status":"fail","summary":"bug","evidence":["a.py:1"],"recommendations":["fix"]}</verdict>\n'
+            '<feedback_directive>\naction: fix_bug\ntarget_files: ["a.py"]\n'
+            'target_lines: ["1"]\nretry_review: true\nnotes: "fix"\n</feedback_directive>'
+        )
+        with patch("loom.agent.tools.spawn_subagent", return_value=mock_return):
+            from loom.agent.review import run_review
+            run_review("f-fail", "fail test", workdir=tmp_path, flip_status_on_pass=True)
+
+        data = json.loads(fl.read_text(encoding="utf-8"))
+        assert data["features"][0]["status"] == "in-progress"
+
+    def test_already_done_does_not_re_flip(self, tmp_path):
+        """Feature already 'done' → no re-flip, no completed_at overwrite."""
+        fl = tmp_path / "feature_list.json"
+        fl.write_text(json.dumps({
+            "features": [
+                {"id": "f-done", "name": "Done", "description": "already done",
+                 "status": "done", "verification": "echo", "completed_at": "original"},
+            ]
+        }), encoding="utf-8")
+
+        from unittest.mock import patch
+        mock_return = (
+            '<verdict>{"status":"pass","summary":"OK","evidence":[],"recommendations":[]}</verdict>\n'
+            '<feedback_directive>\naction: none\ntarget_files: []\n'
+            'target_lines: []\nretry_review: false\nnotes: "ok"\n</feedback_directive>'
+        )
+        with patch("loom.agent.tools.spawn_subagent", return_value=mock_return):
+            from loom.agent.review import run_review
+            run_review("f-done", "already done", workdir=tmp_path, flip_status_on_pass=True)
+
+        data = json.loads(fl.read_text(encoding="utf-8"))
+        assert data["features"][0]["status"] == "done"
+        assert data["features"][0]["completed_at"] == "original"  # not overwritten

@@ -1401,7 +1401,7 @@ def _run_review_tool_handler(
     for forward compatibility with Task 2 (which changes run_review's return
     type to ``tuple[str, FeedbackDirective | None]``).
     """
-    result = run_review(feature_id, feature_description, scope_hint)
+    result = run_review(feature_id, feature_description, scope_hint, flip_status_on_pass=True)
     # Forward-compat: after Task 2, run_review returns tuple[str, FeedbackDirective | None]
     if isinstance(result, tuple):
         return result[0]
