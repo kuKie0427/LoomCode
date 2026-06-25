@@ -9,10 +9,10 @@ side-by-side. The goal is to make the diff output from the
 editing tools actually VISIBLE in the TUI when an agent runs
 edit_file and clicks the tool result to expand it.
 
-Per-line coloring (loom-ink theme):
-  + line (green) — added
-  - line (red)   — removed
-  @@ hunk header (yellow) — context marker
+Per-line coloring (loom-ink theme tokens):
+  + line ($success) — added
+  - line ($error)   — removed
+  @@ hunk header ($warning) — context marker
   default (foreground)   — context / unchanged
 """
 
@@ -33,11 +33,11 @@ def colorize_diff(diff: str) -> str:
     out: list[str] = []
     for line in diff.splitlines():
         if _HUNK.match(line):
-            out.append(f"[yellow]{line}[/yellow]")
+            out.append(f"[$warning]{line}[/]")
         elif _ADD.match(line):
-            out.append(f"[green]{line}[/green]")
+            out.append(f"[$success]{line}[/]")
         elif _REM.match(line):
-            out.append(f"[red]{line}[/red]")
+            out.append(f"[$error]{line}[/]")
         else:
             out.append(line)
     return "\n".join(out)

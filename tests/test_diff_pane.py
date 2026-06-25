@@ -23,19 +23,19 @@ DIFF_SAMPLE = (
 
 def test_colorize_marks_added_lines_green():
     out = colorize_diff("+hello world")
-    assert "[green]" in out
+    assert "[$success]" in out
     assert "+hello world" in out
 
 
 def test_colorize_marks_removed_lines_red():
     out = colorize_diff("-old text")
-    assert "[red]" in out
+    assert "[$error]" in out
     assert "-old text" in out
 
 
 def test_colorize_marks_hunk_headers_yellow():
     out = colorize_diff("@@ -1,3 +1,4 @@")
-    assert "[yellow]" in out
+    assert "[$warning]" in out
     assert "@@" in out
 
 
@@ -47,9 +47,9 @@ def test_colorize_leaves_context_unchanged():
 
 def test_colorize_handles_full_diff():
     out = colorize_diff(DIFF_SAMPLE)
-    assert "[green]" in out
-    assert "[red]" in out
-    assert "[yellow]" in out
+    assert "[$success]" in out
+    assert "[$error]" in out
+    assert "[$warning]" in out
     ADDED_LINE = "+# new comment"
     CONTEXT_LINE = " def add(a, b):"
     assert ADDED_LINE in out
@@ -78,8 +78,8 @@ def test_diff_pane_renders_diff():
     pane = DiffPane()
     pane.diff_text = DIFF_SAMPLE
     out = pane.render()
-    assert "[green]" in out
-    assert "[red]" in out
+    assert "[$success]" in out
+    assert "[$error]" in out
     assert "def add" in out
 
 
@@ -94,9 +94,9 @@ def test_diff_pane_uses_loom_ink_color_palette():
     pane = DiffPane()
     pane.diff_text = "+added\n-removed\n@@ hunk\ncontext\n"
     rendered = pane.render()
-    assert "[green]+added" in rendered
-    assert "[red]-removed" in rendered
-    assert "[yellow]@@ hunk" in rendered
+    assert "[$success]+added" in rendered
+    assert "[$error]-removed" in rendered
+    assert "[$warning]@@ hunk" in rendered
 
 
 def test_diff_pane_reactive_watch_triggers_update():
