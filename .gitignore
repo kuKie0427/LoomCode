@@ -50,3 +50,6 @@ session-handoff.md
 
 # Triangle Protocol live-run test sandbox (Phase A/B evaluation)
 .triangle-test/
+
+# Brainstorming visual companion (mockups, not committed)
+.superpowers/

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 from textual.screen import ModalScreen
@@ -96,3 +97,106 @@ def test_esc_cancels() -> None:
 
 def test_bindings_include_escape() -> None:
     assert any("escape" in str(b) for b in ModelPicker.BINDINGS)
+
+
+def test_on_mount_does_not_crash_when_list_view_missing() -> None:
+    """on_mount should not crash the app if query_one fails.
+
+    Regression: ModelPicker.on_mount called query_one("#model-picker-list")
+    without a try/except. If compose hadn't completed (race condition), the
+    NoMatches exception would propagate to Textual's _handle_exception,
+    exiting the app. The fix defers to call_later.
+    """
+    from textual.css.query import NoMatches
+
+    mp = ModelPicker()
+
+    def _raise_no_matches(*args, **kwargs):
+        raise NoMatches("simulated")
+
+    async def _run():
+        with patch.object(mp, "query_one", side_effect=_raise_no_matches):
+            # This should NOT raise — it should defer via call_later
+            await mp.on_mount()
+
+    asyncio.run(_run())
+
+
+def test_on_mount_handles_build_rows_failure() -> None:
+    """on_mount should not crash if _build_rows throws or the screen is pushed
+    in a context where the ListView isn't fully mounted yet.
+    """
+
+    async def _run():
+        from textual.app import App, ComposeResult
+        from textual.widgets import ListView
+
+        class TestApp(App):
+            def compose(self) -> ComposeResult:
+                yield ListView(id="model-picker-list")
+
+        app = TestApp()
+        async with app.run_test() as pilot:
+            mp = ModelPicker()
+            app.push_screen(mp)
+            await pilot.pause(0.3)
+            # Verify the screen is still alive (didn't crash)
+            assert app.screen is mp
+
+    asyncio.run(_run())
+
+
+def test_on_model_picked_handles_change_model_failure() -> None:
+    """_on_model_picked should not crash if change_model raises."""
+
+    async def _run():
+        from loom.tui.app import AgentTUIApp
+
+        app = AgentTUIApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause(0.3)
+            try:
+                from loom.tui.welcome import WelcomeModal
+                app.query_one(WelcomeModal).dismiss("")
+                await pilot.pause(0.2)
+            except Exception:
+                pass
+
+            with patch.object(
+                app.llm, "change_model", side_effect=RuntimeError("boom")
+            ):
+                app._on_model_picked(("anthropic", "claude-sonnet-4-5"))
+
+            await pilot.pause(0.1)
+            assert app._exit is False
+
+    asyncio.run(_run())
+
+
+def test_on_model_picked_handles_chatlog_missing() -> None:
+    """_on_model_picked should not crash if query_one(ChatLog) fails."""
+    from textual.css.query import NoMatches
+
+    async def _run():
+        from loom.tui.app import AgentTUIApp
+
+        app = AgentTUIApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause(0.3)
+            try:
+                from loom.tui.welcome import WelcomeModal
+                app.query_one(WelcomeModal).dismiss("")
+                await pilot.pause(0.2)
+            except Exception:
+                pass
+
+            def _raise(*args, **kwargs):
+                raise NoMatches("simulated")
+
+            with patch.object(app, "query_one", side_effect=_raise):
+                app._on_model_picked(("deepseek", "deepseek-v4-flash"))
+
+            await pilot.pause(0.1)
+            assert app._exit is False
+
+    asyncio.run(_run())

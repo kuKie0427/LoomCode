@@ -13,9 +13,10 @@ from loom.tui.chat_log import ChatLog
 from loom.tui.slash_commands import SLASH_COMMANDS, find_command
 
 
-def test_registry_has_nine_commands() -> None:
-    """SLASH_COMMANDS has exactly 9 entries."""
-    assert len(SLASH_COMMANDS) == 9
+def test_registry_has_eleven_commands() -> None:
+    """SLASH_COMMANDS has exactly 11 entries (help, init, clear, model,
+    sessions, new, connect, resume, status, thinking, quit)."""
+    assert len(SLASH_COMMANDS) == 11
 
 
 def test_quit_aliases() -> None:
@@ -40,6 +41,26 @@ def test_find_command_case_insensitive() -> None:
 def test_unknown_command_returns_none() -> None:
     """An unrecognized command returns None."""
     assert find_command("nope") is None
+
+
+def test_run_slash_command_empty_input_is_noop() -> None:
+    """run_slash_command("") must not crash — typing "/" alone used to
+    raise IndexError because parts[0] was accessed on an empty list.
+
+    Regression: see traceback ending in `parts[0].lower()` → IndexError.
+    """
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from loom.tui.app import AgentTUIApp
+
+    app = MagicMock(spec=AgentTUIApp)
+    # run_slash_command is async — call the unbound method with the mock.
+    asyncio.run(AgentTUIApp.run_slash_command(app, ""))
+    # Also verify whitespace-only input is a no-op.
+    asyncio.run(AgentTUIApp.run_slash_command(app, "   "))
+    # query_one should never have been called for empty input.
+    app.query_one.assert_not_called()
 
 
 def test_each_command_has_description() -> None:

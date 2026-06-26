@@ -43,7 +43,7 @@ async def handle_help(app: AgentTUIApp, args: str) -> None:
     chat_log = app.query_one(ChatLog)
     chat_log.append_system_note(
         "**Commands:** /help, /clear, /init, /model <name>, /connect, "
-        "/thinking, /resume, /status, /quit"
+        "/thinking, /resume [id], /sessions, /new, /status, /quit"
     )
 
 
@@ -76,18 +76,36 @@ async def handle_model(app: AgentTUIApp, args: str) -> None:
         app.push_screen(ModelPicker(recent=ms.recent(limit=10)), app._on_model_picked)
 
 
-async def handle_connect(app: AgentTUIApp, args: str) -> None:
-    if args.strip():
-        provider_id = args.strip()
-        app.push_screen(AuthInputModal(provider_id), app._on_connect_auth_done)
-    else:
-        app.push_screen(ConnectProviderModal(), app._on_connect_done)
+async def handle_sessions(app: AgentTUIApp, args: str) -> None:
+    """Open the session picker modal to switch between saved sessions."""
+    from loom.tui.session_picker import SessionPicker
+
+    app.push_screen(
+        SessionPicker(current_session_id=app._session_id),
+        app._on_session_picked,
+    )
+
+
+async def handle_new(app: AgentTUIApp, args: str) -> None:
+    """Start a new session, saving the current one first."""
+    app.new_session()
 
 
 async def handle_resume(app: AgentTUIApp, args: str) -> None:
+    """Resume a session.
+
+    With no args: load the most recent checkpoint (legacy behavior).
+    With a session_id arg: switch to that specific session.
+    """
+    chat_log = app.query_one(ChatLog)
+    target = args.strip()
+    if target:
+        # Resume a specific session by id.
+        app.switch_session(target)
+        return
+    # Legacy: resume from the single checkpoint.json file.
     import loom.agent.checkpoint as checkpoint
 
-    chat_log = app.query_one(ChatLog)
     if checkpoint.exists(WORKDIR):
         ckpt = checkpoint.load(WORKDIR)
         if ckpt is not None:
@@ -105,6 +123,14 @@ async def handle_resume(app: AgentTUIApp, args: str) -> None:
             chat_log.append_system_note("Checkpoint file corrupted or empty.")
     else:
         chat_log.append_system_note("No checkpoint found.")
+
+
+async def handle_connect(app: AgentTUIApp, args: str) -> None:
+    if args.strip():
+        provider_id = args.strip()
+        app.push_screen(AuthInputModal(provider_id), app._on_connect_auth_done)
+    else:
+        app.push_screen(ConnectProviderModal(), app._on_connect_done)
 
 
 async def handle_status(app: AgentTUIApp, args: str) -> None:
@@ -215,13 +241,23 @@ SLASH_COMMANDS: list[SlashCommand] = [
         handler=handle_model,
     ),
     SlashCommand(
+        name="sessions",
+        description="Open the session picker to switch or delete sessions",
+        handler=handle_sessions,
+    ),
+    SlashCommand(
+        name="new",
+        description="Start a new session (saves the current one first)",
+        handler=handle_new,
+    ),
+    SlashCommand(
         name="connect",
         description="Connect a provider or enter an API key",
         handler=handle_connect,
     ),
     SlashCommand(
         name="resume",
-        description="Resume from the most recent checkpoint",
+        description="Resume a session: /resume <id> or /resume for last checkpoint",
         handler=handle_resume,
     ),
     SlashCommand(

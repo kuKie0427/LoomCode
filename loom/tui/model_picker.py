@@ -102,16 +102,40 @@ class ModelPicker(ModalScreen[tuple[str, str]]):
 
     async def on_mount(self) -> None:
         """Focus the model list by default. Typing switches to the filter."""
-        list_view = self.query_one("#model-picker-list", ListView)
-        self._build_rows()
-        await self._refresh_list("")
+        try:
+            list_view = self.query_one("#model-picker-list", ListView)
+        except Exception:
+            # Defensive: if compose hasn't completed or the widget is missing,
+            # defer to call_later so on_mount doesn't crash the app.
+            self.call_later(self._deferred_mount)
+            return
+        await self._finish_mount(list_view)
+
+    async def _deferred_mount(self) -> None:
+        """Fallback mount logic called via call_later if query_one failed."""
+        try:
+            list_view = self.query_one("#model-picker-list", ListView)
+        except Exception:
+            return  # give up silently — the dialog is still usable
+        await self._finish_mount(list_view)
+
+    async def _finish_mount(self, list_view: ListView) -> None:
+        """Build rows, populate the list, and focus it."""
+        try:
+            self._build_rows()
+            await self._refresh_list("")
+        except Exception:
+            pass  # _build_rows / _refresh_list failures shouldn't crash the app
         # Start on the first non-header item (headers are disabled).
-        first_enabled = next(
-            (i for i, c in enumerate(list_view.children) if not c.disabled),
-            0,
-        )
-        list_view.index = first_enabled
-        list_view.focus()
+        try:
+            first_enabled = next(
+                (i for i, c in enumerate(list_view.children) if not c.disabled),
+                0,
+            )
+            list_view.index = first_enabled
+            list_view.focus()
+        except Exception:
+            pass
 
     def on_key(self, event: events.Key) -> None:
         """Printable keys auto-redirect to the filter Input.
@@ -148,8 +172,11 @@ class ModelPicker(ModalScreen[tuple[str, str]]):
                 self._rows.append((f"  {display}", safe_id, "model-entry"))
 
         # Provider sections — only show providers with credentials connected.
+        # Use credentials.all() (single disk read) instead of calling
+        # credentials.get() for each of the 120+ registered providers.
+        connected = set(credentials.all().keys())
         for pid in sorted(PROVIDERS):
-            if credentials.get(pid) is None:
+            if pid not in connected:
                 continue
             try:
                 inst = PROVIDERS[pid](api_key="", base_url=None)

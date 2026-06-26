@@ -23,6 +23,13 @@ class Composer(TextArea):
     class CompletionTab(Message):
         """Tab key pressed while in `/` command mode."""
 
+    class CompletionEnter(Message):
+        """Enter key pressed while the `/` completion popup is visible.
+
+        The app decides whether to execute the highlighted command directly
+        (one-step /<name> run) or fall back to normal submit.
+        """
+
     class CompletionMove(Message):
         """Up/Down arrow pressed while in `/` command mode."""
 
@@ -51,6 +58,12 @@ class Composer(TextArea):
         if event.key == "enter":
             event.prevent_default()
             event.stop()
+            # If the / completion popup is visible, let the app decide whether
+            # to execute the highlighted command directly (one-step run) or
+            # fall back to a normal submit.
+            if self.text.startswith("/") and " " not in self.text:
+                self.post_message(self.CompletionEnter())
+                return
             text = self.text
             self.text = ""
             self.post_message(self.Submitted(text))

@@ -167,7 +167,10 @@ def test_model_picker_open(snap_compare):
         return fake_cred if provider_id == "anthropic" else None
 
     async def run_before(pilot):
-        with patch("loom.agent.credential.credentials.get", side_effect=_fake_get):
+        # Mock both credentials.get (legacy path) and credentials.all
+        # (the optimized _build_rows path) so only anthropic appears.
+        with patch("loom.agent.credential.credentials.get", side_effect=_fake_get), \
+             patch("loom.agent.credential.credentials.all", return_value={"anthropic": fake_cred}):
             pilot.app.push_screen(ModelPicker())
             await pilot.pause(0.4)
     assert snap_compare(app, run_before=run_before, terminal_size=(120, 40))

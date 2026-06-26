@@ -289,7 +289,19 @@ def _run_tool_turn(tool_uses, hooks):
     return results
 
 
-def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, stream_text: Callable[[str, list, list, int], Iterator[StreamEvent]] | None = None) -> None:
+def _save_session_store(session_id: str | None, messages: list, llm_client, context, tool_call_count: int) -> None:
+    """Best-effort save to the session store (alongside checkpoint.save)."""
+    if session_id is None:
+        return
+    try:
+        from loom.agent.session_store import SessionStore
+        store = SessionStore(WORKDIR)
+        store.save_session(session_id, messages, llm_client, context, tool_call_count)
+    except Exception:
+        pass  # session store failures must never block the agent loop
+
+
+def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, stream_text: Callable[[str, list, list, int], Iterator[StreamEvent]] | None = None, session_id: str | None = None) -> None:
     configure_logging()
     global _LAST_REVIEWED_FEATURE_ID
     _LAST_REVIEWED_FEATURE_ID = None
@@ -309,7 +321,9 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
     try:
             if cb["on_message_start"] is not None:
                 cb["on_message_start"]()
-            session_id = uuid.uuid4().hex[:12]
+            # Use the provided session_id (from TUI/CLI) or generate a new one.
+            if session_id is None:
+                session_id = uuid.uuid4().hex[:12]
             trace_mod.start(WORKDIR, session_id)
             tr = trace_mod.current()
             if tr is not None:
@@ -439,6 +453,7 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                 if response.stop_reason != "tool_use":
                     hooks.trigger_hooks("AgentStop", messages)
                     checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
+                    _save_session_store(session_id, messages, llm_client, context, tool_call_count)
                     if tr is not None:
                         from loom.agent.cost import get_session_cost
                         sess = get_session_cost()
@@ -472,6 +487,7 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                 if checkpoint.is_due(tool_call_count, new_tokens,
                                      ckpt_cfg.every_tool_calls, ckpt_cfg.every_tokens):
                     saved_path = checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
+                    _save_session_store(session_id, messages, llm_client, context, tool_call_count)
                     if tr is not None:
                         tr.record("checkpoint_save", path=str(saved_path),
                                   tool_calls=tool_call_count, new_tokens=new_tokens)
@@ -500,6 +516,7 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                 })
                 hooks.trigger_hooks("AgentStop", messages)
                 checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
+                _save_session_store(session_id, messages, llm_client, context, tool_call_count)
                 if cb["on_message_end"] is not None:
                     cb["on_message_end"](tool_call_count, len(messages))
                 trace_mod.stop()

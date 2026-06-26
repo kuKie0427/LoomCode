@@ -211,6 +211,10 @@ class AgentTUIApp(App):
         self._cancelled = False
         self._main_loop = None
         self._init_sh_thread: threading.Thread | None = None
+        # Session history: each user turn belongs to a session_id.
+        # Created lazily on first turn if None (so /new and /sessions can
+        # set it explicitly before any turn runs).
+        self._session_id: str | None = None
 
         # Wire up harness.toml config (mirrors run_repl L193)
         from loom.agent.config import load_config
@@ -816,6 +820,27 @@ class AgentTUIApp(App):
             composer.focus()
             composer.cursor_location = (0, len(composer.text))
 
+    async def on_composer_completion_enter(self, event: Composer.CompletionEnter) -> None:
+        """Enter pressed while the / completion popup is visible.
+
+        If a command is highlighted, execute it directly (one-step run)
+        instead of requiring Tab→Enter. Falls back to a normal submit if
+        no command is highlighted or the popup is empty.
+        """
+        completer = self.query_one(CommandCompleter)
+        cmd = completer.current()
+        if cmd:
+            composer = self.query_one(Composer)
+            composer.text = ""
+            completer.hide()
+            await self.run_slash_command(cmd.name)
+        else:
+            # No highlighted match — fall back to normal submit.
+            composer = self.query_one(Composer)
+            text = composer.text
+            composer.text = ""
+            await self.on_composer_submitted(Composer.Submitted(text))
+
     def on_show_notification(self, event: ShowNotification) -> None:
         """Display an inline notification in the ChatLog.
 
@@ -849,6 +874,9 @@ class AgentTUIApp(App):
 
     async def run_slash_command(self, cmd_line: str) -> None:
         parts = cmd_line.split(maxsplit=1)
+        if not parts:
+            # Empty input (e.g. user typed "/" alone) — no-op.
+            return
         cmd = parts[0].lower()
         args = parts[1] if len(parts) > 1 else ""
         chat_log = self.query_one(ChatLog)
@@ -925,13 +953,172 @@ class AgentTUIApp(App):
 
     @work(exclusive=True, group="agent-turn")
     async def _run_turn(self, callbacks: dict) -> None:
+        # Lazily create a session_id if none is set yet.
+        if self._session_id is None:
+            self._start_new_session()
         await asyncio.to_thread(
             agent_loop,
             self.history,
             self.llm,
             callbacks,
             self.llm.stream_iter,
+            self._session_id,
         )
+
+    # ------------------------------------------------------------------
+    # Session history management
+    # ------------------------------------------------------------------
+
+    def _start_new_session(self) -> str:
+        """Create a new session id and register it in the session store."""
+        from loom.agent.session_store import SessionStore
+
+        store = SessionStore(WORKDIR)
+        session_id = store.create_session()
+        self._session_id = session_id
+        return session_id
+
+    def new_session(self) -> None:
+        """Clear current conversation and start a fresh session.
+
+        Saves the current session (if any) before clearing, so no work
+        is lost.  Does NOT delete the old session — it remains in the
+        session list and can be resumed via /sessions.
+        """
+        # Save current session before switching (best-effort).
+        self._save_current_session()
+        # Clear conversation state.
+        self.history.clear()
+        self.user_turn_count = 0
+        self.tool_call_count = 0
+        self.ctx_tokens = 0
+        # Create a new session id.
+        self._start_new_session()
+        # Clear the chat log UI (async — schedule via call_later).
+        try:
+            chat_log = self.query_one(ChatLog)
+            self.call_later(chat_log.clear_content)
+            self.call_later(
+                chat_log.append_system_note, "Started a new session."
+            )
+        except Exception:
+            pass
+
+    def switch_session(self, session_id: str) -> None:
+        """Switch to an existing session by id.
+
+        Saves the current session first, then loads the target session's
+        messages into self.history and refreshes the chat log.
+        """
+        from loom.agent.session_store import SessionStore
+
+        # Save current session before switching.
+        self._save_current_session()
+
+        store = SessionStore(WORKDIR)
+        data = store.load_session(session_id)
+        if data is None:
+            try:
+                self.query_one(ChatLog).append_system_note(
+                    f"Session {session_id} not found or corrupted.",
+                    severity="error",
+                )
+            except Exception:
+                pass
+            return
+
+        # Load the session into memory.
+        self.history = data.get("messages", [])
+        self.user_turn_count = sum(
+            1 for m in self.history if m.get("role") == "user"
+        )
+        self.tool_call_count = data.get("tool_call_count", 0)
+        self._session_id = session_id
+        self._refresh_ctx_tokens()
+
+        # Refresh the chat log UI with the loaded messages.
+        try:
+            chat_log = self.query_one(ChatLog)
+            # clear_content is async — schedule via call_later so we don't
+            # block the event loop.  Replay is also scheduled after clear.
+            self.call_later(chat_log.clear_content)
+            session_name = data.get("session_name", "Untitled")
+            saved_at = data.get("saved_at", "?")
+            self.call_later(
+                chat_log.append_system_note,
+                f"Resumed session **{session_name}** ({saved_at}, "
+                f"{len(self.history)} messages)",
+            )
+            # Re-render historical messages into the chat log.
+            self._replay_history_into_chatlog()
+        except Exception:
+            pass
+        self._sync_status_bar()
+
+    def _save_current_session(self) -> None:
+        """Best-effort save of the current session to the session store."""
+        if self._session_id is None or not self.history:
+            return
+        try:
+            from loom.agent.loop import context as global_context
+            from loom.agent.session_store import SessionStore
+
+            store = SessionStore(WORKDIR)
+            store.save_session(
+                self._session_id,
+                self.history,
+                self.llm,
+                global_context,
+                self.tool_call_count,
+            )
+        except Exception:
+            pass  # best-effort; must not block session switching
+
+    def _replay_history_into_chatlog(self) -> None:
+        """Re-render self.history messages into the ChatLog widget.
+
+        Called after switch_session so the user sees the loaded
+        conversation.  Renders a compact summary of each message —
+        user messages are shown in full, assistant messages are
+        shown as a truncated preview (the full content is preserved
+        in self.history for the LLM).
+        """
+        try:
+            chat_log = self.query_one(ChatLog)
+            for msg in self.history:
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                if role == "user":
+                    if isinstance(content, str):
+                        # Skip system-reminder pseudo-messages.
+                        if content.startswith("<system-reminder>"):
+                            continue
+                        # append_user_message is async; call it via the
+                        # event loop.  We use call_later to avoid blocking.
+                        self.call_later(chat_log.append_user_message, content)
+                    elif isinstance(content, list):
+                        # tool_result messages — skip rendering for simplicity.
+                        pass
+                elif role == "assistant" and isinstance(content, list):
+                    # Extract text blocks from assistant messages.
+                    text_parts = []
+                    for block in content:
+                        if hasattr(block, "type") and block.type == "text":
+                            text_parts.append(block.text)
+                        elif isinstance(block, dict) and block.get("type") == "text":
+                            text_parts.append(block.get("text", ""))
+                    if text_parts:
+                        full_text = "\n".join(text_parts)
+                        # Truncate long assistant messages in the replay view.
+                        preview = full_text[:500]
+                        if len(full_text) > 500:
+                            preview += " …"
+                        self.call_later(
+                            chat_log.append_system_note,
+                            f"**Assistant:** {preview}",
+                        )
+        except Exception:
+            pass
 
     def action_cancel_stream(self) -> None:
         self._cancelled = True
@@ -1021,10 +1208,24 @@ class AgentTUIApp(App):
         if result is None:
             return
         provider_id, model_id = result
-        self.llm.change_model(f"{provider_id}/{model_id}")
+        try:
+            self.llm.change_model(f"{provider_id}/{model_id}")
+        except Exception as exc:
+            logger.warning("change_model failed for {}/{}: {}", provider_id, model_id, exc)
+            try:
+                self.query_one(ChatLog).append_system_note(
+                    f"Failed to switch model: **{provider_id}/{model_id}** — {exc}",
+                    severity="error",
+                )
+            except Exception:
+                pass
+            return
         self._sync_status_bar()
-        chat_log = self.query_one(ChatLog)
-        chat_log.append_system_note(f"Model changed to **{self.llm.model}**")
+        try:
+            chat_log = self.query_one(ChatLog)
+            chat_log.append_system_note(f"Model changed to **{self.llm.model}**")
+        except Exception:
+            pass  # ChatLog query can fail during screen transitions
         ms = ModelState(WORKDIR)
         ms.add_recent(provider_id, model_id)
         ms.set_default(provider_id, model_id)
@@ -1058,6 +1259,21 @@ class AgentTUIApp(App):
             pass
         from loom.tui.model_picker import ModelPicker
         self.push_screen(ModelPicker(), self._on_model_picked)
+
+    def _on_session_picked(self, result: str | None) -> None:
+        """Handle SessionPicker dismiss.
+
+        - None: cancelled (Esc) — do nothing.
+        - "__new__": user pressed 'n' — start a new session.
+        - <session_id>: user selected a session — switch to it.
+        """
+        if result is None:
+            return  # cancelled
+        if result == "__new__":
+            self.new_session()
+            return
+        # Switch to the selected session.
+        self.switch_session(result)
 
     def action_show_command_palette(self) -> None:
         """Open the Ctrl+P command palette."""
