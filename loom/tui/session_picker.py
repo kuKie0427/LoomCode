@@ -14,6 +14,7 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
+from textual.events import Key
 from textual.screen import ModalScreen
 from textual.widgets import Label, ListItem, ListView, Static
 
@@ -104,6 +105,22 @@ class SessionPicker(ModalScreen[str | None]):
             list_view.focus()
         except Exception:
             pass
+
+    def on_key(self, event: Key) -> None:
+        """Handle d/n keys before they reach the ListView or base screen.
+
+        Priority bindings alone may not fire reliably when a ListView has
+        focus — the base-screen Composer (TextArea) can swallow printable
+        keys. We intercept them here at the Screen level.
+        """
+        if event.key == "d":
+            event.stop()
+            event.prevent_default()
+            self.action_delete_session()
+        elif event.key == "n":
+            event.stop()
+            event.prevent_default()
+            self.action_new_session()
 
     def _load_sessions(self) -> None:
         """Load sessions from the SessionStore."""

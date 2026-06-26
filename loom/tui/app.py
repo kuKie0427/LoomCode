@@ -369,7 +369,7 @@ class AgentTUIApp(App):
         """Handle global shortcuts and ensure printable keys reach the Composer."""
         # Don't intercept keys when a modal screen is active — let the
         # modal handle its own keybindings (d/n/Enter in SessionPicker, etc.)
-        if self.screen is not self and hasattr(self.screen, "dismiss"):
+        if len(self.screen_stack) > 1:
             return
         # Ensure printable keys always reach the Composer (input box).
         if event.is_printable:
