@@ -12,6 +12,7 @@ Layout mirrors the ModelPicker pattern for visual consistency.
 from __future__ import annotations
 
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Container
 from textual.screen import ModalScreen
 from textual.widgets import Label, ListItem, ListView, Static
@@ -28,9 +29,9 @@ class SessionPicker(ModalScreen[str | None]):
     """
 
     BINDINGS = [
-        ("escape", "cancel", "Cancel"),
-        ("d", "delete_session", "Delete"),
-        ("n", "new_session", "New"),
+        Binding("escape", "cancel", "Cancel", priority=True),
+        Binding("d", "delete_session", "Delete", priority=True),
+        Binding("n", "new_session", "New", priority=True),
     ]
 
     DEFAULT_CSS = """
