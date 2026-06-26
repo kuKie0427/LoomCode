@@ -19,6 +19,7 @@ Public surface:
 from __future__ import annotations
 
 import json
+from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -30,6 +31,13 @@ if TYPE_CHECKING:
 CHECKPOINT_EVERY_TOOL_CALLS = 10
 CHECKPOINT_EVERY_TOKENS = 5000
 CHECKPOINT_FILENAME = "checkpoint.json"
+
+
+def _json_default(obj: object) -> object:
+    """Serialize dataclass blocks (TextBlock, ToolUseBlock, etc.) to dicts."""
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return asdict(obj)
+    return str(obj)
 
 
 def default_path_for(workdir: Path) -> Path:
@@ -70,7 +78,7 @@ def save(
         "checked_at_index": context.checked_at_index,
     }
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, default=str), encoding="utf-8")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, default=_json_default), encoding="utf-8")
     tmp.replace(path)
     return path
 

@@ -1025,6 +1025,23 @@ class ChatLog(VerticalScroll):
         else:
             asyncio.create_task(self._mount_async(widget))
 
+    async def append_replayed_assistant(self, text: str) -> None:
+        """Mount a full AssistantMessage for session replay (non-streaming).
+
+        Mirrors ``append_user_message`` but for the assistant side: mounts a
+        TurnLabel + AssistantMessage so the replayed conversation looks the
+        same as a live one.
+        """
+        self._current_body = None
+        self._assistant_label_mounted = False
+        self._stream_full_text = ""
+        self._sticky = True
+        label = TurnLabel("▎ assistant", classes="role-assistant")
+        body = AssistantMessage(text)
+        await self.mount(label)
+        await self.mount(body)
+        self.scroll_end()
+
     async def clear_content(self) -> None:
         self._force_flush_stream_buffer()
         self._dismiss_thinking_widget()

@@ -60,6 +60,36 @@ _TODO_STATE_FROM_AGENT: dict[str, Literal["pending", "active", "done"]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Block extraction helpers — handle both dict blocks (new serialization)
+# and dataclass objects (in-memory), plus legacy string-ified blocks.
+# ---------------------------------------------------------------------------
+
+
+def _get_block_type(block: object) -> str:
+    """Return the type string of a content block ('text', 'tool_use', ...)."""
+    if isinstance(block, dict):
+        return block.get("type", "")
+    return getattr(block, "type", "")
+
+
+def _get_block_field(block: object, field: str, default: object = "") -> object:
+    """Return a field from a content block (dict or dataclass)."""
+    if isinstance(block, dict):
+        return block.get(field, default)
+    return getattr(block, field, default)
+
+
+def _extract_block_text(block: object) -> str:
+    """Extract text from a text block (dict, dataclass, or legacy string)."""
+    if isinstance(block, str):
+        # Legacy: block was stringified by default=str. Try to salvage text.
+        return block
+    if isinstance(block, dict):
+        return block.get("text", "")
+    return getattr(block, "text", "")
+
+
 # loom-ink: the single canonical color identity. Every hex is ported 1:1 from
 # the visual reference docs/tui-design.html (:root custom properties) so the
 # running app faithfully realizes the documented "ink & sage" aesthetic. This
@@ -1078,10 +1108,10 @@ class AgentTUIApp(App):
         """Re-render self.history messages into the ChatLog widget.
 
         Called after switch_session so the user sees the loaded
-        conversation.  Renders a compact summary of each message —
-        user messages are shown in full, assistant messages are
-        shown as a truncated preview (the full content is preserved
-        in self.history for the LLM).
+        conversation.  User messages get full UserMessage widgets;
+        assistant messages get full AssistantMessage widgets; tool_use
+        blocks get inline ToolCallMarker widgets so the conversation
+        looks the same as a live one.
         """
         try:
             chat_log = self.query_one(ChatLog)
@@ -1090,32 +1120,43 @@ class AgentTUIApp(App):
                 content = msg.get("content", "")
                 if role == "user":
                     if isinstance(content, str):
-                        # Skip system-reminder pseudo-messages.
                         if content.startswith("<system-reminder>"):
                             continue
-                        # append_user_message is async; call it via the
-                        # event loop.  We use call_later to avoid blocking.
                         self.call_later(chat_log.append_user_message, content)
                     elif isinstance(content, list):
-                        # tool_result messages — skip rendering for simplicity.
-                        pass
-                elif role == "assistant" and isinstance(content, list):
-                    # Extract text blocks from assistant messages.
-                    text_parts = []
-                    for block in content:
-                        if hasattr(block, "type") and block.type == "text":
-                            text_parts.append(block.text)
-                        elif isinstance(block, dict) and block.get("type") == "text":
-                            text_parts.append(block.get("text", ""))
+                        # tool_result messages — render compactly.
+                        for block in content:
+                            text = _extract_block_text(block)
+                            if text:
+                                self.call_later(
+                                    chat_log.append_system_note, text
+                                )
+                elif role == "assistant":
+                    text_parts: list[str] = []
+                    if isinstance(content, str):
+                        text_parts.append(content)
+                    elif isinstance(content, list):
+                        for block in content:
+                            btype = _get_block_type(block)
+                            if btype == "text":
+                                t = _extract_block_text(block)
+                                if t:
+                                    text_parts.append(t)
+                            elif btype == "tool_use":
+                                name = _get_block_field(block, "name", "")
+                                tool_id = _get_block_field(block, "id", "")
+                                inp = _get_block_field(block, "input", {})
+                                if name:
+                                    self.call_later(
+                                        chat_log.add_tool_call_inline,
+                                        name,
+                                        inp if isinstance(inp, dict) else {},
+                                        tool_id or name,
+                                    )
                     if text_parts:
                         full_text = "\n".join(text_parts)
-                        # Truncate long assistant messages in the replay view.
-                        preview = full_text[:500]
-                        if len(full_text) > 500:
-                            preview += " …"
                         self.call_later(
-                            chat_log.append_system_note,
-                            f"**Assistant:** {preview}",
+                            chat_log.append_replayed_assistant, full_text
                         )
         except Exception:
             pass

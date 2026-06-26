@@ -30,7 +30,7 @@ import json
 import os
 import tempfile
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -40,6 +40,18 @@ from loguru import logger
 if TYPE_CHECKING:
     from loom.agent.context import Context
     from loom.agent.llm import LLMClient
+
+def _json_default(obj: Any) -> Any:
+    """JSON default encoder — serializes dataclass blocks (TextBlock, ToolUseBlock, etc.) to dicts.
+
+    Without this, ``json.dump(..., default=str)`` turns content blocks into
+    unreadable strings like ``"TextBlock(type='text', text='Hello')"``, making
+    session files impossible to replay.
+    """
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return asdict(obj)
+    return str(obj)
+
 
 _SESSIONS_SUBDIR = "sessions"
 _INDEX_FILENAME = "index.json"
@@ -239,7 +251,7 @@ class SessionStore:
                 dir=self._dir, prefix=session_id + ".", suffix=".tmp"
             )
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False, default=str)
+                json.dump(payload, f, ensure_ascii=False, default=_json_default)
             os.chmod(tmp, 0o600)
             os.replace(tmp, path)
         except Exception as exc:
@@ -326,7 +338,7 @@ class SessionStore:
                         dir=self._dir, prefix=session_id + ".", suffix=".tmp"
                     )
                     with os.fdopen(fd, "w", encoding="utf-8") as f:
-                        json.dump(data, f, ensure_ascii=False, default=str)
+                        json.dump(data, f, ensure_ascii=False, default=_json_default)
                     os.chmod(tmp, 0o600)
                     os.replace(tmp, path)
                 except Exception as exc:
