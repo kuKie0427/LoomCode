@@ -1,3 +1,4 @@
+import concurrent.futures
 import json
 import os
 import re
@@ -1559,13 +1560,123 @@ def spawn_subagent(
     return f"[done: {turn_count} turns, {tool_call_count} tool calls]\n{result}"
 
 
-def run_task(description: str, feature_card=None, scope=None) -> str:
+# === Background subagent execution (P2) ===
+
+_bg_executor: concurrent.futures.ThreadPoolExecutor | None = None
+
+
+def _get_bg_executor() -> concurrent.futures.ThreadPoolExecutor:
+    """Lazily create a daemon thread pool for background subagents."""
+    global _bg_executor
+    if _bg_executor is None or _bg_executor._broken:
+        _bg_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="bg-subagent"
+        )
+    return _bg_executor
+
+
+def _run_background_subagent(
+    subagent_id: str,
+    description: str,
+    feature_card=None,
+    scope=None,
+) -> None:
+    """Execute a subagent in a background thread.
+
+    Results are written to the BackgroundRegistry.  If the parent loop
+    is still alive, a callback is fired to notify the TUI.
+    """
+    from loom.agent.background_registry import get_registry
+
+    registry = get_registry()
+    try:
+        # Snapshot credentials to avoid env-var race between concurrent
+        # background subagents.  spawn_subagent writes LOOM_AUTH_CONTENT
+        # as an env var; we pass credentials directly instead.
+        _creds_snapshot = credentials.all()
+        if _creds_snapshot:
+            import dataclasses as _dc
+
+            os.environ["LOOM_AUTH_CONTENT"] = json.dumps({
+                pid: _dc.asdict(c) for pid, c in _creds_snapshot.items()
+            })
+
+        result = spawn_subagent(description, feature_card=feature_card, scope=scope)
+
+        # Parse "[done: N turns, M tool calls]\n..." to extract counts
+        turns = 0
+        tool_calls = 0
+        m = re.match(r"\[done:\s*(\d+)\s*turns,\s*(\d+)\s*tool calls\]", result)
+        if m:
+            turns = int(m.group(1))
+            tool_calls = int(m.group(2))
+
+        registry.complete(subagent_id, result, turns=turns, tool_calls=tool_calls)
+
+        # Notify parent loop if still alive
+        from loom.agent.loop import get_active_callbacks
+
+        cb = get_active_callbacks()
+        if cb is not None and cb.get("on_subagent_end") is not None:
+            finished_entry = registry.get(subagent_id)
+            elapsed = finished_entry.elapsed if finished_entry is not None else 0.0
+            try:
+                cb["on_subagent_end"](subagent_id, elapsed, "done")
+            except Exception:
+                pass
+
+    except Exception as exc:
+        logger.exception("Background subagent {} failed: {}", subagent_id, exc)
+        registry.complete(subagent_id, str(exc), error=str(exc))
+
+        from loom.agent.loop import get_active_callbacks
+
+        cb = get_active_callbacks()
+        if cb is not None and cb.get("on_subagent_end") is not None:
+            try:
+                cb["on_subagent_end"](subagent_id, 0.0, "error")
+            except Exception:
+                pass
+
+
+def run_task(description: str, background: bool = False, feature_card=None, scope=None, _subagent_id: str | None = None) -> str:
+    # === Background mode: fire and forget ===
+    if background:
+        from loom.agent.background_registry import get_registry
+
+        # Use provided id (from loop's block.id) or generate one
+        if _subagent_id is not None:
+            subagent_id = _subagent_id
+        else:
+            import uuid as _uuid
+
+            subagent_id = f"bg_{_uuid.uuid4().hex[:12]}"
+
+        registry = get_registry()
+        registry.register(subagent_id, description[:200])
+
+        # Fire background thread
+        executor = _get_bg_executor()
+        executor.submit(
+            _run_background_subagent, subagent_id, description, feature_card, scope
+        )
+
+        # Record trace
+        tr = trace_mod.current()
+        if tr is not None:
+            tr.record("background_start", subagent_id=subagent_id, description_len=len(description))
+
+        return (
+            f"Background subagent started (id: {subagent_id}).\n"
+            f"Use subagent_poll(id=\"{subagent_id}\") to check status and get results.\n"
+            f"Use subagent_list() to see all background subagents."
+        )
+
     # === Triangle Protocol: record delegate event (TP-3) ===
     # C8 fix: trace at the outer run_task handler, NOT inside spawn_subagent.
     # This prevents triangle.delegate from firing when run_review internally
     # calls spawn_subagent for the Reviewer role (which fires triangle.review).
     if feature_card is not None:
-        import loom.agent.trace as trace_mod
         tr = trace_mod.current()
         if tr is not None:
             try:
@@ -1602,6 +1713,74 @@ def run_task(description: str, feature_card=None, scope=None) -> str:
                 logger.warning("run_task: trace.record(triangle.delta) failed: {}", trace_exc)
 
     return result
+
+
+# === subagent_poll / subagent_list tools (P3) ===
+
+
+def run_subagent_poll(subagent_id: str, wait: bool = False, timeout: float = 30.0) -> str:
+    """Poll a background subagent for status and results.
+
+    If ``wait`` is True, blocks up to ``timeout`` seconds for completion.
+    """
+    from loom.agent.background_registry import get_registry
+
+    registry = get_registry()
+    entry = registry.get(subagent_id)
+    if entry is None:
+        return f"Unknown subagent_id: {subagent_id}"
+
+    if wait and entry.status == "running":
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            entry = registry.get(subagent_id)
+            if entry is None or entry.status != "running":
+                break
+            time.sleep(0.2)
+
+    if entry is None:
+        return f"Unknown subagent_id: {subagent_id}"
+
+    if entry.status == "running":
+        return (
+            f"Running ({entry.turns} turns so far, {entry.tool_calls} tool calls, "
+            f"{entry.elapsed:.1f}s elapsed). Description: {entry.description}"
+        )
+
+    # done or error
+    tr = trace_mod.current()
+    if tr is not None and entry.status == "done":
+        tr.record(
+            "background_end",
+            subagent_id=subagent_id,
+            turns=entry.turns,
+            tool_calls=entry.tool_calls,
+            duration_ms=int(entry.elapsed * 1000),
+        )
+
+    if entry.status == "error":
+        return f"Error: {entry.error or 'unknown error'}"
+
+    return entry.result or "[no result]"
+
+
+def run_subagent_list() -> str:
+    """List all background subagents and their status."""
+    from loom.agent.background_registry import get_registry
+
+    registry = get_registry()
+    entries = registry.list_all()
+    if not entries:
+        return "No background subagents."
+
+    lines = ["Background subagents:"]
+    for e in entries:
+        desc = (e.description[:50] + "…") if len(e.description) > 50 else e.description
+        lines.append(
+            f"  {e.subagent_id} | {e.status:7s} | {e.elapsed:.1f}s | "
+            f"{e.turns} turns | {desc}"
+        )
+    return "\n".join(lines)
 
 
 # Register "task" via TOOL_REGISTRY (instead of mutating the module-level
@@ -1670,12 +1849,67 @@ TOOL_REGISTRY.register(Tool(
     ),
     input_schema={
         "type": "object",
-        "properties": {"description": {"type": "string"}},
+        "properties": {
+            "description": {"type": "string"},
+            "background": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "If true, the subagent runs in a background thread. "
+                    "You receive an immediate placeholder result and can "
+                    "continue working. Use subagent_poll(id=...) to check "
+                    "status and retrieve the result when ready."
+                ),
+            },
+        },
         "required": ["description"],
     },
     handler=run_task,
     is_read_only=False,
     is_concurrent_safe=False,
+    enabled=True,
+))
+_resync_from_registry()
+
+# Background subagent management tools
+TOOL_REGISTRY.register(Tool(
+    name="subagent_poll",
+    description=(
+        "Poll a background subagent for status and results. "
+        "Returns 'Running (...)' if still in progress, or the full "
+        "result string if done. Set wait=true to block up to timeout "
+        "seconds for completion."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "subagent_id": {"type": "string"},
+            "wait": {"type": "boolean", "default": False},
+            "timeout": {"type": "number", "default": 30.0},
+        },
+        "required": ["subagent_id"],
+    },
+    handler=run_subagent_poll,
+    is_read_only=True,
+    is_concurrent_safe=True,
+    enabled=True,
+))
+
+TOOL_REGISTRY.register(Tool(
+    name="subagent_list",
+    description=(
+        "List all background subagents and their current status "
+        "(running/done/error). Use after launching task(background=true) "
+        "to see which subagents are still in progress."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {},
+        "required": [],
+    },
+    handler=run_subagent_list,
+    is_read_only=True,
+    is_concurrent_safe=True,
     enabled=True,
 ))
 _resync_from_registry()

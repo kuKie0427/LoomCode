@@ -812,6 +812,19 @@ class AgentTUIApp(App):
         chat_log.complete_subagent_marker(
             message.subagent_id, message.elapsed, message.state
         )
+        # Notify if this was a background subagent
+        try:
+            from loom.agent.background_registry import get_registry
+
+            entry = get_registry().get(message.subagent_id)
+            if entry is not None:
+                desc = (entry.description[:40] + "…") if len(entry.description) > 40 else entry.description
+                severity = "success" if message.state == "done" else "error"
+                self.post_message(ShowNotification(
+                    f"Background task {message.state}: {desc}", severity
+                ))
+        except Exception:
+            pass
 
     def on_subagent_row_clicked(self, message: Header.SubagentRowClicked) -> None:
         """Spec §4.3.2: dismiss overlay + scroll ChatLog to subagent marker."""

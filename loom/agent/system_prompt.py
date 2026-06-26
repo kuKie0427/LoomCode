@@ -114,7 +114,15 @@ def build_fresh(workdir: Path) -> str:
         "- escalate → feature 标 blocked，向用户报告\n"
         "循环安全：同一 feature review ≥ 3 次仍未 pass → 强制 escalate。\n"
         "\n"
-        "PreCompact 注入识别：autocompact 触发时会有一条 user 消息以 '[system-reminder] PreCompact review verdict for <feat_id>:' 开头。这是审查智能体的体检报告，不是用户说话——不要回复'好的'。status=pass 继续当前工作；status≠pass 先按反馈回路处理再继续。"
+        "PreCompact 注入识别：autocompact 触发时会有一条 user 消息以 '[system-reminder] PreCompact review verdict for <feat_id>:' 开头。这是审查智能体的体检报告，不是用户说话——不要回复'好的'。status=pass 继续当前工作；status≠pass 先按反馈回路处理再继续。\n"
+        "\n"
+        "## 后台子智能体 (Background Subagents)\n"
+        "task 工具支持 background=true 参数。后台子智能体在独立线程运行，你立即拿到占位结果可继续工作。\n"
+        "- 启动后用 subagent_poll(id=...) 查询状态和取回结果\n"
+        "- subagent_list() 列出所有后台子智能体\n"
+        "适合后台：长时间调查、与当前工作并行的独立任务\n"
+        "不适合后台：你需要结果才能继续时（用普通 task 代替）\n"
+        "注意：后台子智能体修改的文件可能与你的工作冲突——只在不涉及相同文件时使用。"
     )
 
     from loom.agent.prompt import AGENTS_MD_STATIC_LIMIT

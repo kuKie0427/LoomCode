@@ -77,6 +77,11 @@ def clear_active_callbacks() -> None:
     _active_callbacks = None
 
 
+def get_active_callbacks() -> dict | None:
+    """Return the currently active callbacks dict, or None if no loop is running."""
+    return _active_callbacks
+
+
 def fire_callback(name: str, *args: object) -> None:
     """Fire a named callback if one is active. Silent no-op if not set.
 
@@ -246,19 +251,33 @@ def _run_tool_block(block, hooks) -> dict:
         cb = _active_callbacks
         raw_desc = str(block.input.get("description", ""))
         description = (raw_desc[:59] + "…") if len(raw_desc) > 60 else raw_desc
+        is_background = bool(block.input.get("background", False))
         if cb is not None and cb.get("on_subagent_start") is not None:
             cb["on_subagent_start"](block.id, description)
         t0 = time.monotonic()
         state = "done"
         try:
-            output = handler(**block.input) if handler else f"Unknown: {block.name}"
+            if is_background:
+                # Pass block.id as _subagent_id so the background thread
+                # can fire on_subagent_end with the same id the TUI saw
+                # in on_subagent_start.  The loop does NOT fire
+                # on_subagent_end here — the background thread does it
+                # when the subagent completes.
+                kwargs = dict(block.input)
+                kwargs["_subagent_id"] = block.id
+                output = handler(**kwargs) if handler else f"Unknown: {block.name}"
+            else:
+                output = handler(**block.input) if handler else f"Unknown: {block.name}"
         except Exception:
             state = "error"
             raise
         finally:
             elapsed = time.monotonic() - t0
-            if cb is not None and cb.get("on_subagent_end") is not None:
-                cb["on_subagent_end"](block.id, elapsed, state)
+            # Skip on_subagent_end for background tasks — the background
+            # thread fires it when the subagent actually completes.
+            if not is_background:
+                if cb is not None and cb.get("on_subagent_end") is not None:
+                    cb["on_subagent_end"](block.id, elapsed, state)
     else:
         try:
             output = handler(**block.input) if handler else f"Unknown: {block.name}"
@@ -309,6 +328,12 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
     # TP-4 will replace this with feature_list.json persistence.
     from loom.agent.review import _REVIEW_ATTEMPT_COUNTER
     _REVIEW_ATTEMPT_COUNTER.clear()
+    # Prune stale background subagent entries from previous sessions
+    try:
+        from loom.agent.background_registry import get_registry
+        get_registry().cleanup_stale()
+    except Exception:
+        pass
     cb = {**DEFAULT_CALLBACKS, **(callbacks or {})}
     hooks.trigger_hooks("SessionStart")
     if llm_client is None:
