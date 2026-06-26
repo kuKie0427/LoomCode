@@ -2,19 +2,16 @@
 
 Lists all saved sessions from the SessionStore, allowing the user to:
   - Enter: switch to the selected session
-  - d:     delete the selected session (with confirmation)
-  - n:     start a new session
   - Esc:   cancel (return to current session)
 
+Use the ``/new`` slash command (outside this modal) to start a new session.
 Layout mirrors the ModelPicker pattern for visual consistency.
 """
 
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.containers import Container
-from textual.events import Key
 from textual.screen import ModalScreen
 from textual.widgets import Label, ListItem, ListView, Static
 
@@ -25,14 +22,11 @@ class SessionPicker(ModalScreen[str | None]):
     """Modal screen showing saved sessions.
 
     Returns the selected session_id via dismiss() on Enter.
-    Returns None on Esc (cancel) or when starting a new session
-    (the caller handles /new separately).
+    Returns None on Esc (cancel).
     """
 
     BINDINGS = [
-        Binding("escape", "cancel", "Cancel", priority=True),
-        Binding("d", "delete_session", "Delete", priority=True),
-        Binding("n", "new_session", "New", priority=True),
+        ("escape", "cancel", "Cancel"),
     ]
 
     DEFAULT_CSS = """
@@ -87,7 +81,7 @@ class SessionPicker(ModalScreen[str | None]):
             yield Static("Session History", id="session-picker-title")
             yield ListView(id="session-picker-list")
             yield Static(
-                "[Enter] switch  [d] delete  [n] new  [Esc] cancel",
+                "[Enter] switch  [Esc] cancel",
                 id="session-footer",
             )
 
@@ -106,22 +100,6 @@ class SessionPicker(ModalScreen[str | None]):
         except Exception:
             pass
 
-    def on_key(self, event: Key) -> None:
-        """Handle d/n keys before they reach the ListView or base screen.
-
-        Priority bindings alone may not fire reliably when a ListView has
-        focus — the base-screen Composer (TextArea) can swallow printable
-        keys. We intercept them here at the Screen level.
-        """
-        if event.key == "d":
-            event.stop()
-            event.prevent_default()
-            self.action_delete_session()
-        elif event.key == "n":
-            event.stop()
-            event.prevent_default()
-            self.action_new_session()
-
     def _load_sessions(self) -> None:
         """Load sessions from the SessionStore."""
         from loom.agent.loop import WORKDIR
@@ -137,7 +115,7 @@ class SessionPicker(ModalScreen[str | None]):
 
         if not self._sessions:
             item = ListItem(
-                Label("No saved sessions yet. Press [n] to start a new one."),
+                Label("No saved sessions yet. Use /new to start one."),
                 classes="session-empty",
                 disabled=True,
             )
@@ -173,38 +151,6 @@ class SessionPicker(ModalScreen[str | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
-
-    def action_new_session(self) -> None:
-        # Dismiss with a sentinel "new" value — the caller handles it.
-        self.dismiss("__new__")
-
-    def action_delete_session(self) -> None:
-        """Delete the currently selected session."""
-        list_view = self.query_one("#session-picker-list", ListView)
-        if list_view.index is None:
-            return
-        idx = list_view.index
-        session_id = self._index_to_id.get(idx)
-        if session_id is None:
-            return
-        # Don't allow deleting the current session.
-        if session_id == self._current_session_id:
-            try:
-                self.query_one("#session-footer", Static).update(
-                    "Cannot delete the current session."
-                )
-            except Exception:
-                pass
-            return
-        from loom.agent.loop import WORKDIR
-
-        store = SessionStore(WORKDIR)
-        store.delete_session(session_id)
-        # Reload and repopulate.
-        self._load_sessions()
-        self._populate_list(list_view)
-        if list_view.children:
-            list_view.index = 0
 
 
 def list_view_index(item: ListItem, list_view: ListView) -> int | None:

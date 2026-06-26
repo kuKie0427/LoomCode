@@ -44,11 +44,12 @@ def test_compose_yields_expected_widgets() -> None:
     assert callable(sp.compose)
 
 
-def test_bindings_include_escape_and_shortcuts() -> None:
+def test_bindings_include_escape_only() -> None:
     binding_str = " ".join(str(b) for b in SessionPicker.BINDINGS)
     assert "escape" in binding_str
-    assert "d" in binding_str
-    assert "n" in binding_str
+    # delete ('d') and new ('n') shortcuts were removed.
+    assert "delete_session" not in binding_str
+    assert "new_session" not in binding_str
 
 
 def test_default_current_session_id_is_none() -> None:
@@ -71,13 +72,6 @@ def test_action_cancel_dismisses_none() -> None:
     with patch.object(sp, "dismiss") as mock_dismiss:
         sp.action_cancel()
     mock_dismiss.assert_called_once_with(None)
-
-
-def test_action_new_session_dismisses_new_sentinel() -> None:
-    sp = SessionPicker()
-    with patch.object(sp, "dismiss") as mock_dismiss:
-        sp.action_new_session()
-    mock_dismiss.assert_called_once_with("__new__")
 
 
 # ---------------------------------------------------------------------------
@@ -172,73 +166,6 @@ def test_populate_list_shows_sessions_with_marker() -> None:
 
 
 # ---------------------------------------------------------------------------
-# action_delete_session
-# ---------------------------------------------------------------------------
-
-
-def test_action_delete_session_removes_selected() -> None:
-    """Deleting a non-current session removes it from the store and list."""
-    from textual.app import App, ComposeResult
-    from textual.widgets import ListView
-
-    class TestApp(App):
-        def compose(self) -> ComposeResult:
-            yield ListView(id="session-picker-list")
-
-    async def _run():
-        app = TestApp()
-        async with app.run_test() as pilot:
-            sp = SessionPicker(current_session_id="sess-current")
-            app.push_screen(sp)
-            await pilot.pause(0.2)
-            sp._sessions = [
-                _make_meta("sess-current", "Current"),
-                _make_meta("sess-other", "Other"),
-            ]
-            lv = sp.query_one("#session-picker-list", ListView)
-            sp._populate_list(lv)
-            # Select the second item (sess-other).
-            lv.index = 1
-
-            with patch(
-                "loom.agent.session_store.SessionStore.delete_session"
-            ) as mock_del:
-                sp.action_delete_session()
-                mock_del.assert_called_once_with("sess-other")
-
-    asyncio.run(_run())
-
-
-def test_action_delete_session_refuses_current_session() -> None:
-    """Deleting the current session is refused (footer shows a message)."""
-    from textual.app import App, ComposeResult
-    from textual.widgets import ListView
-
-    class TestApp(App):
-        def compose(self) -> ComposeResult:
-            yield ListView(id="session-picker-list")
-
-    async def _run():
-        app = TestApp()
-        async with app.run_test() as pilot:
-            sp = SessionPicker(current_session_id="sess-current")
-            app.push_screen(sp)
-            await pilot.pause(0.2)
-            sp._sessions = [_make_meta("sess-current", "Current")]
-            lv = sp.query_one("#session-picker-list", ListView)
-            sp._populate_list(lv)
-            lv.index = 0
-
-            with patch(
-                "loom.agent.session_store.SessionStore.delete_session"
-            ) as mock_del:
-                sp.action_delete_session()
-                mock_del.assert_not_called()
-
-    asyncio.run(_run())
-
-
-# ---------------------------------------------------------------------------
 # on_mount robustness
 # ---------------------------------------------------------------------------
 
@@ -291,25 +218,6 @@ def test_on_session_picked_none_is_noop() -> None:
             # Session id unchanged, app still alive.
             assert app._session_id == original_sid
             assert app._exit is False
-
-    asyncio.run(_run())
-
-
-def test_on_session_picked_new_calls_new_session() -> None:
-    """_on_session_picked('__new__') starts a new session."""
-
-    async def _run():
-        from loom.tui.app import AgentTUIApp
-
-        app = AgentTUIApp()
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause(0.3)
-            _dismiss_welcome(app, pilot)
-            await pilot.pause(0.2)
-
-            with patch.object(app, "new_session") as mock_new:
-                app._on_session_picked("__new__")
-                mock_new.assert_called_once()
 
     asyncio.run(_run())
 

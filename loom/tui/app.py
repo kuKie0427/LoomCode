@@ -367,10 +367,6 @@ class AgentTUIApp(App):
 
     def on_key(self, event) -> None:
         """Handle global shortcuts and ensure printable keys reach the Composer."""
-        # Don't intercept keys when a modal screen is active — let the
-        # modal handle its own keybindings (d/n/Enter in SessionPicker, etc.)
-        if len(self.screen_stack) > 1:
-            return
         # Ensure printable keys always reach the Composer (input box).
         if event.is_printable:
             composer = self.query_one("#composer", Composer)
@@ -1309,14 +1305,10 @@ class AgentTUIApp(App):
         """Handle SessionPicker dismiss.
 
         - None: cancelled (Esc) — do nothing.
-        - "__new__": user pressed 'n' — start a new session.
         - <session_id>: user selected a session — switch to it.
         """
         if result is None:
             return  # cancelled
-        if result == "__new__":
-            self.new_session()
-            return
         # Switch to the selected session.
         self.switch_session(result)
 
