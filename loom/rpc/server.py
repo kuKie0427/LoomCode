@@ -154,10 +154,16 @@ class _Server:
     def run(self) -> int:
         """Main loop: read requests, dispatch, emit events."""
         # Late imports to avoid circular deps + respect config loading order
+        import loom.agent.loop as loop_mod
         from loom.agent.config import load_config
         from loom.agent.loop import apply_config
 
         _configure_server_logging(self.workdir)
+        # agent_loop's first line is `configure_logging()` which would
+        # reset loguru's sink back to stdout — that would corrupt the
+        # JSON-RPC wire format. Replace it with our stderr-based variant
+        # for the lifetime of this server process.
+        loop_mod.configure_logging = lambda: _configure_server_logging(self.workdir)
         config = load_config(self.workdir)
         apply_config(config)
 
