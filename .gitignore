@@ -3,6 +3,10 @@ __pycache__/
 *.py[oc]
 build/
 dist/
+
+# Go TUI build artifacts
+tui-go/loom-tui
+tui-go/loom-tui.exe
 wheels/
 *.egg-info
 
