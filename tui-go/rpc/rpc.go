@@ -141,10 +141,13 @@ func (c *Client) readLoop() {
 			if resp.Method != "" {
 				// Server-initiated request (e.g. request/permission).
 				// Forward to Events channel so UI can prompt + reply.
+				// Carry the request ID so the UI can reference it in the
+				// permission_response reply.
 				c.dispatchEvent(protocol.Event{
 					Jsonrpc: "2.0",
 					Method:  resp.Method,
 					Params:  resp.Params,
+					ID:      resp.ID,
 				})
 				continue
 			}

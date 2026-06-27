@@ -5,10 +5,15 @@ package protocol
 import "encoding/json"
 
 // Event is a streamed event from Python to TUI (no response expected).
+//
+// For server-initiated requests (e.g. permission prompts) forwarded via the
+// Events channel, ID carries the request id the TUI must reference in its
+// reply. For ordinary fire-and-forget events ID is empty.
 type Event struct {
 	Jsonrpc string          `json:"jsonrpc"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params"`
+	ID      string          `json:"id,omitempty"`
 }
 
 // Request is a request from TUI to Python (expects a Response).
@@ -66,6 +71,13 @@ const (
 	RequestMethodLoadSession        = "request/load_session"
 	RequestMethodNewSession         = "request/new_session"
 	RequestMethodShutdown           = "request/shutdown"
+)
+
+// Server-request method constants — server-initiated requests (Python -> TUI,
+// but require a reply via the corresponding request/*_response method).
+// Must match loom/rpc/protocol.py SERVER_REQUEST_TYPES.
+const (
+	ServerRequestMethodPermission = "request/permission"
 )
 
 // Event param structs for typed access.

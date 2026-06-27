@@ -82,10 +82,11 @@ func main() {
 // ---------------------------------------------------------------------------
 
 type model struct {
-	client    *rpc.Client
-	chatLog   *view.ChatLog
-	composer  *view.Composer
-	statusBar *view.StatusBar
+	client     *rpc.Client
+	chatLog    *view.ChatLog
+	composer   *view.Composer
+	statusBar  *view.StatusBar
+	permission *view.PermissionModal
 
 	width     int
 	height    int
@@ -99,11 +100,13 @@ func initialModel(client *rpc.Client) model {
 	cl := view.NewChatLog(80, 20)
 	comp := view.NewComposer()
 	sb := view.NewStatusBar()
+	pm := view.NewPermissionModal()
 	return model{
-		client:    client,
-		chatLog:   cl,
-		composer:  comp,
-		statusBar: sb,
+		client:     client,
+		chatLog:    cl,
+		composer:   comp,
+		statusBar:  sb,
+		permission: pm,
 	}
 }
 
@@ -114,6 +117,28 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// When the permission modal is visible, it captures all keys:
+		// Y = allow, N = deny, Esc = cancel (hide modal, no reply sent).
+		// Other keys are swallowed so the composer doesn't get them.
+		if m.permission.Visible() {
+			switch msg.Type {
+			case tea.KeyEsc:
+				m.permission.Hide()
+				return m, nil
+			default:
+				switch msg.String() {
+				case "y", "Y":
+					reqID := m.permission.RequestID()
+					m.permission.Hide()
+					return m, sendPermissionResponse(m.client, reqID, "allow")
+				case "n", "N":
+					reqID := m.permission.RequestID()
+					m.permission.Hide()
+					return m, sendPermissionResponse(m.client, reqID, "deny")
+				}
+				return m, nil
+			}
+		}
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
 			m.quitting = true
@@ -209,6 +234,13 @@ func (m model) applyEvent(ev protocol.Event) (model, tea.Cmd) {
 		}
 		_ = json.Unmarshal(ev.Params, &p)
 		m.errMsg = p.Message
+	case protocol.ServerRequestMethodPermission:
+		// Server-initiated permission prompt: ev.ID is the request id we
+		// must reference in the permission_response reply.
+		var p protocol.PermissionParams
+		if err := json.Unmarshal(ev.Params, &p); err == nil {
+			m.permission.Show(ev.ID, p.ToolName, p.ToolInput, p.Reason)
+		}
 	}
 	return m, nil
 }
@@ -232,6 +264,9 @@ func (m model) View() string {
 	}
 	b.WriteString("\n" + m.composer.View() + "\n")
 	b.WriteString(m.statusBar.View())
+	if m.permission.Visible() {
+		b.WriteString("\n" + m.permission.View())
+	}
 	return b.String()
 }
 
@@ -259,6 +294,18 @@ func sendMessage(client *rpc.Client, text string) tea.Cmd {
 		if err != nil {
 			return sentMsg{} // swallow — agent_loop will stream events or error event
 		}
+		return sentMsg{}
+	}
+}
+
+// sendPermissionResponse replies to a server-initiated permission prompt.
+// requestID is the server-initiated request id (from ev.ID), decision is
+// "allow" or "deny". We use SendNoWait: the server does not send a Response
+// to the permission_response (the original request/permission will be
+// resolved server-side from this reply).
+func sendPermissionResponse(client *rpc.Client, requestID, decision string) tea.Cmd {
+	return func() tea.Msg {
+		_ = client.SendNoWait(protocol.NewPermissionResponse("", requestID, decision))
 		return sentMsg{}
 	}
 }
