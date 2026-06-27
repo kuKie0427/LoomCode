@@ -16,12 +16,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lanf/loom-tui/protocol"
 	"github.com/lanf/loom-tui/rpc"
+	"github.com/lanf/loom-tui/view"
 )
 
 const (
@@ -29,6 +29,11 @@ const (
 	// The agent may take a while to start streaming, but the ack comes back
 	// immediately, so 5s is plenty.
 	sendTimeout = 5 * time.Second
+
+	// composerHeight reserves screen rows for the composer + status bar +
+	// gutters. The chatlog gets the remainder.
+	composerHeight = 4
+	statusHeight   = 1
 )
 
 func main() {
@@ -78,8 +83,12 @@ func main() {
 
 type model struct {
 	client    *rpc.Client
-	messages  []string // accumulated assistant text per turn
-	input     textarea.Model
+	chatLog   *view.ChatLog
+	composer  *view.Composer
+	statusBar *view.StatusBar
+
+	width     int
+	height    int
 	ready     bool // received event/session_started
 	streaming bool // between assistant_turn_start and assistant_turn_end
 	quitting  bool
@@ -87,15 +96,19 @@ type model struct {
 }
 
 func initialModel(client *rpc.Client) model {
-	ta := textarea.New()
-	ta.Placeholder = "Send a message... (Enter to send, Shift+Enter for newline, Ctrl+C to quit)"
-	ta.Focus()
-	ta.CharLimit = 0
-	return model{client: client, input: ta}
+	cl := view.NewChatLog(80, 20)
+	comp := view.NewComposer()
+	sb := view.NewStatusBar()
+	return model{
+		client:    client,
+		chatLog:   cl,
+		composer:  comp,
+		statusBar: sb,
+	}
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(listenForEvents(m.client), textarea.Blink)
+	return listenForEvents(m.client)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -106,29 +119,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case tea.KeyEnter:
-			// Plain Enter = send (Shift+Enter = newline is handled by
-			// textarea internally via its "shift+enter" key binding, so we
-			// only intercept plain Enter here).
-			text := strings.TrimRight(m.input.Value(), "\n")
-			if text != "" {
-				m.input.Reset()
+			text, sent := m.composer.HandleKey(msg)
+			if sent {
 				m.streaming = true
+				m.chatLog.AppendUserMessage(text)
 				return m, sendMessage(m.client, text)
 			}
 			return m, nil
 		}
-		// Delegate other keys to the textarea.
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
+		// Delegate other keys to the composer's textarea (blink, typing, etc.)
+		cmd := m.composer.Update(msg)
 		return m, cmd
 
 	case eventMsg:
-		var cmd tea.Cmd
 		mm, c := m.applyEvent(msg.event)
 		m = mm
-		cmd = c
-		// Keep listening after each event.
-		return m, tea.Batch(cmd, listenForEvents(m.client))
+		return m, tea.Batch(c, listenForEvents(m.client))
 
 	case sentMsg:
 		// request/send_message was ack'd; nothing else to do.
@@ -140,13 +146,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case tea.WindowSizeMsg:
-		// Resize the textarea to fit.
-		m.input.SetWidth(msg.Width)
+		m.width = msg.Width
+		m.height = msg.Height
+		m.composer.SetWidth(msg.Width)
+		chatHeight := msg.Height - composerHeight - statusHeight
+		if chatHeight < 1 {
+			chatHeight = 1
+		}
+		m.chatLog.SetSize(msg.Width, chatHeight)
 		return m, nil
+
+	case tea.MouseMsg:
+		// Forward mouse-wheel events to the chatlog viewport.
+		_, cmd := m.chatLog.Update(msg)
+		return m, cmd
 	}
-	// Forward to textarea for blinking etc.
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
+	// Forward other messages (textarea blink etc.) to the composer.
+	cmd := m.composer.Update(msg)
 	return m, cmd
 }
 
@@ -154,18 +170,38 @@ func (m model) applyEvent(ev protocol.Event) (model, tea.Cmd) {
 	switch ev.Method {
 	case protocol.EventSessionStarted:
 		m.ready = true
+		m.statusBar.SetReady(true)
+		var p struct {
+			Model string `json:"model"`
+		}
+		_ = json.Unmarshal(ev.Params, &p)
+		if p.Model != "" {
+			m.statusBar.SetModel(p.Model)
+		}
 	case protocol.EventAssistantTurnStart:
 		m.streaming = true
-		m.messages = append(m.messages, "")
+		m.chatLog.StartAssistantTurn()
 	case protocol.EventAssistantTurnEnd:
 		m.streaming = false
 	case protocol.EventTextDelta:
 		var p protocol.TextDeltaParams
 		if err := json.Unmarshal(ev.Params, &p); err == nil {
-			if len(m.messages) == 0 {
-				m.messages = append(m.messages, "")
-			}
-			m.messages[len(m.messages)-1] += p.Text
+			m.chatLog.AppendTextDelta(p.Text)
+		}
+	case protocol.EventThinkingDelta:
+		var p protocol.ThinkingDeltaParams
+		if err := json.Unmarshal(ev.Params, &p); err == nil {
+			m.chatLog.AppendThinkingDelta(p.Text)
+		}
+	case protocol.EventToolUseStarted:
+		var p protocol.ToolUseStartedParams
+		if err := json.Unmarshal(ev.Params, &p); err == nil {
+			m.chatLog.StartToolCall(p.ToolName, p.ToolInput, p.ToolUseID)
+		}
+	case protocol.EventToolUseCompleted:
+		var p protocol.ToolUseCompletedParams
+		if err := json.Unmarshal(ev.Params, &p); err == nil {
+			m.chatLog.CompleteToolCall(p.ToolUseID, p.Output, p.IsError)
 		}
 	case protocol.EventError:
 		var p struct {
@@ -186,20 +222,16 @@ func (m model) View() string {
 	}
 	var b strings.Builder
 	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Render("loom")
-	b.WriteString(title + "\n\n")
-	for _, msg := range m.messages {
-		if msg != "" {
-			b.WriteString(msg)
-			b.WriteString("\n\n")
-		}
-	}
+	b.WriteString(title + "\n")
+	b.WriteString(m.chatLog.View())
 	if m.streaming {
 		b.WriteString("▎\n")
 	}
 	if m.errMsg != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render("⚠ "+m.errMsg) + "\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render("⚠ "+m.errMsg) + "\n")
 	}
-	b.WriteString(m.input.View())
+	b.WriteString("\n" + m.composer.View() + "\n")
+	b.WriteString(m.statusBar.View())
 	return b.String()
 }
 
