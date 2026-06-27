@@ -98,6 +98,9 @@ def _build_parser() -> argparse.ArgumentParser:
     tui_p.add_argument("--resume", action="store_true", help="Resume from checkpoint")
     tui_p.add_argument("--model", default=None, help="Override LLM model")
 
+    serve_p = sub.add_parser("serve", help="Run the stdio JSON-RPC server for an external TUI frontend")
+    serve_p.add_argument("--workdir", type=Path, default=Path("."), help="Project workdir (default: cwd)")
+
     trace_p = sub.add_parser("trace", help="Inspect the structured agent trace (.minicode/trace.jsonl)")
     trace_sub = trace_p.add_subparsers(dest="trace_command", required=True)
     trace_show = trace_sub.add_parser("show", help="Show recent trace events")
@@ -217,6 +220,10 @@ def main(argv: list[str] | None = None) -> int:
         from loom.tui.app import AgentTUIApp
         AgentTUIApp(resume=args.resume, model=args.model).run()
         return 0
+
+    if args.command == "serve":
+        from loom.rpc.server import run_server
+        return run_server(workdir=args.workdir.resolve())
 
     if args.command == "trace":
         from loom.agent.trace import Trace, default_path_for  # only needed for trace subcommand
