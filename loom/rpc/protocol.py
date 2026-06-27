@@ -67,8 +67,10 @@ class _Message:
 
     def to_jsonl(self) -> str:
         """Return the message as a single JSON line (no trailing newline)."""
-        d = self._to_dict()
-        d["jsonrpc"] = "2.0"
+        # Put jsonrpc first so the wire format matches the conventional
+        # JSON-RPC 2.0 layout (`{"jsonrpc":"2.0","method":...,"params":...}`).
+        d: dict[str, Any] = {"jsonrpc": "2.0"}
+        d.update(self._to_dict())
         return json.dumps(d, ensure_ascii=False, separators=(",", ":"))
 
     def _to_dict(self) -> dict[str, Any]:
