@@ -31,9 +31,10 @@ const (
 	sendTimeout = 5 * time.Second
 
 	// composerHeight reserves screen rows for the composer + status bar +
-	// gutters. The chatlog gets the remainder.
+	// header + gutters. The chatlog gets the remainder.
 	composerHeight = 4
 	statusHeight   = 1
+	headerHeight   = 1
 )
 
 func main() {
@@ -87,13 +88,15 @@ type model struct {
 	composer   *view.Composer
 	statusBar  *view.StatusBar
 	permission *view.PermissionModal
+	header     *view.Header
 
-	width     int
-	height    int
-	ready     bool // received event/session_started
-	streaming bool // between assistant_turn_start and assistant_turn_end
-	quitting  bool
-	errMsg    string
+	width          int
+	height         int
+	ready          bool // received event/session_started
+	streaming      bool // between assistant_turn_start and assistant_turn_end
+	quitting       bool
+	errMsg         string
+	subagentActive int // count of currently-running subagents (for header badge)
 }
 
 func initialModel(client *rpc.Client) model {
@@ -101,12 +104,14 @@ func initialModel(client *rpc.Client) model {
 	comp := view.NewComposer()
 	sb := view.NewStatusBar()
 	pm := view.NewPermissionModal()
+	hd := view.NewHeader()
 	return model{
 		client:     client,
 		chatLog:    cl,
 		composer:   comp,
 		statusBar:  sb,
 		permission: pm,
+		header:     hd,
 	}
 }
 
@@ -143,6 +148,43 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyCtrlC, tea.KeyEsc:
 			m.quitting = true
 			return m, tea.Quit
+		}
+
+		// Header section toggles: 1=Todos, 2=Subagents, 3=Sessions, 4=Models.
+		// When the Sessions tab is expanded, fire a list_sessions RPC and
+		// render the result via the Header.SetContent body.
+		switch msg.String() {
+		case "1":
+			prev := m.header.Active()
+			m.header.Toggle(view.SectionTodos)
+			if m.header.Active() == view.SectionTodos && prev != view.SectionTodos {
+				m.header.SetContent(formatTodoPanel(m))
+			}
+			return m, nil
+		case "2":
+			prev := m.header.Active()
+			m.header.Toggle(view.SectionSubagent)
+			if m.header.Active() == view.SectionSubagent && prev != view.SectionSubagent {
+				m.header.SetContent("Subagent panel: live markers appear in chat log")
+			}
+			return m, nil
+		case "3":
+			prev := m.header.Active()
+			m.header.Toggle(view.SectionSessions)
+			if m.header.Active() == view.SectionSessions && prev != view.SectionSessions {
+				return m, requestSessions(m.client)
+			}
+			return m, nil
+		case "4":
+			prev := m.header.Active()
+			m.header.Toggle(view.SectionModels)
+			if m.header.Active() == view.SectionModels && prev != view.SectionModels {
+				m.header.SetContent(formatModelsPanel(m))
+			}
+			return m, nil
+		}
+
+		switch msg.Type {
 		case tea.KeyEnter:
 			text, sent := m.composer.HandleKey(msg)
 			if sent {
@@ -162,7 +204,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(c, listenForEvents(m.client))
 
 	case sentMsg:
-		// request/send_message was ack'd; nothing else to do.
+		// request/send_message or permission_response was ack'd; nothing to do.
+		return m, nil
+
+	case sessionsListedMsg:
+		if m.header.Active() == view.SectionSessions {
+			m.header.SetSessionCount(len(msg.sessions))
+			m.header.SetContent(formatSessionPanel(msg.sessions))
+		}
 		return m, nil
 
 	case serverExitMsg:
@@ -174,7 +223,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.composer.SetWidth(msg.Width)
-		chatHeight := msg.Height - composerHeight - statusHeight
+		chatHeight := msg.Height - composerHeight - statusHeight - headerHeight
 		if chatHeight < 1 {
 			chatHeight = 1
 		}
@@ -196,12 +245,10 @@ func (m model) applyEvent(ev protocol.Event) (model, tea.Cmd) {
 	case protocol.EventSessionStarted:
 		m.ready = true
 		m.statusBar.SetReady(true)
-		var p struct {
-			Model string `json:"model"`
-		}
-		_ = json.Unmarshal(ev.Params, &p)
-		if p.Model != "" {
+		var p protocol.SessionStartedParams
+		if err := json.Unmarshal(ev.Params, &p); err == nil && p.Model != "" {
 			m.statusBar.SetModel(p.Model)
+			m.header.SetModels(nil, p.Model)
 		}
 	case protocol.EventAssistantTurnStart:
 		m.streaming = true
@@ -228,6 +275,34 @@ func (m model) applyEvent(ev protocol.Event) (model, tea.Cmd) {
 		if err := json.Unmarshal(ev.Params, &p); err == nil {
 			m.chatLog.CompleteToolCall(p.ToolUseID, p.Output, p.IsError)
 		}
+	case protocol.EventTodoUpdate:
+		var p protocol.TodoUpdateParams
+		if err := json.Unmarshal(ev.Params, &p); err == nil {
+			m.header.SetTodoCount(len(p.Todos))
+			if m.header.Active() == view.SectionTodos {
+				m.header.SetContent(formatTodoPanelFromList(p.Todos))
+			}
+		}
+	case protocol.EventSubagentStart:
+		m.subagentActive++
+		m.header.SetSubagentCount(m.subagentActive)
+		var p protocol.SubagentStartParams
+		if err := json.Unmarshal(ev.Params, &p); err == nil {
+			m.chatLog.AppendSystemLine(fmt.Sprintf("◐ %s: %s", p.AgentName, p.Description))
+		}
+	case protocol.EventSubagentEnd:
+		if m.subagentActive > 0 {
+			m.subagentActive--
+		}
+		m.header.SetSubagentCount(m.subagentActive)
+		var p protocol.SubagentEndParams
+		if err := json.Unmarshal(ev.Params, &p); err == nil {
+			mark := "✓"
+			if p.State == "error" {
+				mark = "✗"
+			}
+			m.chatLog.AppendSystemLine(fmt.Sprintf("%s subagent: %.1fs (%s)", mark, p.Elapsed, p.State))
+		}
 	case protocol.EventError:
 		var p struct {
 			Message string `json:"message"`
@@ -253,8 +328,7 @@ func (m model) View() string {
 		return "Connecting to loom...\n"
 	}
 	var b strings.Builder
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Render("loom")
-	b.WriteString(title + "\n")
+	b.WriteString(m.header.View() + "\n")
 	b.WriteString(m.chatLog.View())
 	if m.streaming {
 		b.WriteString("▎\n")
@@ -277,6 +351,7 @@ func (m model) View() string {
 type eventMsg struct{ event protocol.Event }
 type sentMsg struct{}
 type serverExitMsg struct{}
+type sessionsListedMsg struct{ sessions []protocol.SessionMeta }
 
 func listenForEvents(client *rpc.Client) tea.Cmd {
 	return func() tea.Msg {
@@ -308,6 +383,69 @@ func sendPermissionResponse(client *rpc.Client, requestID, decision string) tea.
 		_ = client.SendNoWait(protocol.NewPermissionResponse("", requestID, decision))
 		return sentMsg{}
 	}
+}
+
+// requestSessions calls request/list_sessions and posts the result back to
+// the program as a sessionsListedMsg. Errors return an empty slice — the
+// panel will show "no sessions / error".
+func requestSessions(client *rpc.Client) tea.Cmd {
+	return func() tea.Msg {
+		resp, err := client.Send(protocol.NewListSessions(""), sendTimeout)
+		if err != nil {
+			return sessionsListedMsg{sessions: nil}
+		}
+		var res protocol.ListSessionsResult
+		if err := json.Unmarshal(resp.Result, &res); err != nil {
+			return sessionsListedMsg{sessions: nil}
+		}
+		return sessionsListedMsg{sessions: res.Sessions}
+	}
+}
+
+// formatSessionPanel builds the body text shown under the Sessions tab.
+func formatSessionPanel(sessions []protocol.SessionMeta) string {
+	if len(sessions) == 0 {
+		return "no sessions"
+	}
+	var b strings.Builder
+	for i, s := range sessions {
+		fmt.Fprintf(&b, "%d. %s  [%d msgs]  %s\n", i+1, s.Name, s.MessageCount, s.UpdatedAt)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// formatTodoPanel builds the body text shown under the Todos tab when there
+// are no todos yet (placeholder).
+func formatTodoPanel(m model) string {
+	return "no todos yet (live updates from agent_loop pending)"
+}
+
+// formatTodoPanelFromList renders the live todo list (called when
+// event/todo_update arrives and the Todos tab is active).
+func formatTodoPanelFromList(todos []protocol.TodoItem) string {
+	if len(todos) == 0 {
+		return "no todos"
+	}
+	var b strings.Builder
+	marks := map[string]string{
+		"pending":     "[ ]",
+		"in_progress": "[~]",
+		"completed":   "[x]",
+	}
+	for _, t := range todos {
+		mark := "[?]"
+		if m, ok := marks[t.Status]; ok {
+			mark = m
+		}
+		fmt.Fprintf(&b, "%s %s\n", mark, t.Content)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// formatModelsPanel builds the body text shown under the Models tab.
+// Until the server exposes a model list endpoint, show the current selection.
+func formatModelsPanel(m model) string {
+	return fmt.Sprintf("current: %s", m.statusBar.View())
 }
 
 // unused import guard (format is used in error messages above)

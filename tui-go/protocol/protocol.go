@@ -126,6 +126,18 @@ type SubagentStartParams struct {
 	AgentName   string `json:"agent_name"`
 }
 
+// TodoItem mirrors one entry in the todo_update event's "todos" array.
+type TodoItem struct {
+	ID      string `json:"id"`
+	Content string `json:"content"`
+	Status  string `json:"status"` // "pending" | "in_progress" | "completed"
+}
+
+// TodoUpdateParams carries the full todo list as of the event.
+type TodoUpdateParams struct {
+	Todos []TodoItem `json:"todos"`
+}
+
 // SubagentEndParams carries subagent completion info.
 type SubagentEndParams struct {
 	SubagentID string  `json:"subagent_id"`
@@ -168,6 +180,31 @@ func NewPermissionResponse(id, requestID, decision string) Request {
 		ID:      id,
 		Params:  map[string]any{"request_id": requestID, "decision": decision},
 	}
+}
+
+// NewListSessions constructs a request/list_sessions.
+func NewListSessions(id string) Request {
+	return Request{
+		Jsonrpc: "2.0",
+		Method:  RequestMethodListSessions,
+		ID:      id,
+		Params:  map[string]any{},
+	}
+}
+
+// SessionMeta mirrors loom.agent.session_store.SessionMeta. Returned inside
+// the result of request/list_sessions as {"sessions": [...]}.
+type SessionMeta struct {
+	SessionID    string `json:"session_id"`
+	Name         string `json:"name"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+	MessageCount int    `json:"message_count"`
+}
+
+// ListSessionsResult is the result payload of request/list_sessions.
+type ListSessionsResult struct {
+	Sessions []SessionMeta `json:"sessions"`
 }
 
 // NewShutdown constructs a request/shutdown.

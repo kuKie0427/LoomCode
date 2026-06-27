@@ -55,6 +55,12 @@ func (c *ChatLog) AppendUserMessage(text string) {
 	c.render()
 }
 
+// AppendSystemLine appends a system notification line (e.g. subagent markers).
+func (c *ChatLog) AppendSystemLine(text string) {
+	c.lines = append(c.lines, chatLine{role: "system", content: text})
+	c.render()
+}
+
 // StartAssistantTurn resets the streaming buffer and starts a fresh assistant line.
 func (c *ChatLog) StartAssistantTurn() {
 	c.streamBuf.Reset()
