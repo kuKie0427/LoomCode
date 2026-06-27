@@ -7,6 +7,8 @@ dist/
 # Go TUI build artifacts
 tui-go/loom-tui
 tui-go/loom-tui.exe
+bin/loom-tui
+bin/loom-tui.exe
 wheels/
 *.egg-info
 

@@ -211,9 +211,21 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(args, "plain", False):
             from loom.agent import run_repl  # only needed for --plain path
             run_repl(resume=args.resume)
-        else:
-            from loom.tui.app import AgentTUIApp
-            AgentTUIApp(resume=args.resume, model=args.model).run()
+            return 0
+        # Prefer the Go Bubble Tea TUI if the binary is available (build via
+        # scripts/build-tui.sh). Fall back to the legacy Textual TUI otherwise.
+        import shutil
+        go_tui = shutil.which("loom-tui") or str(Path(__file__).parent.parent / "bin" / "loom-tui")
+        if Path(go_tui).exists():
+            import os as _os
+            workdir = Path.cwd()
+            argv = [go_tui, "--workdir", str(workdir)]
+            if args.model:
+                argv += ["--loom-args", f"--model {args.model}"]
+            _os.execvp(go_tui, argv)
+            return 0  # unreachable — execvp replaces this process
+        from loom.tui.app import AgentTUIApp
+        AgentTUIApp(resume=args.resume, model=args.model).run()
         return 0
 
     if args.command == "tui":
