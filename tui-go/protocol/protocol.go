@@ -45,20 +45,21 @@ type RPCError struct {
 
 // Event method constants — must match loom/rpc/protocol.py EVENT_TYPES.
 const (
-	EventAssistantTurnStart = "event/assistant_turn_start"
-	EventAssistantTurnEnd   = "event/assistant_turn_end"
-	EventTextDelta          = "event/text_delta"
-	EventThinkingDelta      = "event/thinking_delta"
-	EventToolUseStarted     = "event/tool_use_started"
-	EventToolUseCompleted   = "event/tool_use_completed"
-	EventCompactOccurred    = "event/compact_occurred"
-	EventTodoUpdate         = "event/todo_update"
-	EventSubagentStart      = "event/subagent_start"
-	EventSubagentEnd        = "event/subagent_end"
-	EventShowNotification   = "event/show_notification"
-	EventSessionStarted     = "event/session_started"
-	EventSessionEnded       = "event/session_ended"
-	EventError              = "event/error"
+	EventAssistantTurnStart    = "event/assistant_turn_start"
+	EventAssistantMessageStart = "event/assistant_message_start"
+	EventAssistantTurnEnd      = "event/assistant_turn_end"
+	EventTextDelta             = "event/text_delta"
+	EventThinkingDelta         = "event/thinking_delta"
+	EventToolUseStarted        = "event/tool_use_started"
+	EventToolUseCompleted      = "event/tool_use_completed"
+	EventCompactOccurred       = "event/compact_occurred"
+	EventTodoUpdate            = "event/todo_update"
+	EventSubagentStart         = "event/subagent_start"
+	EventSubagentEnd           = "event/subagent_end"
+	EventShowNotification      = "event/show_notification"
+	EventSessionStarted        = "event/session_started"
+	EventSessionEnded          = "event/session_ended"
+	EventError                 = "event/error"
 )
 
 // Request method constants — must match loom/rpc/protocol.py REQUEST_TYPES.
@@ -214,5 +215,27 @@ func NewShutdown(id string) Request {
 		Method:  RequestMethodShutdown,
 		ID:      id,
 		Params:  map[string]any{},
+	}
+}
+
+// NewNewSession constructs a request/new_session. Mirrors the Python
+// server's _handle_new_session (rpc/server.py:410).
+func NewNewSession(id string) Request {
+	return Request{
+		Jsonrpc: "2.0",
+		Method:  RequestMethodNewSession,
+		ID:      id,
+		Params:  map[string]any{},
+	}
+}
+
+// NewPickModel constructs a request/pick_model. Mirrors the Python
+// server's _handle_pick_model (rpc/server.py:362).
+func NewPickModel(id, model string) Request {
+	return Request{
+		Jsonrpc: "2.0",
+		Method:  RequestMethodPickModel,
+		ID:      id,
+		Params:  map[string]any{"model": model},
 	}
 }
