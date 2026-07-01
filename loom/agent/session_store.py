@@ -222,10 +222,20 @@ class SessionStore:
         context: Context,
         tool_call_count: int,
         name: str | None = None,
+        *,
+        async_io: bool = False,
     ) -> Path | None:
         """Atomically save a session file and update the index.
 
         Returns the path written, or None on failure.
+
+        When ``async_io=True`` (used by the agent loop), the session-file
+        disk write is offloaded to a background worker via
+        ``checkpoint._submit_write``; only the index update remains
+        synchronous (it's small and needs consistency). The caller must
+        have already snapshot-serialized anything race-sensitive — here
+        we serialize ``payload`` to a string in the main thread before
+        dispatching.
         """
         path = self._session_path(session_id)
         now = _now_iso()
@@ -246,23 +256,33 @@ class SessionStore:
             "last_input_tokens": context.last_input_tokens,
             "checked_at_index": context.checked_at_index,
         }
-        try:
-            fd, tmp = tempfile.mkstemp(
-                dir=self._dir, prefix=session_id + ".", suffix=".tmp"
-            )
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False, default=_json_default)
-            os.chmod(tmp, 0o600)
-            os.replace(tmp, path)
-        except Exception as exc:
-            logger.warning("failed to save session {}: {}", session_id, exc)
-            try:
-                os.unlink(tmp)
-            except (OSError, UnboundLocalError):
-                pass
-            return None
+        # Serialize in main thread — snapshot avoids race with agent loop.
+        payload_str = json.dumps(payload, ensure_ascii=False, default=_json_default)
 
-        # Update the index.
+        if async_io:
+            # Offload disk I/O to background worker (L6). Index update
+            # stays synchronous for consistency.
+            from loom.agent.checkpoint import _submit_write
+
+            _submit_write(path, payload_str, chmod_mode=0o600)
+        else:
+            try:
+                fd, tmp = tempfile.mkstemp(
+                    dir=self._dir, prefix=session_id + ".", suffix=".tmp"
+                )
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(payload_str)
+                os.chmod(tmp, 0o600)
+                os.replace(tmp, path)
+            except Exception as exc:
+                logger.warning("failed to save session {}: {}", session_id, exc)
+                try:
+                    os.unlink(tmp)
+                except (OSError, UnboundLocalError):
+                    pass
+                return None
+
+        # Update the index (sync — fast, and needs consistency).
         meta = SessionMeta(
             session_id=session_id,
             name=session_name,

@@ -1,3 +1,5 @@
+import threading
+import time
 from typing import cast
 
 from anthropic import Anthropic
@@ -20,17 +22,78 @@ _DEFAULT_MODEL = "claude-haiku-4-5"
 
 # Cache for accurate token counts, keyed by id(messages). Same message-list
 # object is not recounted across should_compact / current_tokens calls.
-_token_cache: dict[int, int] = {}
+# R1: capped at _TOKEN_CACHE_MAX_SIZE entries (cleared when exceeded) to
+# prevent unbounded memory growth over long sessions.
+# R2: value stores (count, len(messages)) — on read, if len(messages) changed
+# since the count was cached, treat as a miss. This defends against id() reuse
+# after GC and against in-place mutations (clear+extend) that keep the same
+# id but change the content.
+_token_cache: dict[int, tuple[int, int]] = {}
+_TOKEN_CACHE_MAX_SIZE = 32
+
+# L5: throttle for the Anthropic count_tokens API. When the message list
+# grows every tool turn (typical: +2 messages / turn), the R2 length-check
+# invalidates the cache on every turn — without a throttle, every
+# should_compact() call in the threshold zone fires a fresh 100-300ms HTTP
+# roundtrip. The throttle limits fresh API calls to 1 per
+# _PRECISE_COUNT_THROTTLE_S seconds. When throttled, _count_tokens_accurate
+# returns -1 → should_compact falls back to the cheap estimate (already the
+# code path for non-Anthropic providers via B3). Worst case: a needed
+# compaction is delayed by one throttle window (5s) — acceptable, since the
+# cheap estimate is still an upper bound and the next turn re-checks.
+_last_precise_call_ts: float = 0.0
+_PRECISE_COUNT_THROTTLE_S: float = 5.0
+_PRECISE_COUNT_LOCK = threading.Lock()
 
 
 def _count_tokens_accurate(messages: list[MessageParam], model: str) -> int:
     """Call anthropic.messages.count_tokens(). Returns -1 on any failure.
 
     Cached by id(messages) — same list object → no second HTTP roundtrip.
+
+    B3: only called for Anthropic models. Non-Anthropic providers (DeepSeek,
+    OpenAI, etc.) have no compatible count_tokens endpoint — calling the
+    Anthropic API with their message format produces meaningless counts and
+    may fail on auth, adding latency on every should_compact() check.
+
+    L5: throttled to at most 1 fresh API call per _PRECISE_COUNT_THROTTLE_S
+    seconds. Cache hits (same id + len) bypass the throttle. On a cache miss
+    within the throttle window, returns -1 so should_compact falls back to
+    the cheap estimate rather than blocking on a redundant HTTP roundtrip.
     """
+    # B3: skip Anthropic API for non-Anthropic providers. Model strings are
+    # "provider/model_id" (e.g. "deepseek/deepseek-v4-flash"); bare "claude-*"
+    # is treated as Anthropic for backward compat with legacy callers.
+    if "/" in model:
+        provider_id = model.split("/", 1)[0]
+        if provider_id != "anthropic":
+            return -1
+    elif not model.startswith("claude"):
+        return -1
     key = id(messages)
-    if key in _token_cache:
-        return _token_cache[key]
+    msg_len = len(messages)
+    cached = _token_cache.get(key)
+    if cached is not None:
+        count, cached_len = cached
+        # R2: if the list length changed since we cached, the entry is stale
+        # (in-place mutation like clear+extend, or id reuse after GC).
+        if cached_len == msg_len:
+            return count
+    # L5: throttle fresh API calls. The cache miss above means either the
+    # state changed (typical: messages grew this turn) or this is a brand-
+    # new list. Either way, we don't want to fire a count_tokens HTTP call
+    # on every turn while sitting in the threshold zone. Reserve the slot
+    # under the lock; if another thread is already in flight (or was
+    # recently), fall back to cheap.
+    global _last_precise_call_ts
+    now = time.monotonic()
+    with _PRECISE_COUNT_LOCK:
+        if now - _last_precise_call_ts < _PRECISE_COUNT_THROTTLE_S:
+            # Throttled — caller's should_compact uses cheap estimate.
+            return -1
+        # Reserve the slot BEFORE the API call so concurrent threads (e.g.
+        # subagents calling should_compact) skip rather than pile up.
+        _last_precise_call_ts = now
     try:
         client = Anthropic()
         result = client.messages.count_tokens(model=model, messages=cast(list, messages))
@@ -38,7 +101,10 @@ def _count_tokens_accurate(messages: list[MessageParam], model: str) -> int:
     except Exception as e:
         logger.debug("count_tokens failed ({}), falling back to heuristic", e)
         return -1
-    _token_cache[key] = count
+    # R1: bound cache size — clear all when over cap (cheap to rebuild).
+    if len(_token_cache) >= _TOKEN_CACHE_MAX_SIZE:
+        _token_cache.clear()
+    _token_cache[key] = (count, msg_len)
     return count
 
 COMPACT_PROMPT = """你正在压缩一段对话历史。请阅读以下消息，输出一个结构化摘要。
@@ -155,6 +221,11 @@ class Context:
                     "content": f"<system-reminder>\n对话历史已被压缩。以下是摘要：\n\n{summary}\n</system-reminder>"
                 })
                 messages.extend(tail_messages)
+                # B2: invalidate token cache — messages.clear()+extend() keeps
+                # the same list id() but content changed completely. Without
+                # this, should_compact returns the pre-compact (stale) count
+                # and may skip a needed compaction → context overflow.
+                _token_cache.pop(id(messages), None)
 
                 if last_todo:
                     self._inject_todo_attachment(messages, last_todo)
@@ -212,6 +283,8 @@ class Context:
                 ),
             })
             messages.extend(tail_messages)
+        # B2: invalidate token cache — same id(), different content (see autocompact).
+        _token_cache.pop(id(messages), None)
         if last_todo:
             self._inject_todo_attachment(messages, last_todo)
         self.last_input_tokens = 0

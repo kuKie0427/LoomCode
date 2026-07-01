@@ -12,10 +12,24 @@ reading the error and changing its approach.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 MAX_REPEATED_FAILURES = 3
 LOOKBACK_MESSAGES = 6
+
+# P0-F: 未完成意图检测。LLM 输出末尾声明要做某事（"我来直接创建 CSS："）
+# 但 stop_reason=end_turn 且本轮 0 工具调用——说完就停了。
+# 末尾意图触发词：以这些词结尾（允许紧跟冒号/句号/感叹号/空白）即视为未完成意图。
+_UNFINISHED_INTENT_TAIL_RE = re.compile(
+    r"[^\n。！？]*"
+    r"(?:我来|我现在|接下来|我将|我马上|让我|我直接|我来直接|我准备|"
+    r"我现在就|我马上就|接着|然后|下一步|下一步我|下面我)"
+    r"[^。\n！？]*[:：]\s*$"
+)
+
+# 防死循环：最多注入 N 次未完成意图 reminder
+MAX_UNFINISHED_INTENT_REMINDERS = 2
 
 
 def extract_tool_use_blocks(message: dict) -> list[dict]:
@@ -115,3 +129,66 @@ def build_retry_guidance(detection: dict) -> str:
         f"Do not call the same tool with the same input again without changing something.\n"
         f"</system-reminder>"
     )
+
+
+def detect_unfinished_intent(assistant_content: list) -> str | None:
+    """Detect "unfinished intent" — the LLM announced an action in text
+    (e.g. "我来直接创建 CSS：") but produced no tool_use block in this turn.
+
+    Returns the matched tail text if unfinished intent is detected, else None.
+
+    Conditions:
+    1. The assistant message contains text blocks but NO tool_use blocks.
+    2. The last non-empty text block ends with an "intent declaration" tail
+       matching ``_UNFINISHED_INTENT_TAIL_RE`` (e.g. ends with "我来...：" /
+       "接下来...：" / "我将...：" followed by a colon and optional whitespace).
+    3. The matched tail is the END of the text — mid-paragraph intent
+       declarations (followed by more text) are NOT triggered, because
+       those are usually narrative context, not a stop-then-do pattern.
+
+    Block format: ``[{"type": "text", "text": "..."}, {"type": "tool_use", ...}]``
+    Supports both dict blocks (new serialization) and objects with .type/.text
+    attributes (in-memory dataclasses).
+    """
+    has_tool_use = False
+    last_text: str = ""
+    for block in assistant_content:
+        btype = block.get("type") if isinstance(block, dict) else getattr(block, "type", "")
+        if btype == "tool_use":
+            has_tool_use = True
+            break
+        if btype == "text":
+            txt = block.get("text", "") if isinstance(block, dict) else getattr(block, "text", "")
+            if txt:
+                last_text = txt
+    if has_tool_use:
+        return None
+    if not last_text:
+        return None
+    # Match against the tail of the last text block
+    m = _UNFINISHED_INTENT_TAIL_RE.search(last_text)
+    if m is None:
+        return None
+    return m.group(0).strip()
+
+
+def build_unfinished_intent_guidance(matched_tail: str, attempt: int) -> str:
+    """Build the system-reminder forcing the LLM to execute the announced action.
+
+    ``attempt`` is the 1-based injection counter (capped at
+    ``MAX_UNFINISHED_INTENT_REMINDERS``). The reminder escalates in tone
+    on the second attempt to make the LLM actually call the tool.
+    """
+    base = (
+        f"<system-reminder>\n"
+        f"[unfinished_intent] 你上一轮说了 “{matched_tail}” 但没有调用任何工具就停下了。"
+        f"声明要做的事必须在本轮通过工具调用执行——不能说完就停。\n"
+        f"立即调用合适的工具完成你声明的动作；如果你已经决定不做，请明确告诉用户为什么。\n"
+    )
+    if attempt >= 2:
+        base += (
+            f"\n[final_reminder] 这是第 {attempt} 次提醒。再不调用工具执行，"
+            f"主代理将视为放弃此动作并真正停止。\n"
+        )
+    base += "</system-reminder>"
+    return base

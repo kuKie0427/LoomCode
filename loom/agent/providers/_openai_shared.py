@@ -13,7 +13,9 @@ dependency through ``loom.agent.tools``).
 
 from __future__ import annotations
 
+import atexit
 import json
+import threading
 from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -35,6 +37,64 @@ if TYPE_CHECKING:
 DEFAULT_WINDOW = 32_000
 """Fallback context window for OpenAI-compatible providers whose
 per-model context size is unknown (e.g. OpenRouter, Ollama)."""
+
+
+# ---------------------------------------------------------------------------
+# L3: httpx.Client connection pool
+# ---------------------------------------------------------------------------
+# Without a pool, every openai_chat_stream call constructs a fresh
+# httpx.Client, which performs a full TLS handshake + TCP setup against
+# the LLM endpoint. For DeepSeek/Ollama/OpenRouter this adds ~100-300ms
+# of fixed latency on every LLM call. The pool caches clients by
+# base_url so subsequent calls reuse the keep-alive connection.
+#
+# Pool key is base_url only — auth is per-request (Authorization header),
+# so a single entry serves multiple api_keys for the same endpoint.
+_HTTP_CLIENT_POOL: dict[str, httpx.Client] = {}
+_HTTP_CLIENT_LOCK = threading.Lock()
+_HTTP_CLIENT_MAX_POOL_SIZE = 8
+
+
+def _get_pooled_http_client(base_url: str) -> httpx.Client:
+    """Return a cached ``httpx.Client`` for ``base_url``, creating one
+    if needed. Thread-safe via ``_HTTP_CLIENT_LOCK``.
+
+    Pooled clients use ``timeout=None`` (no default timeout) — per-call
+    timeout is passed explicitly to ``client.stream(timeout=...)`` so
+    different callers can use different timeouts on the same pool entry.
+    """
+    with _HTTP_CLIENT_LOCK:
+        client = _HTTP_CLIENT_POOL.get(base_url)
+        if client is not None:
+            return client
+        # FIFO eviction at capacity (dict preserves insertion order in Py3.7+).
+        if len(_HTTP_CLIENT_POOL) >= _HTTP_CLIENT_MAX_POOL_SIZE:
+            oldest_key = next(iter(_HTTP_CLIENT_POOL))
+            evicted = _HTTP_CLIENT_POOL.pop(oldest_key)
+            try:
+                evicted.close()
+            except Exception:
+                logger.debug("Failed to close evicted httpx client for {}", oldest_key)
+        client = httpx.Client(timeout=None)
+        _HTTP_CLIENT_POOL[base_url] = client
+        return client
+
+
+def _close_http_client_pool() -> None:
+    """Close all pooled ``httpx.Client`` instances. Safe to call multiple
+    times. Used by tests for isolation and registered with ``atexit`` for
+    clean process shutdown.
+    """
+    with _HTTP_CLIENT_LOCK:
+        for key, client in list(_HTTP_CLIENT_POOL.items()):
+            try:
+                client.close()
+            except Exception:
+                logger.debug("Failed to close httpx client for {}", key)
+        _HTTP_CLIENT_POOL.clear()
+
+
+atexit.register(_close_http_client_pool)
 
 
 def _strip_provider_prefix(model: str) -> str:
@@ -129,7 +189,7 @@ def get_profile(provider_id: str) -> dict[str, Any] | None:
 def make_compatible_provider_class(
     provider_id: str,
     profile: Mapping[str, Any],
-) -> type["OpenAICompatibleProvider"]:
+) -> type[OpenAICompatibleProvider]:
     """Create a dynamically-bound ``OpenAICompatibleProvider`` subclass
     for a single profile. The class's ClassVar identifiers are pinned
     from the profile dict so the registry lookup works as if it were
@@ -333,6 +393,17 @@ def _serialize_messages(
         else:
             msg["content"] = serialized
 
+        # P0-H: 当 user 消息只含 tool_result blocks 时，提取后 serialized 为空。
+        # 不要追加空的 {role: "user", content: []} —— 某些 provider
+        # (DeepSeek/OpenAI) 会因 "tool_calls 后跟空 user 消息而非 tool message"
+        # 而拒绝。tool messages 已经在循环中单独 append 了。
+        if (
+            msg.get("role") == "user"
+            and not tool_calls
+            and isinstance(msg.get("content"), list)
+            and len(msg["content"]) == 0
+        ):
+            continue
         result.append(msg)
     return result
 
@@ -493,8 +564,9 @@ def openai_chat_stream(
     ``ProviderError`` on transport / HTTP failures.
 
     ``http_client`` is the dependency-injection seam for tests. The
-    production code path creates a fresh ``httpx.Client`` per call to
-    avoid sharing connections across requests.
+    production code path uses a pooled ``httpx.Client`` (keyed by
+    ``base_url``) so TCP/TLS connections are reused across LLM calls
+    instead of being re-established each turn.
 
     ``extra_body`` is provider-specific top-level keys merged into the
     request body (e.g. ``reasoning_effort``, ``thinking`` for DeepSeek
@@ -509,8 +581,11 @@ def openai_chat_stream(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    owns_client = http_client is None
-    client = http_client or httpx.Client(timeout=timeout)
+    # L3: pooled client keeps the TCP/TLS connection alive across calls.
+    # Caller-supplied http_client (tests) bypasses the pool; its lifetime
+    # is owned by the caller (typically a `with` statement). Pooled clients
+    # are closed via _close_http_client_pool (atexit/tests).
+    client = http_client if http_client is not None else _get_pooled_http_client(base_url)
     try:
         try:
             cm = client.stream(
@@ -518,6 +593,7 @@ def openai_chat_stream(
                 url,
                 json=body,
                 headers=headers,
+                timeout=timeout,  # per-call timeout overrides pool default (None)
             )
         except httpx.HTTPError as exc:
             raise ProviderError(
@@ -652,5 +728,7 @@ def openai_chat_stream(
                 provider=provider,
             ) from exc
     finally:
-        if owns_client:
-            client.close()
+        # L3: never close here. Pooled clients are managed by
+        # _close_http_client_pool; caller-supplied clients are owned by
+        # the caller (typically a `with` statement in tests).
+        pass

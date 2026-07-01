@@ -204,11 +204,12 @@ class TestRunToolBlockSubagentCallbacks:
     def test_run_tool_block_fires_subagent_start_with_block_id(self, mocker):
         """For task tools, _run_tool_block fires on_subagent_start using
         block.id (tool_use_id) as the subagent_id and the description from
-        block.input."""
+        block.input. The weaving-themed agent_name (织针) is passed as the
+        third argument."""
         captured: list[tuple] = []
 
-        def cb_start(subagent_id: str, description: str) -> None:
-            captured.append(("start", subagent_id, description))
+        def cb_start(subagent_id: str, description: str, agent_name: str = "织针") -> None:
+            captured.append(("start", subagent_id, description, agent_name))
 
         def cb_end(subagent_id: str, elapsed: float, state: str) -> None:
             captured.append(("end", subagent_id, elapsed, state))
@@ -234,8 +235,8 @@ class TestRunToolBlockSubagentCallbacks:
         assert len(captured) == 2, (
             f"expected start + end callback, got {captured}"
         )
-        assert captured[0] == ("start", "toolu_abc123", "Extract MCP schema"), (
-            f"on_subagent_start should fire with (block.id, description), got {captured[0]}"
+        assert captured[0] == ("start", "toolu_abc123", "Extract MCP schema", "织针"), (
+            f"on_subagent_start should fire with (block.id, description, agent_name), got {captured[0]}"
         )
         assert captured[1][0] == "end"
         assert captured[1][1] == "toolu_abc123", (
@@ -247,7 +248,7 @@ class TestRunToolBlockSubagentCallbacks:
         """When the task handler raises, on_subagent_end fires with state='error'."""
         captured: list[tuple] = []
 
-        def cb_start(subagent_id: str, description: str) -> None:
+        def cb_start(subagent_id: str, description: str, agent_name: str = "织针") -> None:
             captured.append(("start", subagent_id))
 
         def cb_end(subagent_id: str, elapsed: float, state: str) -> None:
@@ -282,10 +283,10 @@ class TestRunToolBlockSubagentCallbacks:
         )
 
     def test_run_tool_block_does_not_fire_subagent_for_non_task_tools(self, mocker):
-        """Non-task tools (e.g., bash) must not fire on_subagent_start / on_subagent_end."""
+        """Non-subagent tools (e.g., bash) must not fire on_subagent_start / on_subagent_end."""
         captured: list[tuple] = []
 
-        def cb_start(subagent_id: str, description: str) -> None:
+        def cb_start(subagent_id: str, description: str, agent_name: str = "织针") -> None:
             captured.append(("start", subagent_id))
 
         def cb_end(subagent_id: str, elapsed: float, state: str) -> None:
@@ -339,7 +340,7 @@ class TestRunToolBlockDescriptionTruncation:
         and ends with `…`. Locks in LOW-2 truncation behavior."""
         captured: list[tuple] = []
 
-        def cb_start(subagent_id: str, description: str) -> None:
+        def cb_start(subagent_id: str, description: str, agent_name: str = "织针") -> None:
             captured.append(("start", subagent_id, description))
 
         def cb_end(subagent_id: str, elapsed: float, state: str) -> None:
@@ -386,7 +387,7 @@ class TestRunToolBlockDescriptionTruncation:
         Locks in the pass-through branch of the truncation ternary."""
         captured: list[tuple] = []
 
-        def cb_start(subagent_id: str, description: str) -> None:
+        def cb_start(subagent_id: str, description: str, agent_name: str = "织针") -> None:
             captured.append(("start", subagent_id, description))
 
         def cb_end(subagent_id: str, elapsed: float, state: str) -> None:

@@ -241,11 +241,13 @@ class _Server:
             _emit(Event.assistant_turn_start(agent_name="织轴"))
 
         def _on_assistant_message_start() -> None:
-            # Per-LLM-call reset (mirrors TUI's on_assistant_message_start).
-            # We don't emit a new assistant_turn_start here because the
-            # first call already did; subsequent LLM calls in the same
-            # turn just continue streaming.
-            pass
+            # Per-LLM-call signal: fired before each LLM call in agent_loop
+            # (the first call is preceded by assistant_turn_start, subsequent
+            # calls by this event). Lets the TUI reset its thinking buffer
+            # so round N+1's reasoning doesn't append to round N's stale
+            # buffer. Critical for DeepSeek thinking-mode where the final
+            # response may come as reasoning_content in round 2+.
+            _emit(Event.assistant_message_start())
 
         def _on_message_end(calls: int, total: int) -> None:
             duration = _time.monotonic() - (self._turn_start_ts or _time.monotonic())

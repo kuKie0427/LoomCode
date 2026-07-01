@@ -25,6 +25,7 @@ from typing import Any
 # Every entry must have a matching factory method on ``Event``.
 EVENT_TYPES: frozenset[str] = frozenset({
     "event/assistant_turn_start",
+    "event/assistant_message_start",
     "event/assistant_turn_end",
     "event/text_delta",
     "event/thinking_delta",
@@ -127,6 +128,18 @@ class Event(_Message):
     def assistant_turn_start(agent_name: str = "织轴") -> Event:
         return Event(method="event/assistant_turn_start",
                      params={"agent_name": agent_name})
+
+    @staticmethod
+    def assistant_message_start() -> Event:
+        """Per-LLM-call signal within a single assistant turn.
+
+        Fired before each LLM call in agent_loop. The first call is
+        preceded by assistant_turn_start; subsequent calls (e.g. after
+        tool_use returns) are preceded by this event. Lets the TUI
+        reset its thinking buffer so round N+1's reasoning doesn't
+        append to round N's stale buffer.
+        """
+        return Event(method="event/assistant_message_start", params={})
 
     @staticmethod
     def assistant_turn_end(tool_calls: int, total_messages: int, duration: float) -> Event:

@@ -126,6 +126,7 @@ def test_status_bar_shows_model_with_provider() -> None:
 
             # Connected: status line includes ✓
             with patch("loom.agent.credential.credentials.get", return_value=MagicMock()):
+                status_bar._creds_cache.clear()  # invalidate cache (P0-3)
                 text = status_bar.render()
                 assert model in text, (
                     f"StatusBar should show model {model!r}, got: {text!r}"
@@ -136,6 +137,7 @@ def test_status_bar_shows_model_with_provider() -> None:
 
             # Disconnected: status line includes ✗
             with patch("loom.agent.credential.credentials.get", return_value=None):
+                status_bar._creds_cache.clear()  # invalidate cache (P0-3)
                 text = status_bar.render()
                 assert "[$text-muted]✗[/]" in text or "✗" in text, (
                     f"Disconnected provider should show ✗, got: {text!r}"

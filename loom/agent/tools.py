@@ -1217,6 +1217,21 @@ def get_tool_handlers() -> dict:
     return TOOL_HANDLERS
 
 
+def is_concurrent_safe_tool(name: str) -> bool:
+    """L2: return whether ``name`` is safe to run in parallel with other tools.
+
+    A tool is concurrent-safe iff it is registered with
+    ``is_concurrent_safe=True`` (currently: ``read_file``, ``glob``,
+    ``grep``, ``web_fetch``, ``subagent_poll``, ``subagent_list``). These
+    tools have no observable side effects on the workspace, so running
+    several of them in parallel within one tool turn cannot break tool
+    dependencies. Tools not in the registry or without the flag return
+    ``False`` — they are run serially by the agent loop.
+    """
+    tool = TOOL_REGISTRY.get(name)
+    return bool(tool is not None and tool.is_concurrent_safe)
+
+
 def _resync_from_registry() -> None:
     """Rebuild the module-level ``TOOLS`` / ``TOOL_HANDLERS`` from ``TOOL_REGISTRY``.
 
@@ -1283,18 +1298,18 @@ SUB_HANDLERS = {
 }
 
 SUB_SYSTEM = (
-    "你是 Generator——三角架构中的'生成'角色，由 Orchestrator 通过 task 工具委派。\n"
+    "你是「织针」——三角架构中的'生成'角色 (Generator)，由织轴 (Orchestrator) 通过 task 工具委派。\n"
     "\n"
     "你必须知道的三件事：\n"
-    "1. 你的输出会被独立的 Reviewer 智能体审查（review 工具），所以要为审查友好\n"
-    "2. 你看不到 Orchestrator 的对话历史，唯一上下文是 prompt 里的 <feature_card> + <scope_envelope>\n"
+    "1. 你的输出会被独立的验布 (Reviewer) 智能体审查（review 工具），所以要为审查友好\n"
+    "2. 你看不到织轴的对话历史，唯一上下文是 prompt 里的 <feature_card> + <scope_envelope>\n"
     "3. 你不能调用 task 或 review（防止无限委派和自审）\n"
     "\n"
     "三角协议在 docs/triangle-protocol.md。\n"
     "\n"
     "## 输入解析\n"
     "\n"
-    "Orchestrator 的 prompt 会以两个结构化块开头：\n"
+    "织轴的 prompt 会以两个结构化块开头：\n"
     "\n"
     "<feature_card>\n"
     "  id / name / description / verification / acceptance_criteria\n"
@@ -1373,7 +1388,16 @@ SUB_SYSTEM = (
     "- 不要 silently skip 步骤 — 跳过的步骤要在结果里说明原因\n"
     "- 不要为了通过测试而 skip/xfail test 或修改 test 文件本身\n"
     "- 不要做 destructive 操作（rm -rf、force-push、删无关文件）— 即使任务看起来允许\n"
-    "- 不要伪造 delta_report：lines_added 写 5 但实际改了 50 行——Reviewer 会 git diff 对账"
+    "- 不要伪造 delta_report：lines_added 写 5 但实际改了 50 行——Reviewer 会 git diff 对账\n"
+    "\n"
+    "## 完成判定硬标准（违反即视为幻觉完成）\n"
+    "\n"
+    "- delta_report.files_created/files_modified 中声明的每个文件，必须在写完后立即用\n"
+    "  bash `ls -la <path>` 或 read_file 验证落盘。只写'已创建'不算证据。\n"
+    "- 跑满 max_turns 仍未完成全部产物时，delta_report.status 必须是 partial 或 blocked，\n"
+    "  绝不允许 complete；partial 时必须在 escalations 里列出未完成项。\n"
+    "- 0 次工具调用时，delta_report.status 绝不能是 complete——没调过工具就不可能完成任何产物。\n"
+    "- 主代理会在你返回后用 is_file() 校验 files_created，伪造产物会被立即检测到。"
 )
 
 # Import review tool components (safe: review.py does NOT import from tools.py at module level)
@@ -1498,6 +1522,7 @@ def spawn_subagent(
 
     turn_count = 0
     tool_call_count = 0
+    hit_max_turns = False
     for _ in range(max_turns):
         turn_count += 1
         response = llm_client.invoke(
@@ -1524,6 +1549,13 @@ def spawn_subagent(
                 results.append({"type": "tool_result", "tool_use_id": block.id,
                                 "content": output, "is_error": False})
         messages.append({"role": "user", "content": results})
+    else:
+        # for-else: loop completed without break → ran out of max_turns.
+        # This is NOT a real completion — the LLM was still wanting to call
+        # tools but was force-stopped. Mark it so the orchestrator can detect
+        # "fake done" (AGENTS.md Rule #11: subagent reporting done after a
+        # long timeout likely did something other than the requested work).
+        hit_max_turns = True
 
     result = extract_text(messages[-1]["content"])
     if not result:
@@ -1544,7 +1576,8 @@ def spawn_subagent(
     # Only check if protocol mode is active (feature_card was provided)
     if feature_card is not None:
         from loom.agent.triangle_protocol import parse_delta_report
-        if parse_delta_report(result) is None:
+        delta = parse_delta_report(result)
+        if delta is None:
             result = result + (
                 "\n\n<system-reminder>\n"
                 "[triangle-protocol violation] Generator 未输出 <delta_report> 块。\n"
@@ -1556,8 +1589,52 @@ def spawn_subagent(
                 "spawn_subagent: feature_card={} but no <delta_report> in result (I4 violation)",
                 feature_card.id,
             )
+        else:
+            # Force max_turns exits to status=partial — a force-stopped run
+            # is by definition incomplete. The LLM may still claim
+            # status=complete; override it so the orchestrator sees truth.
+            if hit_max_turns and delta.status == "complete":
+                result = result.replace(
+                    'status="complete"',
+                    'status="partial"',
+                    1,
+                )
+                result = result + (
+                    "\n\n<system-reminder>\n"
+                    "[max_turns_forced_partial] 子代理跑满 max_turns 被强制退出，"
+                    "delta_report.status 已从 complete 强制改为 partial。"
+                    "声明已完成的产物可能未真正落盘——主代理应校验 files_created。\n"
+                    "</system-reminder>"
+                )
+                logger.warning(
+                    "spawn_subagent: hit max_turns={} with status=complete → forced partial (feature_card={})",
+                    max_turns, feature_card.id,
+                )
 
-    return f"[done: {turn_count} turns, {tool_call_count} tool calls]\n{result}"
+            # Zero-tool-call hallucination: LLM claims complete but never
+            # called any tools. This is the strongest fake-done signal —
+            # a subagent that did zero work cannot have completed anything.
+            if delta.status == "complete" and tool_call_count == 0:
+                result = result.replace(
+                    'status="complete"',
+                    'status="partial"',
+                    1,
+                )
+                result = result + (
+                    "\n\n<system-reminder>\n"
+                    "[protocol violation] delta_report.status=complete 但子代理 0 次工具调用——"
+                    "几乎肯定是 LLM 幻觉完成。status 已强制改为 partial。"
+                    "主代理应忽略此 delta_report 并重新委派或自行完成。\n"
+                    "</system-reminder>"
+                )
+                logger.warning(
+                    "spawn_subagent: 0 tool_calls with status=complete → forced partial (feature_card={})",
+                    feature_card.id,
+                )
+
+    # Distinct prefix so the orchestrator LLM can detect fake-done at a glance.
+    prefix = "[max_turns_reached" if hit_max_turns else "[done"
+    return f"{prefix}: {turn_count} turns, {tool_call_count} tool calls]\n{result}"
 
 
 # === Background subagent execution (P2) ===
@@ -1711,6 +1788,33 @@ def run_task(description: str, background: bool = False, feature_card=None, scop
                 )
             except Exception as trace_exc:
                 logger.warning("run_task: trace.record(triangle.delta) failed: {}", trace_exc)
+
+        # === Artifact verification (P0-C: detect fake-done) ===
+        # When the subagent claims status=complete with files_created, verify
+        # those files actually exist on disk. LLM hallucination can claim
+        # files were created when they weren't (AGENTS.md Rule #11). Don't
+        # block the flow — just append a system-reminder so the orchestrator
+        # LLM sees the mismatch and can retry or take over.
+        if delta is not None and delta.status == "complete" and delta.files_created:
+            missing_files: list[str] = []
+            for path in delta.files_created:
+                try:
+                    if not safe_path(path).is_file():
+                        missing_files.append(path)
+                except (ValueError, OSError):
+                    missing_files.append(f"{path} (path escape)")
+            if missing_files:
+                result = result + (
+                    "\n\n<system-reminder>\n"
+                    "[artifact_verification_failed] delta_report 声明 files_created 但磁盘未找到:\n"
+                    + "\n".join(f"  - {p}" for p in missing_files)
+                    + "\n子代理可能幻觉完成。主代理应重新委派或自行创建这些文件。\n"
+                    "</system-reminder>"
+                )
+                logger.warning(
+                    "run_task: artifact verification failed for feature_card={}: missing={}",
+                    feature_card.id, missing_files,
+                )
 
     return result
 

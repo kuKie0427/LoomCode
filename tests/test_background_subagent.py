@@ -249,7 +249,7 @@ def test_run_tool_block_background_skips_on_subagent_end() -> None:
     end_calls: list[tuple] = []
 
     cb = {
-        "on_subagent_start": lambda sid, desc: start_calls.append((sid, desc)),
+        "on_subagent_start": lambda sid, desc, agent_name="织针": start_calls.append((sid, desc, agent_name)),
         "on_subagent_end": lambda sid, elapsed, state: end_calls.append((sid, elapsed, state)),
     }
     set_active_callbacks(cb)
@@ -292,7 +292,7 @@ def test_run_tool_block_foreground_fires_both_callbacks() -> None:
     end_calls: list[tuple] = []
 
     cb = {
-        "on_subagent_start": lambda sid, desc: start_calls.append((sid, desc)),
+        "on_subagent_start": lambda sid, desc, agent_name="织针": start_calls.append((sid, desc, agent_name)),
         "on_subagent_end": lambda sid, elapsed, state: end_calls.append((sid, elapsed, state)),
     }
     set_active_callbacks(cb)

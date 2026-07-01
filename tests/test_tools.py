@@ -322,7 +322,7 @@ def test_run_task_does_not_fire_subagent_callback(mocker, monkeypatch, temp_work
 
     captured: list[tuple] = []
     callbacks = {
-        "on_subagent_start": lambda sid, desc: captured.append(("start", sid)),
+        "on_subagent_start": lambda sid, desc, agent_name="织针": captured.append(("start", sid)),
         "on_subagent_end": lambda sid, elapsed, state: captured.append(("end", sid, state)),
     }
     loop_mod = __import__("loom.agent.loop", fromlist=["set_active_callbacks", "clear_active_callbacks"])

@@ -5,6 +5,14 @@ a subagent. These templates wrap common workflows with focused
 system prompts so subagents behave like specialists, not general
 assistants.
 
+Weaving-themed agent names (loom = 织布机):
+- Orchestrator → 织轴 (warp beam, holds the warp threads — drives the loom)
+- task / Generator → 织针 (weaving needle, weaves the cloth)
+- task_investigate_code → 飞梭 (flying shuttle, zips through the warp searching)
+- task_refactor_across_files → 经线 (warp thread, spans the full width)
+- task_fix_failing_test → 织补 (darning, patches holes in the fabric)
+- review / Reviewer → 验布 (cloth inspector, checks the finished weave)
+
 Templates:
 - investigate_code(question, hint_paths) - search the codebase, return findings
 - refactor_across_files(pattern, scope_glob) - search, plan, apply multi_edit, verify
@@ -13,9 +21,29 @@ Templates:
 
 from __future__ import annotations
 
+# ── Agent display names (weaving theme) ──────────────────────────────
+# Maps tool_name → Chinese weaving name for TUI display.
+AGENT_NAMES: dict[str, str] = {
+    "task": "织针",
+    "task_investigate_code": "飞梭",
+    "task_refactor_across_files": "经线",
+    "task_fix_failing_test": "织补",
+    "review": "验布",
+}
+
+# The main agent (Orchestrator) display name. Shown in the ChatLog turn label
+# ("▎ 织轴") and available as a single source of truth for any TUI surface
+# that wants to identify the main agent.
+MAIN_AGENT_NAME: str = "织轴"
+
+
+def agent_display_name(tool_name: str) -> str:
+    """Return the weaving-themed display name for a tool, or the tool name itself."""
+    return AGENT_NAMES.get(tool_name, tool_name)
+
 INVESTIGATE_CODE_SYSTEM = (
-    "你是一个代码调查子智能体 (code investigator)。你的工作是: 在给定的代码库里搜索信息, "
-    "总结发现, 并返回结构化的结论给主 agent.\n"
+    "你是「飞梭」——代码调查子智能体 (code investigator)。你的工作是: 在给定的代码库里搜索信息, "
+    "总结发现, 并返回结构化的结论给主 agent (织轴).\n"
     "规则:\n"
     "- 优先用 grep (而不是 read_file) 来定位符号、字符串、引用\n"
     "- 用 glob 快速发现文件结构\n"
@@ -28,7 +56,7 @@ INVESTIGATE_CODE_SYSTEM = (
 
 
 REFACTOR_ACROSS_FILES_SYSTEM = (
-    "你是一个跨文件重构子智能体 (cross-file refactor)。你的工作是: 在 scope_glob 范围内, "
+    "你是「经线」——跨文件重构子智能体 (cross-file refactor)。你的工作是: 在 scope_glob 范围内, "
     "查找所有匹配 pattern 的位置, 计划编辑, 一次性用 multi_edit 应用, 验证结果.\n"
     "规则:\n"
     "- 第一步: 用 grep 找出所有匹配, 列出 file:line:context 形式\n"
@@ -42,7 +70,7 @@ REFACTOR_ACROSS_FILES_SYSTEM = (
 
 
 FIX_FAILING_TEST_SYSTEM = (
-    "你是一个测试驱动的 bug 修复子智能体 (TDD fixer)。你的工作是: 读失败的测试, "
+    "你是「织补」——测试驱动的 bug 修复子智能体 (TDD fixer)。你的工作是: 读失败的测试, "
     "定位源 bug, 修复, 重新跑测试, 确认 pass.\n"
     "规则:\n"
     "- 第一步: 跑测试, 读完整错误信息 (assertion mismatch / exception / timeout)\n"

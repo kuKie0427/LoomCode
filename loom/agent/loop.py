@@ -19,10 +19,12 @@ from loom.agent.context import Context
 from loom.agent.hooks import Hooks
 from loom.agent.llm import LLMClient, StreamEvent
 from loom.agent.prompt import AGENTS_MD_STATIC_LIMIT, SystemPrompt
+from loom.agent.subagent_templates import agent_display_name
 from loom.agent.system_prompt import get_system_prompt
 from loom.agent.tools import (
     get_tool_handlers,
     get_tools,
+    is_concurrent_safe_tool,
 )
 from loom.agent.triangle_protocol import FeedbackDirective
 from loom.agent.user_hooks import discover_user_hooks, make_shell_callback
@@ -232,12 +234,35 @@ hooks.register_hook("SessionStart", _on_session_start_mcp)
 llm_client = LLMClient(model=os.getenv("MODEL") or "deepseek/deepseek-v4-flash")
 
 
+# Tools that launch a subagent and should fire on_subagent_start / on_subagent_end
+# (plus show a SubagentMarker in the TUI with the weaving-themed display name).
+_SUBAGENT_TOOLS = frozenset({
+    "task",
+    "task_investigate_code",
+    "task_refactor_across_files",
+    "task_fix_failing_test",
+    "review",
+})
+
+# Maps each subagent tool to the block.input key holding its human-readable
+# description (used for the TUI SubagentMarker text).
+_SUBAGENT_DESC_KEY: dict[str, str] = {
+    "task": "description",
+    "task_investigate_code": "question",
+    "task_refactor_across_files": "pattern",
+    "task_fix_failing_test": "test_path",
+    "review": "feature_id",
+}
+
+
 def _run_tool_block(block, hooks) -> dict:
     """Execute a single tool_use block and return the tool_result dict.
 
-    For ``task`` tools, wraps the handler call with on_subagent_start /
-    on_subagent_end (using ``block.id`` as subagent_id) so the TUI can
-    map subagent overlay rows directly to ChatLog ToolCallMarkers.
+    For subagent-launching tools (``task``, ``task_*``, ``review``), wraps
+    the handler call with on_subagent_start / on_subagent_end (using
+    ``block.id`` as subagent_id) so the TUI can map subagent overlay rows
+    directly to ChatLog ToolCallMarkers. The weaving-themed display name
+    (织针 / 飞梭 / 经线 / 织补 / 验布) is passed to on_subagent_start.
     """
     blocked = hooks.trigger_hooks("PreToolUse", block)
     if blocked is not None:
@@ -247,13 +272,20 @@ def _run_tool_block(block, hooks) -> dict:
         return {"type": "tool_result", "tool_use_id": block.id,
                 "content": blocked, "is_error": True}
     handler = get_tool_handlers().get(block.name)
-    if block.name == "task":
+    # B1: track error state so detect_repeated_failures can see exception-caught
+    # failures. Previously is_error was hardcoded False, so the retry-detection
+    # safety net only fired for tools that explicitly returned error results —
+    # tools that raised exceptions were invisible to it, causing infinite retries.
+    is_error = False
+    if block.name in _SUBAGENT_TOOLS:
         cb = _active_callbacks
-        raw_desc = str(block.input.get("description", ""))
+        agent_name = agent_display_name(block.name)
+        desc_key = _SUBAGENT_DESC_KEY.get(block.name, "description")
+        raw_desc = str(block.input.get(desc_key, ""))
         description = (raw_desc[:59] + "…") if len(raw_desc) > 60 else raw_desc
         is_background = bool(block.input.get("background", False))
         if cb is not None and cb.get("on_subagent_start") is not None:
-            cb["on_subagent_start"](block.id, description)
+            cb["on_subagent_start"](block.id, description, agent_name)
         t0 = time.monotonic()
         state = "done"
         try:
@@ -268,9 +300,15 @@ def _run_tool_block(block, hooks) -> dict:
                 output = handler(**kwargs) if handler else f"Unknown: {block.name}"
             else:
                 output = handler(**block.input) if handler else f"Unknown: {block.name}"
-        except Exception:
+        except Exception as exc:
+            # P0-H: 不再 re-raise。如果 re-raise，_run_tool_turn 会抛出，
+            # agent_loop 的 messages.append(tool_result) 永远不执行，
+            # 历史就出现 "assistant 有 tool_calls 但后面不是 tool message"
+            # 的非法状态——下次 LLM 调用会被 DeepSeek/OpenAI 拒绝 (400)。
+            # 转为 error tool_result 返回，保证消息历史始终合法。
             state = "error"
-            raise
+            is_error = True
+            output = f"Error: {block.name} raised {type(exc).__name__}: {exc}"
         finally:
             elapsed = time.monotonic() - t0
             # Skip on_subagent_end for background tasks — the background
@@ -281,22 +319,68 @@ def _run_tool_block(block, hooks) -> dict:
     else:
         try:
             output = handler(**block.input) if handler else f"Unknown: {block.name}"
-        except TypeError as e:
-            output = f"Error: tool {block.name} called with invalid arguments: {e}"
+        except Exception as exc:
+            # P0-H: 捕获所有异常（不只 TypeError），转为 error tool_result。
+            # 原来只捕 TypeError，其他异常上抛导致 tool_result 丢失，
+            # 消息历史出现 "tool_calls 无对应 tool message" 的非法状态。
+            is_error = True
+            output = f"Error: {block.name} raised {type(exc).__name__}: {exc}"
     hooks.trigger_hooks("PostToolUse", block, output)
     return {"type": "tool_result", "tool_use_id": block.id,
-            "content": output, "is_error": False}
+            "content": output, "is_error": is_error}
 
 
 def _run_tool_turn(tool_uses, hooks):
-    """Run a batch of tool_use blocks. 'task' calls run concurrently (Fork mode)."""
+    """Run a batch of tool_use blocks.
+
+    Execution strategy (L2):
+    - 'task' tools run concurrently (existing Fork mode).
+    - Concurrent-safe tools (is_concurrent_safe=True: read_file, glob, grep,
+      web_fetch, subagent_poll, subagent_list) run concurrently with each
+      other — they have no side effects and the LLM cannot see mid-batch
+      results, so within a single batch they are independent by construction.
+    - All other non-task tools (bash, write_file, edit_file, todo_write, ...)
+      run serially in their original order to preserve observable ordering.
+
+    Order of execution: serial → concurrent-safe → task. Results are placed
+    back into ``results[i]`` by index, so the caller always sees tool results
+    in the same order as the LLM emitted them.
+    """
     results: list[dict | None] = [None] * len(tool_uses)
     task_idx = [i for i, b in enumerate(tool_uses) if b.name == "task"]
-    non_task_idx = [i for i, b in enumerate(tool_uses) if b.name != "task"]
+    # L2: split non-task tools into concurrent-safe vs serial groups.
+    concurrent_safe_idx: list[int] = []
+    serial_idx: list[int] = []
+    for i, b in enumerate(tool_uses):
+        if b.name == "task":
+            continue
+        if is_concurrent_safe_tool(b.name):
+            concurrent_safe_idx.append(i)
+        else:
+            serial_idx.append(i)
 
-    for i in non_task_idx:
+    # Serial first — preserves write-before-read ordering for stateful tools
+    # (e.g. bash writes a file then edit_file edits it).
+    for i in serial_idx:
         results[i] = _run_tool_block(tool_uses[i], hooks)
 
+    # Concurrent-safe tools in parallel — bounded pool to avoid spawning
+    # one thread per tool when the LLM emits a huge batch.
+    if len(concurrent_safe_idx) == 1:
+        results[concurrent_safe_idx[0]] = _run_tool_block(
+            tool_uses[concurrent_safe_idx[0]], hooks
+        )
+    elif len(concurrent_safe_idx) > 1:
+        max_workers = min(len(concurrent_safe_idx), 8)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = {
+                ex.submit(_run_tool_block, tool_uses[i], hooks): i
+                for i in concurrent_safe_idx
+            }
+            for fut in concurrent.futures.as_completed(futures):
+                results[futures[fut]] = fut.result()
+
+    # 'task' tools in parallel (existing Fork mode, unchanged).
     if len(task_idx) == 1:
         results[task_idx[0]] = _run_tool_block(tool_uses[task_idx[0]], hooks)
     elif len(task_idx) > 1:
@@ -308,14 +392,14 @@ def _run_tool_turn(tool_uses, hooks):
     return results
 
 
-def _save_session_store(session_id: str | None, messages: list, llm_client, context, tool_call_count: int) -> None:
+def _save_session_store(session_id: str | None, messages: list, llm_client, context, tool_call_count: int, *, async_io: bool = False) -> None:
     """Best-effort save to the session store (alongside checkpoint.save)."""
     if session_id is None:
         return
     try:
         from loom.agent.session_store import SessionStore
         store = SessionStore(WORKDIR)
-        store.save_session(session_id, messages, llm_client, context, tool_call_count)
+        store.save_session(session_id, messages, llm_client, context, tool_call_count, async_io=async_io)
     except Exception:
         pass  # session store failures must never block the agent loop
 
@@ -356,6 +440,8 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
             from loom.agent.cost import reset_session_cost
             reset_session_cost()
             tool_call_count = 0
+            # P0-F: counter for unfinished_intent reminders (capped to avoid infinite loop)
+            unfinished_intent_count = 0
             tokens_at_last_checkpoint = context.current_tokens(messages)
             max_turns = _active_config.max_turns
             for _turn in range(max_turns):
@@ -476,9 +562,34 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                 messages.append({"role": "assistant", "content": response.content})
 
                 if response.stop_reason != "tool_use":
+                    # P0-F: 检测"未完成意图"——LLM 声明要做某事（"我来直接创建 CSS："）
+                    # 但本轮 0 工具调用就 end_turn 了。注入 system-reminder 强制继续。
+                    # 防死循环：最多注入 MAX_UNFINISHED_INTENT_REMINDERS 次。
+                    if tool_call_count > 0:
+                        from loom.agent.tool_errors import (
+                            MAX_UNFINISHED_INTENT_REMINDERS,
+                            build_unfinished_intent_guidance,
+                            detect_unfinished_intent,
+                        )
+                        matched = detect_unfinished_intent(response.content)
+                        if matched is not None and unfinished_intent_count < MAX_UNFINISHED_INTENT_REMINDERS:
+                            unfinished_intent_count += 1
+                            reminder = build_unfinished_intent_guidance(matched, unfinished_intent_count)
+                            messages.append({"role": "user", "content": reminder})
+                            if tr is not None:
+                                tr.record(
+                                    "unfinished_intent_reminder",
+                                    matched_tail=matched[:200],
+                                    attempt=unfinished_intent_count,
+                                )
+                            logger.warning(
+                                "unfinished_intent: matched={!r} attempt={}/{}",
+                                matched[:80], unfinished_intent_count, MAX_UNFINISHED_INTENT_REMINDERS,
+                            )
+                            continue
                     hooks.trigger_hooks("AgentStop", messages)
-                    checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
-                    _save_session_store(session_id, messages, llm_client, context, tool_call_count)
+                    checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count, async_io=True)
+                    _save_session_store(session_id, messages, llm_client, context, tool_call_count, async_io=True)
                     if tr is not None:
                         from loom.agent.cost import get_session_cost
                         sess = get_session_cost()
@@ -499,7 +610,21 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                         cb["on_tool_use"](block.name, block.input, block.id)
                 if tr is not None and tool_uses:
                     tr.record("tool_batch", tools=[b.name for b in tool_uses], size=len(tool_uses))
-                results = _run_tool_turn(tool_uses, hooks)
+                try:
+                    results = _run_tool_turn(tool_uses, hooks)
+                except Exception as exc:
+                    # P0-H safety net: _run_tool_block 已捕获工具异常，
+                    # 但 hooks (PreToolUse/PostToolUse) 仍可能抛出。
+                    # 如果此处抛出，messages.append(tool_result) 不执行，
+                    # 历史就会出现 "tool_calls 无 tool message" 的非法状态。
+                    # 合成全 error tool_results 保证历史合法。
+                    logger.error("_run_tool_turn raised; synthesizing error results: {}", exc)
+                    results = [
+                        {"type": "tool_result", "tool_use_id": b.id,
+                         "content": f"Error: _run_tool_turn raised {type(exc).__name__}: {exc}",
+                         "is_error": True}
+                        for b in tool_uses
+                    ]
                 if cb["on_tool_result"] is not None:
                     for r in results:
                         if r is not None:
@@ -511,8 +636,8 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                 ckpt_cfg = _active_config.checkpoint
                 if checkpoint.is_due(tool_call_count, new_tokens,
                                      ckpt_cfg.every_tool_calls, ckpt_cfg.every_tokens):
-                    saved_path = checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
-                    _save_session_store(session_id, messages, llm_client, context, tool_call_count)
+                    saved_path = checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count, async_io=True)
+                    _save_session_store(session_id, messages, llm_client, context, tool_call_count, async_io=True)
                     if tr is not None:
                         tr.record("checkpoint_save", path=str(saved_path),
                                   tool_calls=tool_call_count, new_tokens=new_tokens)
@@ -540,13 +665,20 @@ def agent_loop(messages: list, llm_client=None, callbacks: dict | None = None, s
                     ),
                 })
                 hooks.trigger_hooks("AgentStop", messages)
-                checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count)
-                _save_session_store(session_id, messages, llm_client, context, tool_call_count)
+                checkpoint.save(WORKDIR, messages, llm_client, context, tool_call_count, async_io=True)
+                _save_session_store(session_id, messages, llm_client, context, tool_call_count, async_io=True)
                 if cb["on_message_end"] is not None:
                     cb["on_message_end"](tool_call_count, len(messages))
                 trace_mod.stop()
                 return
     finally:
+        # L6: ensure all background checkpoint/session writes are durable
+        # before returning. Typically a no-op (writes finish during the
+        # next LLM call); only blocks if the disk is very slow.
+        try:
+            checkpoint.flush_pending_writes()
+        except Exception:
+            pass
         clear_active_callbacks()
 
 
@@ -1002,6 +1134,54 @@ def run_init_sh_on_session_end(
     thread.join()
 
 
+_REPL_ERROR_COLORS = {
+    "error": "\033[31m",      # red
+    "warning": "\033[33m",    # yellow
+    "info": "\033[36m",       # cyan
+}
+_RESET = "\033[0m"
+
+
+def _print_repl_error(exc: Exception) -> None:
+    """Print a friendly error to stderr instead of crashing the REPL.
+
+    Mirrors ``AgentTUIApp._handle_turn_exception``: classifies
+    ``ProviderError`` by code (auth / network / rate_limit / ...) and
+    prints a one-line actionable hint. Non-ProviderError exceptions are
+    printed with type + message. The REPL loop continues so the user
+    can retry after fixing the underlying issue (e.g. setting an API key).
+    """
+    from loom.agent.providers.types import ProviderError
+
+    code = getattr(exc, "code", "") or "" if isinstance(exc, ProviderError) else ""
+    msg = getattr(exc, "message", str(exc)) or str(exc)
+
+    if isinstance(exc, ProviderError):
+        if code in ("auth", "missing_credential"):
+            text = f"API key 缺失或无效：{msg}。请配置凭证后重试。"
+            severity = "error"
+        elif code == "rate_limit":
+            text = f"请求被限流：{msg}。请稍后重试。"
+            severity = "warning"
+        elif code in ("network", "timeout"):
+            text = f"网络错误：{msg}。请检查网络后重试。"
+            severity = "warning"
+        elif code == "context_overflow":
+            text = f"上下文超长：{msg}。请用 /clear 或 /compact 压缩对话。"
+            severity = "warning"
+        else:
+            text = f"模型调用失败（{code}）：{msg}"
+            severity = "error"
+    else:
+        text = f"agent_loop 异常：{type(exc).__name__}: {exc}"
+        severity = "error"
+
+    color = _REPL_ERROR_COLORS.get(severity, _REPL_ERROR_COLORS["error"])
+    import sys
+
+    print(f"{color}{text}{_RESET}", file=sys.stderr)
+
+
 def run_repl(resume: bool = False) -> None:
     apply_config(load_config(WORKDIR))
 
@@ -1034,7 +1214,14 @@ def run_repl(resume: bool = False) -> None:
             if query.strip().lower() in ("exit", ""):
                 break
             history.append({"role": "user", "content": query})
-            agent_loop(history)
+            try:
+                agent_loop(history)
+            except Exception as exc:
+                # Friendly error instead of crashing the REPL — mirrors
+                # AgentTUIApp._handle_turn_exception.  Keeps the REPL
+                # alive so the user can re-run after fixing credentials.
+                _print_repl_error(exc)
+                continue
             for msg in history:
                 for block in msg["content"]:
                     if getattr(block, "type", None) == "thinking":

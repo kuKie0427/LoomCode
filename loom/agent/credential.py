@@ -55,10 +55,20 @@ class CredentialManager:
 
     def __init__(self, auth_path: Path | None = None) -> None:
         self._auth_path = auth_path or (Path.home() / ".loom" / "auth.json")
+        # Bumped on every set/remove so callers can cache `get()` results
+        # and invalidate when credentials change (P0-3 perf fix: avoids
+        # StatusBar re-reading auth.json on every render).
+        self._version: int = 0
 
     @property
     def auth_path(self) -> Path:
         return self._auth_path
+
+    @property
+    def version(self) -> int:
+        """Bumped on every mutation (set/remove). Callers can cache `get()`
+        results keyed on this version and invalidate when it changes."""
+        return self._version
 
     # ------------------------------------------------------------------
     # Public surface
@@ -133,6 +143,7 @@ class CredentialManager:
             metadata=dict(info.metadata),
         )
         self._save_to_file(creds)
+        self._version += 1
 
     def remove(self, provider_id: str) -> None:
         """Delete a credential from auth.json."""
@@ -141,6 +152,7 @@ class CredentialManager:
         if norm in creds:
             del creds[norm]
             self._save_to_file(creds)
+            self._version += 1
 
     # ------------------------------------------------------------------
     # Private helpers

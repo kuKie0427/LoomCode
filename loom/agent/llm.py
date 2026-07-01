@@ -13,10 +13,13 @@ import os
 import threading
 from collections.abc import Iterator
 
+from loguru import logger
+
 from loom.agent.config import LLM_CONFIG
 from loom.agent.providers import (
     LLMProvider,
     PricingInfo,
+    ProviderError,
     ProviderRequest,
     ProviderResponse,
     StopReason,
@@ -215,7 +218,32 @@ class LLMClient:
             provider_options=self._provider_options,
         )
 
-        yield from self._provider.stream(request)
+        # L1: retry on transient provider errors (network / rate_limit / server 5xx).
+        # ProviderError.retryable gates whether we retry; once we've yielded any
+        # event to the caller we stop retrying — mid-stream errors can't be
+        # safely retried because partial output has already been consumed by
+        # the caller (TUI showed it / agent_loop appended it to content_blocks).
+        # Non-retryable errors (auth, invalid_request) propagate immediately.
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            emitted_any = False
+            try:
+                for ev in self._provider.stream(request):
+                    emitted_any = True
+                    yield ev
+                return  # stream completed successfully
+            except ProviderError as exc:
+                if not exc.retryable or emitted_any or attempt >= max_retries:
+                    raise
+                delay = min(2.0 ** attempt, 8.0)  # 1s, 2s, 4s capped at 8s
+                logger.warning(
+                    "LLM stream retryable error (attempt {}/{}): {} — retrying in {:.1f}s",
+                    attempt + 1, max_retries, exc, delay,
+                )
+                # Sleep on the cancel event so user cancellation wakes us
+                # immediately instead of waiting the full backoff delay.
+                if self._cancel_event.wait(delay):
+                    raise  # cancelled during backoff — re-raise ProviderError
 
     def invoke(
         self,
@@ -289,7 +317,6 @@ class LLMClient:
                         stop_reason = StopReason.END_TURN
             elif ev.kind == "error":
                 _flush_text()
-                from loom.agent.providers.types import ProviderError
                 raise ProviderError(
                     ev.error_code or "unknown",
                     ev.error_message or "provider error",
