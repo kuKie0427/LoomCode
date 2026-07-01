@@ -94,14 +94,16 @@ class TodoItem:
 class Subagent:
     """Mock representation of a running / finished subagent invocation.
 
-    The Header only stores summary state (id + state + elapsed) — the full
-    subagent transcript lives in the ChatLog, so the overlay row is
-    "summary only" per spec §4.3.2.
+    The Header only stores summary state (id + state + elapsed + agent_name)
+    — the full subagent transcript lives in the ChatLog, so the overlay row
+    is "summary only" per spec §4.3.2. ``agent_name`` is the weaving-themed
+    display name (织针 / 飞梭 / 经线 / 织补 / 验布).
     """
 
     id: str
     state: Literal["running", "done", "error"]
     elapsed: str
+    agent_name: str = "织针"
 
 
 @dataclass
@@ -771,7 +773,7 @@ class HeaderOverlay(Widget):
                 }[sub.state]
                 row = (
                     f"{_subagent_glyph_rich(row_glyph, sub.state)} "
-                    f"[$secondary]{sub.id}[/]  "
+                    f"[$secondary]{sub.agent_name}[/]  "
                     f"[$text-muted]· {sub.state}[/]  "
                     f"[$text-muted]· {sub.elapsed}[/]"
                 )

@@ -52,6 +52,23 @@ class TestSubagentMarker:
         assert not marker.has_class("marker-done")
         assert not marker.has_class("marker-error")
 
+    def test_default_agent_name_is_weaving_needle(self):
+        """SubagentMarker defaults to 织针 (task tool's weaving name)."""
+        marker = SubagentMarker("id1", "do work")
+        assert marker.agent_name == "织针"
+        rendered = str(marker.render())
+        assert "织针" in rendered
+
+    def test_custom_agent_name_shown_in_marker(self):
+        """SubagentMarker displays the weaving name (飞梭 / 经线 / 织补 / 验布)."""
+        marker = SubagentMarker("id1", "find bug", agent_name="飞梭")
+        rendered = str(marker.render())
+        assert "飞梭" in rendered
+        assert "find bug" in rendered
+        assert "task" not in rendered, (
+            f"marker should show weaving name, not 'task': {rendered!r}"
+        )
+
 
 # ── ChatLog.add_subagent_marker ───────────────────────────────────────────────
 
@@ -121,6 +138,18 @@ class TestCompleteSubagentMarker:
             log_no_async.complete_subagent_marker("id1", 125.0, "done")
             text = mock_update.call_args[0][0]
             assert "125s" in text
+
+    def test_done_text_uses_weaving_agent_name(self, log_no_async):
+        """complete_subagent_marker renders the weaving name, not 'task'."""
+        log_no_async.add_subagent_marker("id1", "extract", agent_name="飞梭")
+        marker = log_no_async._subagent_markers["id1"]
+        with patch.object(marker, "update") as mock_update:
+            log_no_async.complete_subagent_marker("id1", 5.0, "done")
+            text = mock_update.call_args[0][0]
+            assert "飞梭" in text
+            assert "task" not in text, (
+                f"complete text should use weaving name, not 'task': {text!r}"
+            )
 
 
 # ── ChatLog.emit_todo_note ────────────────────────────────────────────────────
@@ -223,6 +252,24 @@ class TestSubagentMarkerDescriptionProperty:
     def test_description_property_empty_string(self):
         marker = SubagentMarker("id1", "")
         assert marker.description == ""
+
+
+# ── Main agent (Orchestrator) display name ────────────────────────────────────
+
+
+class TestMainAgentName:
+    def test_main_agent_name_is_weaving_beam(self):
+        """The main agent (Orchestrator) is 织轴 (warp beam)."""
+        from loom.agent.subagent_templates import MAIN_AGENT_NAME
+
+        assert MAIN_AGENT_NAME == "织轴"
+
+    def test_chat_log_imports_main_agent_name(self):
+        """ChatLog module imports MAIN_AGENT_NAME for the assistant turn label."""
+        from loom.tui import chat_log as chat_log_mod
+
+        assert hasattr(chat_log_mod, "MAIN_AGENT_NAME")
+        assert chat_log_mod.MAIN_AGENT_NAME == "织轴"
 
 
 # ── LOW-5: add_subagent_marker replaces old widget in DOM ─────────────────────

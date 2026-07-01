@@ -117,7 +117,7 @@ class TestRunRoutesToGoTuiWhenPresent:
             with patch("pathlib.Path.exists", return_value=True):
                 with patch("os.execvp") as mock_execvp:
                     with patch("loom.tui.app.AgentTUIApp") as mock_app:
-                        rc = cli_mod.main(["run"])
+                        cli_mod.main(["run"])
         mock_execvp.assert_called_once()
         # First arg is the binary path; second is the argv list.
         argv = mock_execvp.call_args[0][1]
@@ -144,7 +144,7 @@ class TestRunRoutesToGoTuiWhenPresent:
             with patch("pathlib.Path.exists", return_value=True):
                 with patch("os.execvp") as mock_execvp:
                     with patch("loom.agent.run_repl") as mock_repl:
-                        rc = cli_mod.main(["run", "--plain"])
+                        cli_mod.main(["run", "--plain"])
         mock_repl.assert_called_once()
         mock_execvp.assert_not_called()
 

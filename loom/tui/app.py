@@ -314,7 +314,7 @@ class AgentTUIApp(App):
             result.append(TodoItem(text=content, state=state))
         return result
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         """Capture the main event loop for cross-thread async dispatch."""
         self._main_loop = asyncio.get_running_loop()
         self.query_one("#composer", Composer).focus()
@@ -337,8 +337,22 @@ class AgentTUIApp(App):
             pass
         self.set_interval(1.0, self._tick_shuttle, name="shuttle-tick")
         self.set_interval(3.0, self._resync_mcp_state, name="mcp-sync")
-        self._detect_git_branch()
-        self._check_credentials_on_startup()
+        # Off-main-thread: git subprocess + credential file I/O used to
+        # block startup for 1-3s on large repos / network filesystems.
+        # Run them concurrently and await both (P0-4/P0-5 perf fix).
+        # _check_credentials_on_startup is skipped under the test harness
+        # (_skip_welcome) because it reads the global CredentialManager
+        # singleton whose state depends on test execution order — an empty
+        # credential store would push ConnectProviderModal on top of the
+        # layout, intercepting keyboard bindings and altering snapshots.
+        # Tests exercise it directly via _check_credentials_on_startup().
+        if self._skip_welcome:
+            await self._detect_git_branch()
+        else:
+            await asyncio.gather(
+                self._detect_git_branch(),
+                self._check_credentials_on_startup(),
+            )
         # Push the full-screen centered welcome page on top of the empty
         # layout.  Dismissed when the user types Enter (or ESC to skip).
         # Skipped when _skip_welcome is set (used by test harness).
@@ -539,9 +553,13 @@ class AgentTUIApp(App):
             return
         status_bar.shuttle_phase = (status_bar.shuttle_phase + 1) % 3
 
-    def _detect_git_branch(self) -> None:
+    async def _detect_git_branch(self) -> None:
+        # Run the blocking subprocess off the main event loop so the TUI
+        # stays responsive during startup (P0-4 perf fix). On large repos
+        # or network filesystems, `git rev-parse` can take hundreds of ms.
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
                 capture_output=True,
                 text=True,
@@ -557,7 +575,7 @@ class AgentTUIApp(App):
         except Exception:
             pass
 
-    def _check_credentials_on_startup(self) -> None:
+    async def _check_credentials_on_startup(self) -> None:
         """If no provider credentials are configured, auto-prompt the user.
 
         Runs once at TUI mount. Reads ``CredentialManager.all()`` — if the
@@ -572,12 +590,16 @@ class AgentTUIApp(App):
         on the screen stack (e.g. from a prior ``/connect`` slash command),
         skip. This makes the startup hook idempotent against any future
         re-entry path.
+
+        The credential lookup is run off the main event loop (P0-5 perf fix)
+        because it reads ``~/.loom/auth.json`` + parses JSON, which can block
+        on network/encrypted home directories.
         """
         from loom.agent.credential import credentials  # lazy: avoid circular
         from loom.tui.connect_provider import ConnectProviderModal  # lazy
 
         try:
-            configured = credentials.all()
+            configured = await asyncio.to_thread(credentials.all)
         except Exception:
             # Credential lookup is best-effort — never block startup on a
             # credential backend failure (keyring, malformed file, etc.).
@@ -737,32 +759,51 @@ class AgentTUIApp(App):
         # indicator when thinking content is present.
         chat_log = self.query_one(ChatLog)
         chat_log._reset_thinking_state()
+        # Mount the "▎ 织轴" turn label so the main agent's weaving
+        # name is visible for every assistant turn (not just when
+        # thinking deltas arrive). Idempotent via _assistant_label_mounted.
+        chat_log.mount_assistant_label()
+        # Engine state transitions happen here on the main thread
+        # (P0-2 perf fix: previously these were called from the worker
+        # thread's callback lambdas, which is unsafe — reactive setters
+        # and query_one DOM walks are not thread-safe in Textual).
+        self._set_engine_state("thinking")
+        self._sync_chat_engine_state("thinking")
 
     def on_text_delta(self, message: TextDelta) -> None:
         chat_log = self.query_one(ChatLog)
         chat_log.append_streaming_text(message.text)
+        self._set_engine_state("streaming")
 
     def on_thinking_delta(self, message: ThinkingDelta) -> None:
         chat_log = self.query_one(ChatLog)
         chat_log.append_thinking_text(message.text)
+        self._set_engine_state("thinking")
 
     def on_tool_use_started(self, message: ToolUseStarted) -> None:
         chat_log = self.query_one(ChatLog)
         chat_log.add_tool_call_inline(
             message.tool_name, message.tool_input, message.tool_use_id
         )
+        self._set_engine_state("executing")
+        self._sync_chat_engine_state("executing")
 
     def on_tool_use_completed(self, message: ToolUseCompleted) -> None:
         chat_log = self.query_one(ChatLog)
         chat_log.complete_tool_call_inline(
             message.tool_use_id, message.output, message.is_error
         )
+        new_state: EngineState = "error" if message.is_error else "executing"
+        self._set_engine_state(new_state)
+        self._sync_chat_engine_state(new_state)
 
     def on_compact_occurred(self, message: CompactOccurred) -> None:
         chat_log = self.query_one(ChatLog)
         chat_log.append_system_note(
             f"[Compacted: {message.msgs_before} → {message.msgs_after} messages]"
         )
+        self._set_engine_state("compacting")
+        self._sync_chat_engine_state("compacting")
         self._refresh_ctx_tokens()
 
     def on_assistant_turn_end(self, message: AssistantTurnEnd) -> None:
@@ -770,6 +811,8 @@ class AgentTUIApp(App):
         chat_log = self.query_one(ChatLog)
         chat_log._finalize_streaming()
         chat_log.append_assistant_summary(self.llm.model, message.duration)
+        self._set_engine_state("idle")
+        self._sync_chat_engine_state("idle")
         self._refresh_ctx_tokens()
 
     def _refresh_ctx_tokens(self) -> None:
@@ -792,13 +835,20 @@ class AgentTUIApp(App):
         chat_log.emit_todo_note(summary)
 
     def on_subagent_start(self, message: SubagentStart) -> None:
-        """f-tui-header-backend-wiring: a subagent was spawned (task tool called)."""
+        """f-tui-header-backend-wiring: a subagent was spawned (task / task_* / review)."""
         self._header_state.subagents.append(
-            Subagent(id=message.subagent_id, state="running", elapsed="0s")
+            Subagent(
+                id=message.subagent_id,
+                state="running",
+                elapsed="0s",
+                agent_name=message.agent_name,
+            )
         )
         self.query_one(Header).update_state(self._header_state)
         chat_log = self.query_one(ChatLog)
-        chat_log.add_subagent_marker(message.subagent_id, message.description)
+        chat_log.add_subagent_marker(
+            message.subagent_id, message.description, message.agent_name
+        )
 
     def on_subagent_end(self, message: SubagentEnd) -> None:
         """f-tui-header-backend-wiring: subagent finished (done or error)."""
@@ -941,51 +991,39 @@ class AgentTUIApp(App):
         callbacks = {
             "on_message_start": lambda: (
                 self.post_message(AssistantTurnStart()),
-                self._set_engine_state("thinking"),
                 setattr(self, "_turn_start", time.monotonic()),  # type: ignore[func-returns-value]
             ),
             "on_assistant_message_start": lambda: (
                 self.post_message(AssistantTurnStart()),
-                self._set_engine_state("thinking"),
             ),
             "on_text_delta": lambda chunk: (
                 self.post_message(TextDelta(chunk)),
-                self._set_engine_state("streaming"),
             ),
             "on_thinking_delta": lambda chunk: (
                 self.post_message(ThinkingDelta(chunk)),
-                self._set_engine_state("thinking"),
             ),
             "on_tool_use": lambda name, inp, uid: (
                 self.post_message(ToolUseStarted(name, inp, uid)),
-                self._set_engine_state("executing"),
-                self._sync_chat_engine_state("executing"),
             ),
             "on_tool_result": lambda uid, out, err: (
                 self.post_message(ToolUseCompleted(uid, out, err)),
-                self._set_engine_state("error" if err else "executing"),
-                self._sync_chat_engine_state("error" if err else "executing"),
             ),
             "on_compact": lambda before, after: (
                 self.post_message(CompactOccurred(before, after)),
-                self._set_engine_state("compacting"),
-                self._sync_chat_engine_state("compacting"),
             ),
             "on_message_end": lambda calls, turns: (
                 self.post_message(AssistantTurnEnd(
                     calls, turns,
                     time.monotonic() - getattr(self, "_turn_start", time.monotonic()),
                 )),
-                self._set_engine_state("idle"),
-                self._sync_chat_engine_state("idle"),
             ),
             # f-tui-header-backend-wiring: cross-thread bridge for todo /
             # subagent state. Callbacks fire from the worker thread inside
             # agent_loop → fire_callback (loop.py) → these lambdas →
             # post_message (thread-safe) → main thread handlers below.
             "on_todo_update": lambda todos: self.post_message(TodoUpdate(list(todos))),
-            "on_subagent_start": lambda sid, desc: self.post_message(
-                SubagentStart(sid, desc)
+            "on_subagent_start": lambda sid, desc, agent_name="织针": self.post_message(
+                SubagentStart(sid, desc, agent_name)
             ),
             "on_subagent_end": lambda sid, elapsed, state: self.post_message(
                 SubagentEnd(sid, elapsed, state)
@@ -999,14 +1037,82 @@ class AgentTUIApp(App):
         # Lazily create a session_id if none is set yet.
         if self._session_id is None:
             self._start_new_session()
-        await asyncio.to_thread(
-            agent_loop,
-            self.history,
-            self.llm,
-            callbacks,
-            self.llm.stream_iter,
-            self._session_id,
-        )
+        try:
+            await asyncio.to_thread(
+                agent_loop,
+                self.history,
+                self.llm,
+                callbacks,
+                self.llm.stream_iter,
+                self._session_id,
+            )
+        except Exception as exc:
+            # ProviderError (auth / network / server / ...) or any other
+            # exception from agent_loop — display a friendly message in
+            # the ChatLog instead of crashing the worker (which would
+            # leave the TUI stuck in "thinking" state).
+            await self._handle_turn_exception(exc)
+
+    async def _handle_turn_exception(self, exc: Exception) -> None:
+        """Display a provider/agent error as a friendly SystemNote + notification.
+
+        Distinguishes auth/credential failures (actionable: "set your API key")
+        from transient failures (network/server/rate-limit) and generic errors.
+        Always resets the engine state to idle and finalizes streaming so the
+        TUI is not left stuck in a "thinking" state.
+        """
+        from loom.agent.providers.types import ProviderError
+
+        # Always: finalize streaming + reset engine state so the UI recovers.
+        try:
+            chat_log = self.query_one(ChatLog)
+            chat_log._force_flush_stream_buffer()
+            chat_log._finalize_streaming()
+            chat_log._dismiss_thinking_widget()
+        except Exception:
+            pass
+        self._set_engine_state("idle")
+        self._sync_chat_engine_state("idle")
+
+        # Build the user-facing message.
+        provider_id = getattr(self.llm, "provider_id", "") or ""
+        model_id = getattr(self.llm, "model_id", "") or ""
+        model_label = f"{provider_id}/{model_id}" if provider_id else "current model"
+
+        if isinstance(exc, ProviderError):
+            code = getattr(exc, "code", "") or ""
+            msg = getattr(exc, "message", str(exc)) or str(exc)
+            if code in ("auth", "missing_credential"):
+                text = (
+                    f"无法连接到 {model_label}：API key 缺失或无效（{msg}）。\n"
+                    f"请通过 /connect 命令或设置环境变量配置 {provider_id} 的凭证。"
+                )
+                severity = "error"
+            elif code == "rate_limit":
+                text = f"请求被限流（{model_label}）：{msg}。请稍后重试。"
+                severity = "warning"
+            elif code in ("network", "timeout"):
+                text = f"网络错误（{model_label}）：{msg}。请检查网络后重试。"
+                severity = "warning"
+            elif code == "context_overflow":
+                text = f"上下文超长（{model_label}）：{msg}。请用 /clear 或 /compact 压缩对话。"
+                severity = "warning"
+            else:
+                text = f"模型调用失败（{model_label}，{code}）：{msg}"
+                severity = "error"
+        else:
+            text = f"agent_loop 异常：{type(exc).__name__}: {exc}"
+            severity = "error"
+
+        # Show inline SystemNote in the ChatLog. We call append_system_note
+        # directly (rather than posting ShowNotification) because the TUI
+        # may be mid-render and the message pump can delay the notification
+        # past the user's expectation. Direct mount is synchronous-scheduled.
+        try:
+            chat_log = self.query_one(ChatLog)
+            chat_log.append_system_note(text, severity=severity)
+        except Exception:
+            logger.warning("Failed to show turn error: {}", text)
 
     # ------------------------------------------------------------------
     # Session history management

@@ -738,6 +738,31 @@ def test_app_on_subagent_start_appends_running_subagent():
     asyncio.run(driver())
 
 
+def test_app_on_subagent_start_threads_weaving_agent_name():
+    """on_subagent_start passes the weaving-themed agent_name through to the
+    Header Subagent dataclass (织针 / 飞梭 / 经线 / 织补 / 验布)."""
+    async def driver():
+        app = AgentTUIApp()
+        async with app.run_test() as pilot:
+            await pilot.pause(0.05)
+            # Default (task tool) → 织针
+            app.on_subagent_start(SubagentStart("sa-task", "do stuff"))
+            # investigate_code → 飞梭
+            app.on_subagent_start(SubagentStart("sa-invest", "find bug", agent_name="飞梭"))
+            # review → 验布
+            app.on_subagent_start(SubagentStart("sa-review", "review feat", agent_name="验布"))
+            await pilot.pause(0.05)
+            state = app._header_state
+            assert len(state.subagents) == 3
+            assert state.subagents[0].agent_name == "织针", (
+                f"default agent_name should be 织针, got {state.subagents[0].agent_name!r}"
+            )
+            assert state.subagents[1].agent_name == "飞梭"
+            assert state.subagents[2].agent_name == "验布"
+
+    asyncio.run(driver())
+
+
 def test_app_on_subagent_end_updates_existing_subagent():
     async def driver():
         app = AgentTUIApp()

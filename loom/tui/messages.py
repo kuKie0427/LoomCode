@@ -82,12 +82,17 @@ class TodoUpdate(Message):
 
 
 class SubagentStart(Message):
-    """Posted when a subagent begins (task tool called)."""
+    """Posted when a subagent begins (task / task_* / review tool called).
 
-    def __init__(self, subagent_id: str, description: str) -> None:
+    ``agent_name`` is the weaving-themed display name (织针 / 飞梭 / 经线 /
+    织补 / 验布) used by the ChatLog SubagentMarker and the Header overlay.
+    """
+
+    def __init__(self, subagent_id: str, description: str, agent_name: str = "织针") -> None:
         super().__init__()
         self.subagent_id = subagent_id
         self.description = description
+        self.agent_name = agent_name
 
 
 class SubagentEnd(Message):

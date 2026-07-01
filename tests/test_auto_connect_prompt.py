@@ -6,6 +6,7 @@ AuthInputModal, and the stream error hint appended by loop.py.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock, PropertyMock, patch
 
 from loom.tui.auth_input import AuthInputModal
@@ -28,7 +29,7 @@ def test_startup_with_no_credentials_pushes_modal() -> None:
         patch("loom.agent.credential.credentials.all", return_value={}),
         patch.object(app, "push_screen") as mock_push,
     ):
-        app._check_credentials_on_startup()
+        asyncio.run(app._check_credentials_on_startup())
 
     mock_push.assert_called_once()
     args, _ = mock_push.call_args
@@ -52,7 +53,7 @@ def test_startup_with_credentials_does_not_push_modal() -> None:
         ),
         patch.object(app, "push_screen") as mock_push,
     ):
-        app._check_credentials_on_startup()
+        asyncio.run(app._check_credentials_on_startup())
 
     mock_push.assert_not_called()
 

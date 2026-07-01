@@ -69,8 +69,10 @@ class TestNormalizeForStream:
 
     def test_single_newlines_become_spaces(self):
         # Original bug: each word on its own line
+        # CJK chars merge without spaces (see test_cjk_newline_fix.py);
+        # only ASCII letters get a space inserted.
         text = "我要\n读\n哪些\n文档？"
-        assert _normalize_for_stream(text) == "我要 读 哪些 文档？"
+        assert _normalize_for_stream(text) == "我要读哪些文档？"
 
     def test_double_newlines_preserved(self):
         text = "para1\n\npara2"
@@ -78,7 +80,7 @@ class TestNormalizeForStream:
 
     def test_mixed_paragraphs(self):
         text = "我要\n读\n文档？\n\n如果要全部读完。"
-        expected = "我要 读 文档？\n\n如果要全部读完。"
+        expected = "我要读文档？\n\n如果要全部读完。"
         assert _normalize_for_stream(text) == expected
 
     def test_table_preserves_newlines(self):

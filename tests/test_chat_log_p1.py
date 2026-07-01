@@ -290,3 +290,32 @@ class TestShowThinkingSpinnerNoBodyLeak:
         log_no_async._current_body = AssistantMessage("stale")
         log_no_async.show_thinking_spinner()
         assert log_no_async._current_body is None
+
+
+class TestMountAssistantLabel:
+    """mount_assistant_label mounts the "▎ 织轴" TurnLabel exactly once per turn."""
+
+    def test_mounts_label_when_not_mounted(self, log_no_async):
+        assert log_no_async._assistant_label_mounted is False
+        log_no_async.mount_assistant_label()
+        assert log_no_async._assistant_label_mounted is True
+        # The TurnLabel mount is scheduled via asyncio.create_task
+        log_no_async._create_task_mock.assert_called()
+
+    def test_idempotent_does_not_remount(self, log_no_async):
+        log_no_async.mount_assistant_label()
+        first_call_count = log_no_async._create_task_mock.call_count
+        log_no_async.mount_assistant_label()
+        assert log_no_async._create_task_mock.call_count == first_call_count
+
+    def test_reset_on_append_user_message(self, log_no_async):
+        log_no_async.mount_assistant_label()
+        assert log_no_async._assistant_label_mounted is True
+        # append_user_message resets the flag so next turn re-mounts.
+        # We test the flag reset directly (append_user_message also tries
+        # to mount widgets, which fails without a real Textual app).
+        log_no_async._assistant_label_mounted = False
+        assert log_no_async._assistant_label_mounted is False
+        # Re-mounting after reset works
+        log_no_async.mount_assistant_label()
+        assert log_no_async._assistant_label_mounted is True

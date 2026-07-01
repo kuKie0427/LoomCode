@@ -19,6 +19,8 @@ from textual.events import Click, Key
 from textual.reactive import reactive
 from textual.widgets import Markdown, Static
 
+from loom.agent.subagent_templates import MAIN_AGENT_NAME
+
 MAX_TOOL_OUTPUT_LINES = 30
 _HEAD_LINES = 15
 _TAIL_LINES = 15
@@ -64,14 +66,47 @@ def _is_structured_line(line: str) -> bool:
     return False
 
 
+def _needs_space_between(prev: str, next: str) -> bool:
+    """Return True if a space is needed between ``prev`` and ``next`` char
+    when joining two lines that were separated by a single ``\\n``.
+
+    The goal: merge LLM stream chunks split by ``\\n`` back into one line,
+    inserting a space ONLY when both sides are ASCII letters — this
+    prevents merging English words (``"hello\\nworld" → "hello world"``).
+    For CJK characters, digits, punctuation, or any mixed junction,
+    no space is needed:
+
+    - ``"已\\n创"`` → ``"已创"``    (CJK, no space)
+    - ``"215\\n66"`` → ``"21566"``  (digits, no space — prevents splitting numbers)
+    - ``"JS\\n已"`` → ``"JS已"``     (ASCII + CJK, no space)
+    - ``"hello\\nworld"`` → ``"hello world"``  (ASCII letters, space)
+
+    Without this, the old ``" ".join(lines)`` behavior inserted spaces
+    between every CJK token, causing Static word-wrap to break Chinese
+    text every few characters.
+    """
+    if not prev or not next:
+        return False
+    # Both ASCII letters → need space to avoid merging English words
+    if prev.isascii() and prev.isalpha() and next.isascii() and next.isalpha():
+        return True
+    # Everything else (CJK, digits, punctuation, mixed) → join directly
+    return False
+
+
 def _normalize_for_stream(text: str) -> str:
     """Normalize text for Markdown streaming.
 
-    Single newlines within plain paragraphs become spaces (Markdown
-    treats them as line breaks otherwise).  Double newlines are
-    preserved as paragraph breaks.  Structured content (tables, lists,
-    headers, code blocks, blockquotes) keeps its newlines so the
-    Markdown parser can detect the structure.
+    Single newlines within plain paragraphs are merged into one line.
+    Double newlines are preserved as paragraph breaks.  Structured
+    content (tables, lists, headers, code blocks, blockquotes) keeps
+    its newlines so the Markdown parser can detect the structure.
+
+    When merging single newlines, a space is inserted ONLY between two
+    ASCII letters (see ``_needs_space_between``). CJK text, digits, and
+    punctuation join directly without a space — this prevents the
+    "every-few-Chinese-chars-on-its-own-line" word-wrap bug caused by
+    stray spaces between CJK tokens.
     """
     if "\n" not in text:
         return text
@@ -82,8 +117,19 @@ def _normalize_for_stream(text: str) -> str:
     # If this paragraph contains any structured line, preserve as-is
     if any(_is_structured_line(ln) for ln in lines):
         return text
-    # Plain paragraph: single newlines → spaces
-    return " ".join(ln for ln in lines if ln)
+    # Plain paragraph: merge single newlines with smart spacing
+    result = ""
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if result:
+            prev_char = result[-1]
+            next_char = line[0]
+            if _needs_space_between(prev_char, next_char):
+                result += " "
+        result += line
+    return result
 
 
 def _truncate(text: str) -> str:
@@ -245,6 +291,7 @@ class StreamingOverlay(Static):
 
     DEFAULT_CSS = """
     StreamingOverlay {
+        width: 1fr;
         background: $background;
         color: $text;
         padding: 0 2;
@@ -266,6 +313,7 @@ class StreamingOverlay(Static):
 class SystemNote(Static):
     DEFAULT_CSS = """
     SystemNote {
+        width: 1fr;
         height: auto;
         color: $text-muted;
         text-style: italic dim;
@@ -291,6 +339,7 @@ class AssistantSummary(Static):
 
     DEFAULT_CSS = """
     AssistantSummary {
+        width: 1fr;
         height: auto;
         padding: 0 2;
         margin: 0 0 1 0;
@@ -564,15 +613,21 @@ class SubagentMarker(Static):
     }
     """
 
-    def __init__(self, subagent_id: str, description: str, **kwargs: Any) -> None:
-        super().__init__(f"◐ task: {description}", **kwargs)
+    def __init__(self, subagent_id: str, description: str, agent_name: str = "织针", **kwargs: Any) -> None:
+        super().__init__(f"◐ {agent_name}: {description}", **kwargs)
         self._subagent_id = subagent_id
         self._description = description
+        self._agent_name = agent_name
 
     @property
     def description(self) -> str:
         """The task description shown in the marker text."""
         return self._description
+
+    @property
+    def agent_name(self) -> str:
+        """The weaving-themed agent display name (织针 / 飞梭 / 经线 / 织补 / 验布)."""
+        return self._agent_name
 
 
 class ToolCallMarker(Static):
@@ -731,6 +786,13 @@ class ChatLog(VerticalScroll):
         self._stream_full_text: str = ""
         self._stream_flush_timer: Any = None
         self._STREAM_FLUSH_INTERVAL = 0.05
+        # Thinking-text flush state — mirrors _stream_full_text/_stream_flush_timer
+        # but for ThinkingDelta chunks. Without throttling, extended-thinking
+        # models emit hundreds of chunks/second and each one triggers an
+        # expensive Markdown.update (full re-parse). 50ms batching keeps
+        # the main thread responsive (P0-1 perf fix).
+        self._thinking_flush_timer: Any = None
+        self._THINKING_FLUSH_INTERVAL = 0.05
         return iter(())
 
     async def append_user_message(self, text: str) -> None:
@@ -762,6 +824,18 @@ class ChatLog(VerticalScroll):
         self._thinking_reasoning = ""
         self._thinking_display = None
 
+    def mount_assistant_label(self) -> None:
+        """Mount the "▎ 织轴" TurnLabel for the main agent if not already mounted.
+
+        Idempotent via ``_assistant_label_mounted`` — safe to call from
+        ``on_assistant_turn_start`` for every LLM call within a turn;
+        the label is mounted once per turn and reset by
+        ``_finalize_streaming`` / ``append_user_message``.
+        """
+        if not self._assistant_label_mounted:
+            asyncio.create_task(self._mount_async(TurnLabel(f"▎ {MAIN_AGENT_NAME}", classes="role-assistant")))
+            self._assistant_label_mounted = True
+
     def show_thinking_spinner(self) -> None:
         if self._thinking_widget is not None and not self._thinking_widget._complete:
             return
@@ -769,9 +843,7 @@ class ChatLog(VerticalScroll):
             self._thinking_display.display = False
         self._dismiss_thinking_widget()
         self._current_body = None
-        if not self._assistant_label_mounted:
-            asyncio.create_task(self._mount_async(TurnLabel("▎ assistant", classes="role-assistant")))
-            self._assistant_label_mounted = True
+        self.mount_assistant_label()
         self._thinking_reasoning = ""
         self._thinking_display = None
         self._mount_thinking_widget()
@@ -818,6 +890,9 @@ class ChatLog(VerticalScroll):
         self._thinking_widget.update_spinner(_SPINNER_FRAMES[self._spinner_idx])
 
     def _dismiss_thinking_widget(self) -> None:
+        # Flush any pending thinking text before tearing down the marker,
+        # so the final thinking content is visible in the toggle.
+        self._force_flush_thinking_buffer()
         if self._thinking_widget is not None:
             if self._spinner_timer is not None:
                 self._spinner_timer.stop()
@@ -841,10 +916,43 @@ class ChatLog(VerticalScroll):
                 self._thinking_widget._display = display
                 # display stays False (default) — marker toggles it.
             asyncio.create_task(self._mount_thinking_display(display))
+            # Schedule the first content flush so the display isn't blank
+            # until the next chunk arrives.
+            self._start_thinking_flush_timer()
         else:
-            # Markdown.update() returns AwaitComplete; schedule via async wrapper
-            # so the AwaitComplete is actually awaited (rule #16). Sync call leaves
-            # the Markdown half-rendered and the click toggle cannot show content.
+            # Already mounted — just ensure the flush timer is running.
+            # Each chunk only appends to _thinking_reasoning; the actual
+            # Markdown.update (expensive) happens in _flush_thinking_buffer
+            # at most once per 50ms.
+            self._start_thinking_flush_timer()
+
+    def _start_thinking_flush_timer(self) -> None:
+        """Ensure the thinking flush timer is running (50ms batched update)."""
+        if self._thinking_flush_timer is None:
+            self._thinking_flush_timer = self.set_interval(
+                self._THINKING_FLUSH_INTERVAL, self._flush_thinking_buffer
+            )
+
+    def _flush_thinking_buffer(self) -> None:
+        """Batched update of the thinking Markdown display.
+
+        Called every 50ms while thinking chunks are arriving. Coalesces
+        all accumulated chunks into a single Markdown.update, avoiding
+        per-token re-parse overhead (P0-1 perf fix).
+        """
+        if self._thinking_display is not None and self._thinking_reasoning:
+            asyncio.create_task(
+                self._update_thinking_display(
+                    _normalize_for_stream(self._thinking_reasoning)
+                )
+            )
+
+    def _force_flush_thinking_buffer(self) -> None:
+        """Flush pending thinking text immediately and stop the timer."""
+        if self._thinking_flush_timer is not None:
+            self._thinking_flush_timer.stop()
+            self._thinking_flush_timer = None
+        if self._thinking_display is not None and self._thinking_reasoning:
             asyncio.create_task(
                 self._update_thinking_display(
                     _normalize_for_stream(self._thinking_reasoning)
@@ -949,14 +1057,14 @@ class ChatLog(VerticalScroll):
         if self._sticky:
             self.scroll_end()
 
-    def add_subagent_marker(self, subagent_id: str, description: str) -> None:
+    def add_subagent_marker(self, subagent_id: str, description: str, agent_name: str = "织针") -> None:
         self._force_flush_stream_buffer()
         self._finalize_streaming()
         self._current_body = None
         existing = self._subagent_markers.get(subagent_id)
         if existing is not None:
             asyncio.create_task(self._remove_async(existing))
-        marker = SubagentMarker(subagent_id, description)
+        marker = SubagentMarker(subagent_id, description, agent_name)
         self._subagent_markers[subagent_id] = marker
         asyncio.create_task(self._mount_async(marker))
         if self._sticky:
@@ -969,11 +1077,12 @@ class ChatLog(VerticalScroll):
         if marker is None:
             return
         elapsed_str = f"{elapsed:.1f}s" if elapsed < 60 else f"{int(elapsed)}s"
+        name = marker.agent_name
         if state == "done":
-            marker.update(f"◑ task: {marker.description} · done {elapsed_str}")
+            marker.update(f"◑ {name}: {marker.description} · done {elapsed_str}")
             marker.add_class("marker-done")
         else:
-            marker.update(f"⊗ task: {marker.description} · error {elapsed_str}")
+            marker.update(f"⊗ {name}: {marker.description} · error {elapsed_str}")
             marker.add_class("marker-error")
         if self._sticky:
             self.scroll_end()
@@ -1036,7 +1145,7 @@ class ChatLog(VerticalScroll):
         self._assistant_label_mounted = False
         self._stream_full_text = ""
         self._sticky = True
-        label = TurnLabel("▎ assistant", classes="role-assistant")
+        label = TurnLabel(f"▎ {MAIN_AGENT_NAME}", classes="role-assistant")
         body = AssistantMessage(text)
         await self.mount(label)
         await self.mount(body)

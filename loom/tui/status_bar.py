@@ -153,15 +153,18 @@ def _render_line(
     phase: int,
     git_branch: str,
     available: int,
+    has_creds: bool,
 ) -> str:
     """Build status bar content that fits within *available* visible cells.
 
     Tries compact levels from most verbose to most compact until the
     visible width (after stripping Rich markup) fits.
+
+    ``has_creds`` is passed in (rather than read from disk here) so the
+    caller can cache it — reading auth.json on every render is a P0 perf
+    bottleneck (P0-3 perf fix).
     """
     model = getattr(getattr(app, "llm", None), "model", "?")
-    pid, _ = parse_model_id(model)
-    has_creds = credentials.get(pid) is not None
     turns = getattr(app, "user_turn_count", 0)
     tools = getattr(app, "tool_call_count", 0)
     is_active = engine_state != "idle"
@@ -288,10 +291,31 @@ class StatusBar(Static):
     engine_state: reactive[EngineState] = reactive("idle")
     shuttle_phase: reactive[int] = reactive(0)
 
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+        # Credential cache (P0-3 perf fix): avoid reading auth.json on
+        # every render. Invalidated when CredentialManager.version changes
+        # (bumped on set/remove) or when the model/provider changes.
+        self._creds_cache: dict[str, bool] = {}
+        self._creds_cache_version: int = -1
+
+    def _get_has_creds(self, provider_id: str) -> bool:
+        """Cached credential lookup. Re-reads only when cred version changes."""
+        current_version = credentials.version
+        if current_version != self._creds_cache_version:
+            self._creds_cache.clear()
+            self._creds_cache_version = current_version
+        if provider_id not in self._creds_cache:
+            self._creds_cache[provider_id] = credentials.get(provider_id) is not None
+        return self._creds_cache[provider_id]
+
     def render(self) -> str:
         app = self.app
         # Content area: widget width minus CSS padding (0 1 = 2 cols).
         available = max(10, self.size.width - 2)
+        model = getattr(getattr(app, "llm", None), "model", "?")
+        pid, _ = parse_model_id(model)
+        has_creds = self._get_has_creds(pid)
         return _render_line(
             app,
             self.ctx_tokens,
@@ -300,4 +324,5 @@ class StatusBar(Static):
             self.shuttle_phase,
             self.git_branch,
             available,
+            has_creds,
         )

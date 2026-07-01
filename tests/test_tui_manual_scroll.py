@@ -151,14 +151,16 @@ def test_keyboard_scroll_page_up_down():
             chat_log.scroll_y = chat_log.max_scroll_y
             await pilot.pause(0.05)
             await pilot.press("shift+pageup")
-            await pilot.pause(0.05)
-            assert chat_log.scroll_y < chat_log.max_scroll_y, (
-                "Shift+PageUp should scroll the chat log up"
+            await wait_for_state(
+                pilot, lambda: chat_log.scroll_y < chat_log.max_scroll_y,
+                timeout=2.0,
+                message="Shift+PageUp should scroll the chat log up",
             )
             await pilot.press("shift+pagedown")
-            await pilot.pause(0.05)
-            assert chat_log.scroll_y == chat_log.max_scroll_y, (
-                "Shift+PageDown should scroll the chat log back to the bottom"
+            await wait_for_state(
+                pilot, lambda: chat_log.scroll_y == chat_log.max_scroll_y,
+                timeout=2.0,
+                message="Shift+PageDown should scroll the chat log back to the bottom",
             )
     asyncio.run(driver())
 
@@ -172,11 +174,14 @@ def test_keyboard_scroll_home_end():
             chat_log.scroll_y = chat_log.max_scroll_y
             await pilot.pause(0.05)
             await pilot.press("ctrl+home")
-            await pilot.pause(0.05)
-            assert chat_log.scroll_y == 0, "Ctrl+Home should jump to the top of the chat log"
+            await wait_for_state(
+                pilot, lambda: chat_log.scroll_y == 0, timeout=2.0,
+                message="Ctrl+Home should jump to the top of the chat log",
+            )
             await pilot.press("ctrl+end")
-            await pilot.pause(0.05)
-            assert chat_log.scroll_y == chat_log.max_scroll_y, (
-                "Ctrl+End should jump to the bottom of the chat log"
+            await wait_for_state(
+                pilot, lambda: chat_log.scroll_y == chat_log.max_scroll_y,
+                timeout=2.0,
+                message="Ctrl+End should jump to the bottom of the chat log",
             )
     asyncio.run(driver())
