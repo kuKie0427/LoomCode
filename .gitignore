@@ -31,6 +31,7 @@ MEMORY.md
 test.py
 loop.log
 loom.log
+loom.*.log
 .pytest_cache/
 
 .env
@@ -52,6 +53,7 @@ snapshot_report.html
 
 # Session artifacts (not committed — auto-loaded on cold start)
 progress.md
+progress-archive.md
 session-handoff.md
 
 # Triangle Protocol live-run test sandbox (Phase A/B evaluation)
